@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      body {
+        font-family: "Segoe UI", sans-serif;
+        margin: 0;
+        padding: 16px;
+        color: #1f2937;
+        background: #f7f8fa;
+      }
+      h1 {
+        margin: 0;
+        font-size: 18px;
+      }
+      h2 {
+        margin: 20px 0 8px;
+        font-size: 14px;
+      }
+      p.note {
+        margin: 6px 0 0;
+        font-size: 12px;
+        color: #6b7280;
+        white-space: pre-line;
+      }
+      .card {
+        background: #fff;
+        border: 1px solid #d9dee7;
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+      label {
+        display: block;
+        font-size: 12px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      input, textarea, select, button {
+        box-sizing: border-box;
+        width: 100%;
+        border-radius: 8px;
+        border: 1px solid #c7ced9;
+        padding: 8px 10px;
+        font: inherit;
+      }
+      textarea {
+        min-height: 88px;
+        resize: vertical;
+      }
+      button {
+        cursor: pointer;
+        background: #0f766e;
+        border-color: #0f766e;
+        color: #fff;
+        font-weight: 600;
+      }
+      button.secondary {
+        background: #fff;
+        color: #0f172a;
+        border-color: #c7ced9;
+      }
+      .page-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        margin-bottom: 12px;
+      }
+      .page-header button {
+        width: auto;
+        flex-shrink: 0;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+      .stack {
+        display: grid;
+        gap: 8px;
+      }
+      .field-row {
+        border: 1px solid #e5e7eb;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        background: #fbfcfe;
+      }
+      .field-actions {
+        display: flex;
+        gap: 8px;
+        margin-top: 8px;
+      }
+      .field-actions button {
+        width: auto;
+        padding: 8px 12px;
+      }
+      .status {
+        margin-top: 12px;
+        font-size: 12px;
+        white-space: pre-line;
+      }
+      .status.error {
+        color: #b91c1c;
+      }
+      .status.success {
+        color: #047857;
+      }
+      .status.warning {
+        color: #b45309;
+      }
+      .inline-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .inline-actions button {
+        width: auto;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="page-header">
+      <h1>送信設定</h1>
+      <button type="button" class="secondary" id="reloadTopButton">再読込</button>
+    </div>
+
+    <div class="card">
+      <h2>基本列</h2>
+      <p class="note">自動送信の際、Form側のスプレッドシートで必要になる情報列を入力します。</p>
+      <p class="note">フォーム回答スプレッドシートと接頭辞は設定シートで管理します。</p>
+      <div style="margin-bottom:8px;">
+        <button type="button" class="secondary" id="fetchHeadersButton">ヘッダを取得</button>
+      </div>
+      <div class="stack">
+        <div>
+          <label for="emailHeader">メール列名</label>
+          <select id="emailHeader"></select>
+        </div>
+        <div>
+          <label for="studentNameHeader">名前列名</label>
+          <select id="studentNameHeader"></select>
+        </div>
+        <div>
+          <label for="formStatusHeader">送信状態列名</label>
+          <select id="formStatusHeader"></select>
+        </div>
+        <div>
+          <label for="replyBodyHeader">送信シートの返信本文列名</label>
+          <input id="replyBodyHeader" type="text">
+        </div>
+        <div>
+          <label for="scoreSourceHeader">採点済み判定に使うフォーム側ヘッダ</label>
+          <select id="scoreSourceHeader"></select>
+        </div>
+      </div>
+      <p class="note">未採点判定はメール列名を使います（メールアドレス列を推奨）。</p>
+      <p class="note">採点時に必ず入力され、生徒に送信する列を選んでください。</p>
+      <p class="note" id="sourceHeaderGuide"></p>
+    </div>
+
+    <div class="card">
+      <div class="inline-actions">
+        <h2 style="flex:1;margin:0;">取り込み項目</h2>
+        <button type="button" class="secondary" id="addFieldButton">項目を追加</button>
+      </div>
+      <div id="fields"></div>
+      <p class="note">テンプレート変数名は返信テンプレートで使う名前です。半角英字で始めて、英数字とアンダースコアのみ使えます。例: `score`, `submission_text`</p>
+      <p class="note">評価データ列名と送信シート列名を空欄にすると、フォーム側ヘッダ名をそのまま使います。</p>
+    </div>
+
+    <div class="card">
+      <h2>返信テンプレート</h2>
+      <textarea id="messageTemplate"></textarea>
+      <p class="note" id="templateGuide"></p>
+    </div>
+
+    <div class="inline-actions">
+      <button type="button" id="saveButton">保存してシート再生成</button>
+      <button type="button" class="secondary" id="reloadButton">再読込</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <template id="fieldTemplate">
+      <div class="field-row">
+        <div class="row">
+          <div>
+            <label>テンプレート変数名</label>
+            <input data-name="key" type="text">
+          </div>
+          <div>
+            <label>type</label>
+            <select data-name="type"></select>
+          </div>
+        </div>
+        <div class="row">
+          <div>
+            <label>フォーム側ヘッダ</label>
+            <select data-name="sourceHeader"></select>
+          </div>
+          <div>
+            <label>評価データ列名（任意）</label>
+            <input data-name="evalHeader" type="text">
+          </div>
+        </div>
+        <div>
+          <label>送信シート列名（任意）</label>
+          <input data-name="sendHeader" type="text">
+        </div>
+        <div class="field-actions">
+          <button type="button" class="secondary" data-action="remove">削除</button>
+        </div>
+      </div>
+    </template>
+
+    <script>
+      let sidebarData = null;
+      // 現在のヘッダー候補（fetchHeaders 実行後に更新）
+      let currentHeaders = [];
+
+      const defaultFieldTypes = [
+        { value: 'text', label: 'text' },
+        { value: 'date', label: 'date' },
+        { value: 'score_grade', label: 'score_grade' }
+      ];
+
+      document.getElementById('addFieldButton').addEventListener('click', function() {
+        appendFieldRow();
+      });
+
+      document.getElementById('reloadButton').addEventListener('click', function() {
+        loadConfig();
+      });
+      document.getElementById('reloadTopButton').addEventListener('click', function() {
+        loadConfig();
+      });
+
+      document.getElementById('saveButton').addEventListener('click', function() {
+        save(false);
+      });
+
+      document.getElementById('fetchHeadersButton').addEventListener('click', function() {
+        fetchHeaders();
+      });
+
+      function setStatus(message, kind) {
+        const el = document.getElementById('status');
+        el.textContent = message || '';
+        el.className = 'status' + (kind ? ' ' + kind : '');
+      }
+
+      function getAvailableFieldTypes() {
+        return sidebarData && sidebarData.availableFieldTypes
+          ? sidebarData.availableFieldTypes
+          : defaultFieldTypes;
+      }
+
+      function populateTypeOptions(select) {
+        select.innerHTML = '';
+        getAvailableFieldTypes().forEach(function(item) {
+          const option = document.createElement('option');
+          option.value = item.value;
+          option.textContent = item.label;
+          select.appendChild(option);
+        });
+      }
+
+      function populateHeaderSelect(select, value) {
+        const headers = currentHeaders;
+        const targetValue = value || '';
+
+        select.innerHTML = '';
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = '';
+        select.appendChild(emptyOption);
+
+        headers.forEach(function(header) {
+          const option = document.createElement('option');
+          option.value = header;
+          option.textContent = header;
+          select.appendChild(option);
+        });
+
+        if (targetValue && !headers.includes(targetValue)) {
+          const currentOption = document.createElement('option');
+          currentOption.value = targetValue;
+          currentOption.textContent = targetValue;
+          select.appendChild(currentOption);
+        }
+
+        select.value = targetValue;
+      }
+
+      /**
+       * fetchHeadersFromSources の結果を受け取り、全 select を更新する。
+       */
+      function updateHeaderSelects(result) {
+        currentHeaders = result.headers || [];
+
+        // 基本列の select を更新（現在の選択値を保持）
+        ['emailHeader', 'studentNameHeader', 'formStatusHeader', 'scoreSourceHeader'].forEach(function(id) {
+          const sel = document.getElementById(id);
+          if (sel) populateHeaderSelect(sel, sel.value);
+        });
+
+        // 取り込み項目の sourceHeader select を更新
+        document.querySelectorAll('[data-name="sourceHeader"]').forEach(function(sel) {
+          populateHeaderSelect(sel, sel.value);
+        });
+
+        const guide = document.getElementById('sourceHeaderGuide');
+        const lines = [];
+        if (currentHeaders.length > 0) {
+          lines.push('フォーム回答スプレッドシートのヘッダー候補から選べます。');
+        } else {
+          lines.push('ヘッダー候補を取得できていません。設定シートのFORM_SSと接頭辞を確認して「ヘッダを取得」を押してください。');
+        }
+        (result.warnings || []).forEach(function(msg) {
+          lines.push('注意: ' + msg);
+        });
+        guide.textContent = lines.join('\n');
+      }
+
+      function appendFieldRow(field) {
+        const template = document.getElementById('fieldTemplate');
+        const node = template.content.firstElementChild.cloneNode(true);
+        const typeSelect = node.querySelector('select[data-name="type"]');
+        const sourceHeaderSelect = node.querySelector('select[data-name="sourceHeader"]');
+        populateTypeOptions(typeSelect);
+        populateHeaderSelect(sourceHeaderSelect, field && field.sourceHeader ? field.sourceHeader : '');
+
+        ['key', 'evalHeader', 'sendHeader'].forEach(function(name) {
+          node.querySelector('[data-name="' + name + '"]').value = field && field[name] ? field[name] : '';
+        });
+        typeSelect.value = field && field.type ? field.type : 'text';
+
+        node.querySelector('[data-action="remove"]').addEventListener('click', function() {
+          node.remove();
+        });
+
+        document.getElementById('fields').appendChild(node);
+      }
+
+      function readFieldRows() {
+        return Array.from(document.querySelectorAll('.field-row')).map(function(row) {
+          return {
+            key: row.querySelector('[data-name="key"]').value.trim(),
+            sourceHeader: row.querySelector('[data-name="sourceHeader"]').value.trim(),
+            evalHeader: row.querySelector('[data-name="evalHeader"]').value.trim(),
+            sendHeader: row.querySelector('[data-name="sendHeader"]').value.trim(),
+            type: row.querySelector('[data-name="type"]').value
+          };
+        }).filter(function(field) {
+          return field.key || field.sourceHeader || field.evalHeader || field.sendHeader;
+        });
+      }
+
+      function collectPayload() {
+        return {
+          emailHeader: document.getElementById('emailHeader').value.trim(),
+          studentNameHeader: document.getElementById('studentNameHeader').value.trim(),
+          formStatusHeader: document.getElementById('formStatusHeader').value.trim(),
+          replyBodyHeader: document.getElementById('replyBodyHeader').value.trim(),
+          scoreSourceHeader: document.getElementById('scoreSourceHeader').value.trim(),
+          fields: readFieldRows(),
+          messageTemplate: document.getElementById('messageTemplate').value
+        };
+      }
+
+      function fillForm(config) {
+        populateHeaderSelect(document.getElementById('emailHeader'), config.emailHeader || '');
+        populateHeaderSelect(document.getElementById('studentNameHeader'), config.studentNameHeader || '');
+        populateHeaderSelect(document.getElementById('formStatusHeader'), config.formStatusHeader || '');
+        document.getElementById('replyBodyHeader').value = config.replyBodyHeader || '';
+        populateHeaderSelect(document.getElementById('scoreSourceHeader'), config.scoreSourceHeader || '');
+        document.getElementById('messageTemplate').value = config.messageTemplate || '';
+        document.getElementById('templateGuide').textContent = sidebarData && sidebarData.templateGuide || '';
+
+        const fields = document.getElementById('fields');
+        fields.innerHTML = '';
+        (config.fields || []).forEach(function(field) {
+          appendFieldRow(field);
+        });
+      }
+
+      function loadConfig() {
+        setStatus('設定を読み込んでいます…');
+        google.script.run
+          .withSuccessHandler(function(data) {
+            sidebarData = data;
+            fillForm(data.config);
+            if (data.configParseError) {
+              setStatus('設定データが壊れていました。デフォルト値を表示しています。保存すると上書きされます。', 'warning');
+            } else {
+              setStatus('');
+            }
+          })
+          .withFailureHandler(function(error) {
+            setStatus(error.message || String(error), 'error');
+          })
+          .getSettingsSidebarData();
+      }
+
+      function fetchHeaders() {
+        setStatus('ヘッダーを取得しています…');
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            updateHeaderSelects(result);
+            const hasWarnings = result.warnings && result.warnings.length > 0;
+            setStatus(
+              'ヘッダーを取得しました（' + result.headers.length + '件）' +
+              (hasWarnings ? '\n注意: ' + result.warnings.join('\n注意: ') : ''),
+              hasWarnings ? 'warning' : 'success'
+            );
+          })
+          .withFailureHandler(function(error) {
+            setStatus(error.message || String(error), 'error');
+          })
+          .fetchHeadersFromSources();
+      }
+
+      function save(confirmedReset) {
+        const payload = collectPayload();
+        setStatus('保存しています…');
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            if (result.requiresConfirmation && !confirmedReset) {
+              const ok = window.confirm(result.summary);
+              if (ok) {
+                save(true);
+              } else {
+                setStatus('保存をキャンセルしました。');
+              }
+              return;
+            }
+            setStatus(result.message || '保存しました。', 'success');
+            loadConfig();
+          })
+          .withFailureHandler(function(error) {
+            setStatus(error.message || String(error), 'error');
+          })
+          .saveSettingsFromSidebar(payload, confirmedReset);
+      }
+
+      loadConfig();
+    </script>
+  </body>
+</html>
