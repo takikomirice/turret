@@ -45,7 +45,7 @@ function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
   ui.createMenu('自動送信システム')
-    .addItem('設定を開く', 'openSettingsSidebar')
+    .addItem('設定を開く', 'openSettingsDialog')
     .addSeparator()
     .addItem('1 初期設定シート作成', 'initializeSheets')
     .addSeparator()
@@ -73,14 +73,15 @@ function initializeSheets() {
   safeAlert_('シートを作成しました（クラス一覧・生徒一覧・設定シート）');
 }
 
-function openSettingsSidebar() {
-  const html = HtmlService.createHtmlOutputFromFile('Sidebar')
-    .setTitle('設定')
-    .setWidth(420);
-  SpreadsheetApp.getUi().showSidebar(html);
+function openSettingsDialog() {
+  const html = HtmlService.createHtmlOutputFromFile('SettingsDialog')
+    .setTitle('自動送信設定')
+    .setWidth(900)
+    .setHeight(760);
+  SpreadsheetApp.getUi().showModalDialog(html, '自動送信設定');
 }
 
-function getSettingsSidebarData() {
+function getSettingsDialogData() {
   const config = getConfig_();
   const parseError = PropertiesService.getScriptProperties()
     .getProperty('APP_CONFIG_PARSE_ERROR') === '1';
@@ -102,8 +103,8 @@ function getSettingsSidebarData() {
   };
 }
 
-function saveSettingsFromSidebar(payload, confirmedReset) {
-  // サイドバーは reminderTo / formSources / formSheetNamePrefix を持たないので、
+function saveSettingsFromDialog(payload, confirmedReset) {
+  // 設定ダイアログは reminderTo / formSources / formSheetNamePrefix を持たないので、
   // 既存の設定からそれらを引き継いでマージする。
   const existing = getConfig_();
   const merged = Object.assign({}, existing, payload);
@@ -132,7 +133,7 @@ function saveSettingsFromSidebar(payload, confirmedReset) {
 
 /**
  * 指定された URL リストとシート名接頭辞から利用可能なヘッダー候補を収集する。
- * @param {string[]} urlList - 未正規化の URL 文字列の配列（サイドバーの入力値）
+ * @param {string[]} urlList - 未正規化の URL 文字列の配列
  * @param {string} prefix - 対象シート名の接頭辞
  * @returns {{ headers: string[], warnings: string[] }}
  */
@@ -205,7 +206,7 @@ function collectAvailableSourceHeaders_(urlList, prefix) {
 }
 
 /**
- * サイドバーの「ヘッダを取得」ボタンから呼ばれる。
+ * 設定ダイアログの「ヘッダー候補を更新」ボタンから呼ばれる。
  * 設定シートから formSources と formSheetNamePrefix を読み取り、ヘッダー候補を返す（保存は行わない）。
  * @returns {{ headers: string[], warnings: string[] }}
  */
@@ -1282,7 +1283,7 @@ function getSelectedClassRecords_() {
   const classSheet = ensureSheet_('クラス一覧', ['クラス名', 'コースID', '同期対象(1)']);
   const lastRow = classSheet.getLastRow();
   if (lastRow < 2) {
-    throw new Error('クラス一覧が空です。先に「1 クラス一覧取得」を実行してください。');
+    throw new Error('クラス一覧が空です。先に「2 クラス一覧取得」を実行してください。');
   }
 
   const values = classSheet.getRange(2, 1, lastRow - 1, 3).getDisplayValues();
@@ -1365,7 +1366,7 @@ function readMappingEntries_(strict) {
   ['元SS_ID', '元シート名', 'クラス名', 'courseId', 'メモ'].forEach(function(header) {
     if (!(header in headerMap)) {
       if (!strict) return;
-      throw new Error('対応表シートのヘッダが不正です。「3 対応表を作成」を実行してください。');
+      throw new Error('対応表シートのヘッダが不正です。「4 対応表を作成」を実行してください。');
     }
   });
   if (!('元SS_ID' in headerMap) || !('元シート名' in headerMap) || !('クラス名' in headerMap) || !('courseId' in headerMap) || !('メモ' in headerMap)) {

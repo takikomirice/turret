@@ -1,0 +1,1158 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <base target="_top">
+    <style>
+      :root {
+        --bg: #f5f7fa;
+        --surface: #ffffff;
+        --surface-subtle: #f8fafc;
+        --border: #d8dee8;
+        --text: #111827;
+        --muted: #667085;
+        --primary: #0f766e;
+        --primary-dark: #115e59;
+        --danger: #b91c1c;
+        --danger-bg: #fef2f2;
+        --warning: #92400e;
+        --warning-bg: #fffbeb;
+        --success: #047857;
+        --success-bg: #ecfdf5;
+        --info-bg: #e0f2fe;
+        --info-text: #075985;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        color: var(--text);
+        background: var(--surface);
+        font-family: Arial, "Helvetica Neue", sans-serif;
+        font-size: 14px;
+      }
+
+      button,
+      input,
+      select,
+      textarea {
+        font: inherit;
+      }
+
+      button {
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 9px 14px;
+        background: var(--surface);
+        color: var(--text);
+        font-weight: 700;
+        cursor: pointer;
+      }
+
+      button:hover:not(:disabled) {
+        border-color: #aeb8c8;
+        background: #f9fafb;
+      }
+
+      button:disabled,
+      input:disabled,
+      select:disabled,
+      textarea:disabled {
+        cursor: not-allowed;
+        opacity: 0.58;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid #cfd7e3;
+        border-radius: 8px;
+        background: #fff;
+        color: var(--text);
+        padding: 9px 10px;
+      }
+
+      textarea {
+        min-height: 180px;
+        line-height: 1.5;
+        resize: vertical;
+      }
+
+      label {
+        display: block;
+        margin-bottom: 5px;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .app {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        height: 760px;
+        min-height: 620px;
+        background: var(--surface);
+      }
+
+      .header {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .title-block {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .title {
+        margin: 0;
+        font-size: 22px;
+        line-height: 1.25;
+      }
+
+      .subtitle,
+      .note {
+        margin: 4px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.45;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: 180px minmax(0, 1fr);
+        min-height: 0;
+      }
+
+      .nav {
+        padding: 14px;
+        border-right: 1px solid var(--border);
+        background: var(--surface-subtle);
+      }
+
+      .nav button {
+        display: block;
+        width: 100%;
+        margin: 0 0 6px;
+        padding: 10px;
+        border-color: transparent;
+        background: transparent;
+        text-align: left;
+        font-weight: 700;
+      }
+
+      .nav button span {
+        display: block;
+        margin-top: 2px;
+        color: var(--muted);
+        font-size: 12px;
+        font-weight: 400;
+      }
+
+      .nav button.active {
+        background: var(--info-bg);
+        color: var(--info-text);
+      }
+
+      .content {
+        min-width: 0;
+        overflow: auto;
+        padding: 18px;
+      }
+
+      .panel {
+        display: none;
+      }
+
+      .panel.active {
+        display: block;
+      }
+
+      .panel h2 {
+        margin: 0;
+        font-size: 20px;
+        line-height: 1.3;
+      }
+
+      .section {
+        margin-top: 14px;
+        padding: 14px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface);
+      }
+
+      .section h3 {
+        margin: 0;
+        font-size: 15px;
+      }
+
+      .grid {
+        display: grid;
+        gap: 12px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .metric-row,
+      .flow-row,
+      .field-summary,
+      .source-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+
+      .metric {
+        min-width: 0;
+        flex: 1;
+        padding: 12px;
+        border-radius: 8px;
+        background: var(--surface-subtle);
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 4px;
+        font-size: 18px;
+      }
+
+      .metric.warning {
+        background: #fef3c7;
+        color: var(--warning);
+      }
+
+      .metric.danger {
+        background: #fee2e2;
+        color: var(--danger);
+      }
+
+      .metric.success {
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 28px;
+        border-radius: 999px;
+        padding: 4px 8px;
+        background: #eef2f7;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .pill.success {
+        background: #dcfce7;
+        color: #166534;
+      }
+
+      .pill.warning {
+        background: #fef3c7;
+        color: var(--warning);
+      }
+
+      .pill.danger {
+        background: #fee2e2;
+        color: var(--danger);
+      }
+
+      .pill.info {
+        background: var(--info-bg);
+        color: #0369a1;
+      }
+
+      .flow-row {
+        margin-top: 8px;
+        padding: 10px;
+        border-radius: 8px;
+        background: var(--surface-subtle);
+      }
+
+      .flow-copy {
+        min-width: 0;
+        flex: 1;
+      }
+
+      .flow-copy strong {
+        display: block;
+      }
+
+      .source-row {
+        align-items: flex-start;
+        justify-content: space-between;
+        padding: 9px 0;
+        border-bottom: 1px solid #edf1f7;
+      }
+
+      .source-row:last-child {
+        border-bottom: 0;
+      }
+
+      .source-row code {
+        display: block;
+        color: var(--muted);
+        font-family: Consolas, monospace;
+        font-size: 12px;
+        word-break: break-all;
+      }
+
+      .form-field {
+        margin-top: 12px;
+      }
+
+      .field-card {
+        margin-top: 10px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-subtle);
+      }
+
+      .field-summary {
+        align-items: flex-end;
+      }
+
+      .field-summary .form-field {
+        flex: 1;
+        margin-top: 0;
+      }
+
+      details {
+        margin-top: 10px;
+      }
+
+      summary {
+        color: var(--primary);
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .field-actions {
+        display: flex;
+        justify-content: flex-end;
+        margin-top: 10px;
+      }
+
+      .template-tools {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .footer {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 14px 20px;
+        border-top: 1px solid var(--border);
+        background: var(--surface);
+      }
+
+      .footer-note {
+        flex: 1;
+        min-width: 0;
+        color: var(--muted);
+        font-size: 12px;
+        line-height: 1.4;
+      }
+
+      .primary {
+        border-color: var(--primary);
+        background: var(--primary);
+        color: #fff;
+      }
+
+      .primary:hover:not(:disabled) {
+        border-color: var(--primary-dark);
+        background: var(--primary-dark);
+      }
+
+      .danger-button {
+        border-color: var(--danger);
+        background: var(--danger);
+        color: #fff;
+      }
+
+      .danger-button:hover:not(:disabled) {
+        border-color: #991b1b;
+        background: #991b1b;
+      }
+
+      .status {
+        display: none;
+        margin-top: 14px;
+        padding: 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--surface-subtle);
+        white-space: pre-line;
+      }
+
+      .status.visible {
+        display: block;
+      }
+
+      .status strong {
+        display: block;
+        margin-bottom: 4px;
+      }
+
+      .status--success {
+        border-color: #a7f3d0;
+        background: var(--success-bg);
+        color: var(--success);
+      }
+
+      .status--warning {
+        border-color: #f59e0b;
+        background: var(--warning-bg);
+        color: var(--warning);
+      }
+
+      .status--error {
+        border-color: #fca5a5;
+        background: var(--danger-bg);
+        color: var(--danger);
+      }
+
+      .confirm-panel {
+        display: none;
+        margin-top: 14px;
+        padding: 14px;
+        border: 1px solid #fca5a5;
+        border-radius: 8px;
+        background: var(--danger-bg);
+        color: var(--danger);
+      }
+
+      .confirm-panel.visible {
+        display: block;
+      }
+
+      .confirm-panel h3 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .confirm-summary {
+        margin: 10px 0;
+        padding: 10px;
+        border-radius: 8px;
+        background: #fff;
+        white-space: pre-line;
+        line-height: 1.5;
+      }
+
+      .confirm-check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text);
+      }
+
+      .confirm-check input {
+        width: auto;
+      }
+
+      .confirm-actions {
+        display: flex;
+        gap: 10px;
+        justify-content: flex-end;
+        margin-top: 12px;
+      }
+
+      .hidden {
+        display: none !important;
+      }
+
+      @media (max-width: 720px) {
+        .app {
+          height: auto;
+          min-height: 100vh;
+        }
+
+        .layout {
+          grid-template-columns: 1fr;
+        }
+
+        .nav {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          border-right: 0;
+          border-bottom: 1px solid var(--border);
+        }
+
+        .grid.two {
+          grid-template-columns: 1fr;
+        }
+
+        .field-summary {
+          display: grid;
+        }
+
+        .footer,
+        .confirm-actions {
+          align-items: stretch;
+          flex-direction: column;
+        }
+
+        .footer button,
+        .confirm-actions button {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app" id="appRoot">
+      <header class="header">
+        <div class="title-block">
+          <h1 class="title">自動送信設定</h1>
+          <p class="subtitle">フォーム回答から評価データと送信シートを作るための設定です。</p>
+        </div>
+        <button type="button" id="closeButton">閉じる</button>
+      </header>
+
+      <main class="layout">
+        <nav class="nav" aria-label="設定ステップ">
+          <button type="button" class="active" data-panel-button="overview" data-primary-action>
+            1 概要
+            <span>流れを確認</span>
+          </button>
+          <button type="button" data-panel-button="sources" data-primary-action>
+            2 参照元
+            <span>設定シート</span>
+          </button>
+          <button type="button" data-panel-button="columns" data-primary-action>
+            3 列設定
+            <span>フォーム列</span>
+          </button>
+          <button type="button" data-panel-button="fields" data-primary-action>
+            4 取り込み項目
+            <span>本文に使う値</span>
+          </button>
+          <button type="button" data-panel-button="template" data-primary-action>
+            5 本文
+            <span>Classroom投稿</span>
+          </button>
+          <button type="button" data-panel-button="save" data-primary-action>
+            6 保存
+            <span>再生成確認</span>
+          </button>
+        </nav>
+
+        <section class="content">
+          <section class="panel active" id="panel-overview">
+            <h2>はじめに</h2>
+            <p class="note">この画面だけで設定を確認・編集します。フォームURLや通知先は設定シートで行追加できます。</p>
+
+            <div class="section">
+              <h3>現在の状態</h3>
+              <div class="grid two" id="summaryMetrics"></div>
+            </div>
+
+            <div class="section">
+              <h3>初回利用の流れ</h3>
+              <p class="note">左の順番どおりに確認すると、初回でも迷わず設定できます。</p>
+              <div id="flowList"></div>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-sources">
+            <h2>参照元</h2>
+            <p class="note">複数行の入力は設定シートで管理します。この画面では読み込まれた内容を確認します。</p>
+
+            <div class="section">
+              <h3>設定シートから読み込んだ内容</h3>
+              <div id="sourceSummary"></div>
+              <div class="form-field">
+                <button type="button" id="fetchHeadersButton" data-primary-action>ヘッダー候補を更新</button>
+                <p class="note">フォーム回答スプレッドシートへアクセスして、列名候補だけを取得します。保存はしません。</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-columns">
+            <h2>フォームの列設定</h2>
+            <p class="note">フォーム回答シートの列を、処理の役割に対応づけます。先にヘッダー候補を更新してください。</p>
+
+            <div class="section grid">
+              <div class="form-field">
+                <label for="emailHeader">生徒メールの列</label>
+                <select id="emailHeader" data-editable></select>
+                <p class="note">回答者を特定します。</p>
+              </div>
+              <div class="form-field">
+                <label for="studentNameHeader">生徒名の列</label>
+                <select id="studentNameHeader" data-editable></select>
+                <p class="note">評価データの表示に使います。</p>
+              </div>
+              <div class="form-field">
+                <label for="formStatusHeader">フォームに書き戻す状態列</label>
+                <select id="formStatusHeader" data-editable></select>
+                <p class="note">反映済み・準備済み・送信済みを書き戻します。</p>
+              </div>
+              <div class="form-field">
+                <label for="scoreSourceHeader">採点済みとみなす列</label>
+                <select id="scoreSourceHeader" data-editable></select>
+                <p class="note">この列が空でない行だけ取り込みます。</p>
+              </div>
+              <div class="form-field">
+                <label for="replyBodyHeader">返信本文を保存する列名</label>
+                <input id="replyBodyHeader" type="text" data-editable>
+                <p class="note">送信シート上の本文列です。</p>
+              </div>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-fields">
+            <h2>送信に含める項目</h2>
+            <p class="note">フォーム回答の値を、評価データ・送信シート・返信本文で使える項目として定義します。</p>
+
+            <div class="section">
+              <div class="metric-row">
+                <div>
+                  <h3>取り込み項目</h3>
+                  <p class="note">列名の上書きは詳細設定に入れています。</p>
+                </div>
+                <button type="button" id="addFieldButton" data-editable>項目を追加</button>
+              </div>
+              <div id="fieldsContainer"></div>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-template">
+            <h2>Classroomに送る本文</h2>
+            <p class="note">差し込み名は `＜score＞` のように書きます。値が空の行は自動で非表示になります。</p>
+
+            <div class="section">
+              <label for="messageTemplate">返信本文テンプレート</label>
+              <textarea id="messageTemplate" data-editable></textarea>
+              <div class="template-tools" id="tokenGuide"></div>
+              <p class="note" id="templateGuide"></p>
+            </div>
+          </section>
+
+          <section class="panel" id="panel-save">
+            <h2>保存</h2>
+            <p class="note">保存すると、設定に合わせて評価データと送信シートを再生成します。</p>
+
+            <div class="section">
+              <h3>保存前に確認すること</h3>
+              <div class="flow-row">
+                <span class="pill danger">危険</span>
+                <div class="flow-copy">
+                  <strong>評価データと送信シートは再生成されます。</strong>
+                  <p class="note">既存行がある場合は、削除件数を表示してから確定します。</p>
+                </div>
+              </div>
+              <div class="flow-row">
+                <span class="pill">確認</span>
+                <div class="flow-copy">
+                  <strong>送信前の行が残っていないか確認してください。</strong>
+                  <p class="note">未送信や再送待ちがある場合は、先に送信シートを確認してください。</p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <div id="statusRegion" class="status" role="status" aria-live="polite"></div>
+
+          <div id="confirmPanel" class="confirm-panel" aria-live="assertive">
+            <h3>保存前の確認</h3>
+            <p>この操作は評価データと送信シートを再生成します。</p>
+            <div id="confirmSummary" class="confirm-summary"></div>
+            <label class="confirm-check">
+              <input type="checkbox" id="confirmCheck">
+              削除される件数と未送信件数を確認しました
+            </label>
+            <div class="confirm-actions">
+              <button type="button" id="saveCancelButton">戻って確認する</button>
+              <button type="button" class="danger-button" id="saveConfirmButton" disabled>再生成して保存する</button>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <div class="footer-note" id="footerNote">ヘッダー取得はボタンを押した時だけ実行します。</div>
+        <button type="button" id="reloadButton" data-primary-action>再読込</button>
+        <button type="button" class="primary" id="saveButton" data-primary-action>確認して保存</button>
+      </footer>
+
+      <template id="fieldTemplate">
+        <div class="field-card">
+          <div class="field-summary">
+            <div class="form-field">
+              <label>フォームの列</label>
+              <select data-name="sourceHeader" data-editable></select>
+            </div>
+            <div class="form-field">
+              <label>差し込み名</label>
+              <input data-name="key" type="text" data-editable>
+            </div>
+            <div class="form-field">
+              <label>値の扱い</label>
+              <select data-name="type" data-editable></select>
+            </div>
+          </div>
+          <details>
+            <summary>詳細設定</summary>
+            <div class="grid two">
+              <div class="form-field">
+                <label>評価データ列名（任意）</label>
+                <input data-name="evalHeader" type="text" data-editable>
+                <p class="note">空欄ならフォームの列名を使います。</p>
+              </div>
+              <div class="form-field">
+                <label>送信シート列名（任意）</label>
+                <input data-name="sendHeader" type="text" data-editable>
+                <p class="note">空欄ならフォームの列名を使います。</p>
+              </div>
+            </div>
+          </details>
+          <div class="field-actions">
+            <button type="button" data-action="remove" data-editable>削除</button>
+          </div>
+        </div>
+      </template>
+    </div>
+
+    <script>
+      let dialogData = null;
+      let currentHeaders = [];
+      let pendingPayload = null;
+      let isBusy = false;
+      let isConfirming = false;
+
+      const defaultFieldTypes = [
+        { value: 'text', label: 'テキスト' },
+        { value: 'date', label: '日付' },
+        { value: 'score_grade', label: '評価（1〜5をA/Bへ変換）' }
+      ];
+
+      document.getElementById('closeButton').addEventListener('click', function() {
+        google.script.host.close();
+      });
+      document.getElementById('reloadButton').addEventListener('click', function() {
+        loadConfig();
+      });
+      document.getElementById('saveButton').addEventListener('click', function() {
+        save(false);
+      });
+      document.getElementById('saveConfirmButton').addEventListener('click', function() {
+        save(true);
+      });
+      document.getElementById('saveCancelButton').addEventListener('click', function() {
+        pendingPayload = null;
+        showConfirmPanel(null);
+        showStatus('保存をキャンセルしました。', '通常の編集に戻りました。', 'warning');
+      });
+      document.getElementById('confirmCheck').addEventListener('change', updateControlState);
+      document.getElementById('fetchHeadersButton').addEventListener('click', fetchHeaders);
+      document.getElementById('addFieldButton').addEventListener('click', function() {
+        appendFieldRow();
+        updateTokenGuide();
+      });
+      document.querySelectorAll('[data-panel-button]').forEach(function(button) {
+        button.addEventListener('click', function() {
+          setActivePanel(button.getAttribute('data-panel-button'));
+        });
+      });
+
+      function setActivePanel(name) {
+        document.querySelectorAll('[data-panel-button]').forEach(function(button) {
+          button.classList.toggle('active', button.getAttribute('data-panel-button') === name);
+        });
+        document.querySelectorAll('.panel').forEach(function(panel) {
+          panel.classList.toggle('active', panel.id === 'panel-' + name);
+        });
+      }
+
+      function setBusy(active, message) {
+        isBusy = active;
+        document.getElementById('footerNote').textContent = message || 'ヘッダー取得はボタンを押した時だけ実行します。';
+        updateControlState();
+      }
+
+      function updateControlState() {
+        const editLocked = isBusy || isConfirming;
+        document.querySelectorAll('[data-editable]').forEach(function(element) {
+          element.disabled = editLocked;
+        });
+        document.querySelectorAll('[data-primary-action]').forEach(function(element) {
+          element.disabled = editLocked;
+        });
+        document.getElementById('closeButton').disabled = isBusy;
+        document.getElementById('saveCancelButton').disabled = isBusy;
+        document.getElementById('confirmCheck').disabled = isBusy;
+        document.getElementById('saveConfirmButton').disabled =
+          isBusy || !isConfirming || !document.getElementById('confirmCheck').checked;
+      }
+
+      function showStatus(title, detail, kind) {
+        const region = document.getElementById('statusRegion');
+        region.className = 'status visible' + (kind ? ' status--' + kind : '');
+        region.innerHTML = '';
+
+        const strong = document.createElement('strong');
+        strong.textContent = title || '';
+        region.appendChild(strong);
+
+        if (detail) {
+          const body = document.createElement('div');
+          body.textContent = detail;
+          region.appendChild(body);
+        }
+      }
+
+      function clearStatus() {
+        const region = document.getElementById('statusRegion');
+        region.className = 'status';
+        region.textContent = '';
+      }
+
+      function showError(error, fallbackAction) {
+        const message = error && error.message ? error.message : String(error || '不明なエラー');
+        showStatus(
+          '処理できませんでした。',
+          '何が起きたか: ' + message + '\n次にすること: ' + (fallbackAction || '設定内容と権限を確認して、もう一度実行してください。'),
+          'error'
+        );
+      }
+
+      function getAvailableFieldTypes() {
+        const source = dialogData && dialogData.availableFieldTypes
+          ? dialogData.availableFieldTypes
+          : defaultFieldTypes;
+        return source.map(function(item) {
+          const friendly = defaultFieldTypes.filter(function(defaultItem) {
+            return defaultItem.value === item.value;
+          })[0];
+          return {
+            value: item.value,
+            label: friendly ? friendly.label : item.label
+          };
+        });
+      }
+
+      function populateTypeOptions(select, selectedValue) {
+        select.innerHTML = '';
+        getAvailableFieldTypes().forEach(function(item) {
+          const option = document.createElement('option');
+          option.value = item.value;
+          option.textContent = item.label;
+          select.appendChild(option);
+        });
+        select.value = selectedValue || 'text';
+      }
+
+      function populateHeaderSelect(select, value) {
+        const targetValue = value || '';
+        select.innerHTML = '';
+
+        const emptyOption = document.createElement('option');
+        emptyOption.value = '';
+        emptyOption.textContent = currentHeaders.length > 0 ? '選択してください' : 'ヘッダー候補を更新してください';
+        select.appendChild(emptyOption);
+
+        currentHeaders.forEach(function(header) {
+          const option = document.createElement('option');
+          option.value = header;
+          option.textContent = header;
+          select.appendChild(option);
+        });
+
+        if (targetValue && currentHeaders.indexOf(targetValue) === -1) {
+          const currentOption = document.createElement('option');
+          currentOption.value = targetValue;
+          currentOption.textContent = targetValue + '（現在の設定）';
+          select.appendChild(currentOption);
+        }
+
+        select.value = targetValue;
+      }
+
+      function updateHeaderSelects(result) {
+        currentHeaders = result && result.headers ? result.headers : [];
+
+        ['emailHeader', 'studentNameHeader', 'formStatusHeader', 'scoreSourceHeader'].forEach(function(id) {
+          const select = document.getElementById(id);
+          populateHeaderSelect(select, select.value);
+        });
+        document.querySelectorAll('[data-name="sourceHeader"]').forEach(function(select) {
+          populateHeaderSelect(select, select.value);
+        });
+
+        const warnings = result && result.warnings ? result.warnings : [];
+        if (warnings.length > 0) {
+          showStatus(
+            'ヘッダー候補を取得しましたが、確認が必要です。',
+            '何が起きたか: ' + warnings.join('\n') + '\n次にすること: 設定シートのFORM_SSと対象シート名を確認してください。',
+            'warning'
+          );
+        } else if (currentHeaders.length > 0) {
+          showStatus('ヘッダー候補を取得しました。', currentHeaders.length + '件の列名を選択肢に反映しました。', 'success');
+        } else {
+          showStatus('ヘッダー候補がありません。', '次にすること: 設定シートのFORM_SSと対象シート名を確認してください。', 'warning');
+        }
+      }
+
+      function renderSummary(config) {
+        const metrics = document.getElementById('summaryMetrics');
+        metrics.innerHTML = '';
+
+        [
+          ['設定シート', 'FORM_SS ' + ((config.formSources || []).length || 0) + '件', 'success'],
+          ['ヘッダー候補', currentHeaders.length > 0 ? currentHeaders.length + '件' : '未更新', currentHeaders.length > 0 ? 'success' : 'warning'],
+          ['保存時', '2シート再生成', 'danger'],
+          ['取り込み項目', ((config.fields || []).length || 0) + '項目', '']
+        ].forEach(function(item) {
+          const metric = document.createElement('div');
+          metric.className = 'metric ' + item[2];
+          metric.innerHTML = '<span></span><strong></strong>';
+          metric.querySelector('span').textContent = item[0];
+          metric.querySelector('strong').textContent = item[1];
+          metrics.appendChild(metric);
+        });
+
+        const flow = document.getElementById('flowList');
+        flow.innerHTML = '';
+        [
+          ['1', '設定シートを確認', 'フォームSS、対象シート名、通知先を表形式で管理します。', '完了', 'success'],
+          ['2', 'ヘッダー候補を更新', 'フォーム回答シートから列名候補を取得します。', currentHeaders.length > 0 ? '完了' : '未確認', currentHeaders.length > 0 ? 'success' : 'warning'],
+          ['3', '列と項目を確認', 'メール列、状態列、本文に使う項目を選びます。', '要確認', 'warning'],
+          ['4', '保存前に件数を確認', '評価データと送信シートの再生成を明示して確定します。', '危険', 'danger']
+        ].forEach(function(item) {
+          const row = document.createElement('div');
+          row.className = 'flow-row';
+          row.innerHTML =
+            '<span class="pill"></span>' +
+            '<div class="flow-copy"><strong></strong><p class="note"></p></div>' +
+            '<span class="pill"></span>';
+          row.querySelectorAll('.pill')[0].textContent = item[0];
+          row.querySelector('strong').textContent = item[1];
+          row.querySelector('.note').textContent = item[2];
+          row.querySelectorAll('.pill')[1].textContent = item[3];
+          row.querySelectorAll('.pill')[1].classList.add(item[4]);
+          flow.appendChild(row);
+        });
+      }
+
+      function renderSourceSummary(config) {
+        const container = document.getElementById('sourceSummary');
+        container.innerHTML = '';
+
+        const rows = [
+          ['FORM_SS', (config.formSources || []).map(function(source) { return source.url || source.id || ''; })],
+          ['FORM_SHEET_PREFIX', config.formSheetNamePrefix || []],
+          ['REMINDER_TO', config.reminderTo || []]
+        ];
+
+        rows.forEach(function(row) {
+          const values = row[1].length > 0 ? row[1] : ['未設定'];
+          values.forEach(function(value, index) {
+            const div = document.createElement('div');
+            div.className = 'source-row';
+            const label = document.createElement('strong');
+            label.textContent = index === 0 ? row[0] : '';
+            const code = document.createElement('code');
+            code.textContent = value;
+            div.appendChild(label);
+            div.appendChild(code);
+            container.appendChild(div);
+          });
+        });
+      }
+
+      function appendFieldRow(field) {
+        const template = document.getElementById('fieldTemplate');
+        const node = template.content.firstElementChild.cloneNode(true);
+        const typeSelect = node.querySelector('[data-name="type"]');
+        const sourceHeaderSelect = node.querySelector('[data-name="sourceHeader"]');
+
+        populateHeaderSelect(sourceHeaderSelect, field && field.sourceHeader ? field.sourceHeader : '');
+        populateTypeOptions(typeSelect, field && field.type ? field.type : 'text');
+
+        ['key', 'evalHeader', 'sendHeader'].forEach(function(name) {
+          node.querySelector('[data-name="' + name + '"]').value = field && field[name] ? field[name] : '';
+        });
+
+        node.querySelector('[data-action="remove"]').addEventListener('click', function() {
+          node.remove();
+          updateTokenGuide();
+        });
+        node.querySelector('[data-name="key"]').addEventListener('input', updateTokenGuide);
+
+        document.getElementById('fieldsContainer').appendChild(node);
+        updateControlState();
+      }
+
+      function readFieldRows() {
+        return Array.from(document.querySelectorAll('.field-card')).map(function(row) {
+          return {
+            key: row.querySelector('[data-name="key"]').value.trim(),
+            sourceHeader: row.querySelector('[data-name="sourceHeader"]').value.trim(),
+            evalHeader: row.querySelector('[data-name="evalHeader"]').value.trim(),
+            sendHeader: row.querySelector('[data-name="sendHeader"]').value.trim(),
+            type: row.querySelector('[data-name="type"]').value
+          };
+        }).filter(function(field) {
+          return field.key || field.sourceHeader || field.evalHeader || field.sendHeader;
+        });
+      }
+
+      function updateTokenGuide() {
+        const guide = document.getElementById('tokenGuide');
+        guide.innerHTML = '';
+
+        ['student_name', 'class_name', 'course_id', 'row_no'].concat(
+          readFieldRows().map(function(field) { return field.key; }).filter(Boolean)
+        ).forEach(function(token) {
+          const pill = document.createElement('span');
+          pill.className = 'pill info';
+          pill.textContent = '＜' + token + '＞';
+          guide.appendChild(pill);
+        });
+      }
+
+      function collectPayload() {
+        return {
+          emailHeader: document.getElementById('emailHeader').value.trim(),
+          studentNameHeader: document.getElementById('studentNameHeader').value.trim(),
+          formStatusHeader: document.getElementById('formStatusHeader').value.trim(),
+          replyBodyHeader: document.getElementById('replyBodyHeader').value.trim(),
+          scoreSourceHeader: document.getElementById('scoreSourceHeader').value.trim(),
+          fields: readFieldRows(),
+          messageTemplate: document.getElementById('messageTemplate').value
+        };
+      }
+
+      function fillForm(config) {
+        populateHeaderSelect(document.getElementById('emailHeader'), config.emailHeader || '');
+        populateHeaderSelect(document.getElementById('studentNameHeader'), config.studentNameHeader || '');
+        populateHeaderSelect(document.getElementById('formStatusHeader'), config.formStatusHeader || '');
+        populateHeaderSelect(document.getElementById('scoreSourceHeader'), config.scoreSourceHeader || '');
+        document.getElementById('replyBodyHeader').value = config.replyBodyHeader || '';
+        document.getElementById('messageTemplate').value = config.messageTemplate || '';
+        document.getElementById('templateGuide').textContent = dialogData && dialogData.templateGuide || '';
+
+        const fieldsContainer = document.getElementById('fieldsContainer');
+        fieldsContainer.innerHTML = '';
+        (config.fields || []).forEach(function(field) {
+          appendFieldRow(field);
+        });
+
+        renderSummary(config);
+        renderSourceSummary(config);
+        updateTokenGuide();
+      }
+
+      function loadConfig(successMessage) {
+        setBusy(true, '設定を読み込んでいます。');
+
+        google.script.run
+          .withSuccessHandler(function(data) {
+            dialogData = data;
+            fillForm(data.config);
+            showConfirmPanel(null);
+
+            if (successMessage) {
+              showStatus('保存しました。', successMessage, 'success');
+            } else if (data.configParseError) {
+              showStatus(
+                '設定データを読み込めませんでした。',
+                '何が起きたか: 保存済み設定が壊れていたため、デフォルト値を表示しています。\n次にすること: 内容を確認して保存すると上書きされます。',
+                'warning'
+              );
+            } else {
+              clearStatus();
+            }
+            setBusy(false);
+          })
+          .withFailureHandler(function(error) {
+            setBusy(false);
+            showError(error, 'スプレッドシートの権限と設定シートの内容を確認してください。');
+          })
+          .getSettingsDialogData();
+      }
+
+      function fetchHeaders() {
+        setBusy(true, 'ヘッダー候補を取得しています。');
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            updateHeaderSelects(result);
+            if (dialogData && dialogData.config) {
+              renderSummary(dialogData.config);
+            }
+            setBusy(false);
+          })
+          .withFailureHandler(function(error) {
+            setBusy(false);
+            showError(error, '設定シートのFORM_SS、対象シート名、スプレッドシートへのアクセス権を確認してください。');
+          })
+          .fetchHeadersFromSources();
+      }
+
+      function showConfirmPanel(result) {
+        const panel = document.getElementById('confirmPanel');
+        const checkbox = document.getElementById('confirmCheck');
+        isConfirming = !!result;
+        checkbox.checked = false;
+
+        if (result) {
+          document.getElementById('confirmSummary').textContent = result.summary || '';
+          panel.classList.add('visible');
+          setActivePanel('save');
+          showStatus('保存前の確認が必要です。', '削除される件数を確認してから確定してください。', 'warning');
+        } else {
+          panel.classList.remove('visible');
+        }
+
+        updateControlState();
+      }
+
+      function save(confirmedReset) {
+        const payload = confirmedReset && pendingPayload ? pendingPayload : collectPayload();
+        pendingPayload = payload;
+        setBusy(true, confirmedReset ? '保存を確定しています。' : '保存内容を確認しています。');
+
+        google.script.run
+          .withSuccessHandler(function(result) {
+            setBusy(false);
+
+            if (result.requiresConfirmation && !confirmedReset) {
+              showConfirmPanel(result);
+              return;
+            }
+
+            pendingPayload = null;
+            showConfirmPanel(null);
+            loadConfig(result.message || '設定を保存し、評価データと送信シートを再生成しました。');
+          })
+          .withFailureHandler(function(error) {
+            setBusy(false);
+            showError(error, 'エラーに表示された項目を修正してから、もう一度保存してください。');
+          })
+          .saveSettingsFromDialog(payload, confirmedReset);
+      }
+
+      loadConfig();
+    </script>
+  </body>
+</html>
