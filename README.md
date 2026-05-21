@@ -14,6 +14,15 @@ Google フォーム回答を元に採点結果を取り込み、Google Classroom
 
 このスクリプトは、管理用スプレッドシートを 1 つ用意し、その中のメニュー操作または時間トリガーで運用する前提です。
 
+## リポジトリ構成
+
+| パス | 内容 |
+| --- | --- |
+| [Code.gs](Code.gs) | Google Apps Script 本体 |
+| [SettingsDialog.html](SettingsDialog.html) | 設定ダイアログのHTML/CSS/JavaScript |
+| [tests/](tests/) | Node.js の契約テスト |
+| [docs/](docs/) | 設計メモとUI検討資料 |
+
 ## できること
 
 - Google Classroom のアクティブなクラス一覧を取得
@@ -277,6 +286,14 @@ Google Classroom には、設定ダイアログで設定したテンプレート
 
 特に Google Classroom は Advanced Google Services の有効化が必要です。
 
+## テスト
+
+ローカルでは Node.js の標準テストランナーで、設定ダイアログまわりの契約テストを実行できます。
+
+```bash
+node --test tests/*.test.mjs
+```
+
 ## エラー時の挙動
 
 - Classroom 投稿でレート制限や一時エラーが出た場合は最大 3 回までリトライします
@@ -307,7 +324,7 @@ Google Classroom には、設定ダイアログで設定したテンプレート
 ## 初期セットアップ例
 
 1. 管理用スプレッドシートを作成する
-2. このリポジトリの [Code.gs](c:/Users/takik/cursor/turret/Code.gs) を Apps Script に貼り付ける
+2. このリポジトリの [Code.gs](Code.gs) を Apps Script に貼り付ける
 3. スプレッドシートを開き、`1 初期設定シート作成` を実行する
 4. `設定シート` に通知先、フォーム回答スプレッドシート URL、対象シート名の接頭辞を入力する
 5. `設定を開く` からヘッダー候補を更新し、列設定、取り込み項目、返信テンプレートを保存する
@@ -318,3 +335,7 @@ Google Classroom には、設定ダイアログで設定したテンプレート
 10. `3 生徒一覧取得（同期対象クラス）` を実行する
 11. フォーム回答シートに、設定したヘッダ名が存在することを確認する
 12. 手動実行または時間トリガーで運用する
+
+## ライセンス
+
+MIT License です。詳細は [LICENSE](LICENSE) を参照してください。
