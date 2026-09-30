@@ -1,0 +1,17 @@
+{
+  "name": "turret",
+  "version": "4.0.0",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test",
+    "gas:status": "clasp -P .clasp.test.json show-file-status",
+    "gas:push": "pnpm test && clasp -P .clasp.test.json push"
+  },
+  "devDependencies": {
+    "@google/clasp": "3.3.0"
+  }
+}

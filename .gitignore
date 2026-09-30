@@ -1,2 +1,7 @@
 .claude/settings.local.json
 .vscode/settings.json
+node_modules/
+.local/
+.clasp.json
+.clasp.test.json
+.clasprc.json

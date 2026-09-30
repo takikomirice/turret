@@ -1,0 +1,59 @@
+{
+  "application": "turret",
+  "schemaVersion": 1,
+  "includesConnections": false,
+  "config": {
+    "formSheetNamePrefix": [
+      "フォームの回答"
+    ],
+    "emailHeader": "メールアドレス",
+    "studentNameHeader": "名前",
+    "formStatusHeader": "送信状態",
+    "scoreSourceHeader": "評価",
+    "replyBodyHeader": "返信本文",
+    "messageTemplate": "評価：{score}\n\n【理由】\n{reason}\n\n【改善】\n{advice}\n\n【提出内容（抜粋）】\n授業日付：{lesson_date}\n{submission}",
+    "fields": [
+      {
+        "key": "lesson_date",
+        "sourceHeader": "授業の日付を入力してください。",
+        "evalHeader": "授業日付",
+        "sendHeader": "授業日付",
+        "type": "date"
+      },
+      {
+        "key": "submission",
+        "sourceHeader": "改行除去",
+        "evalHeader": "提出内容",
+        "sendHeader": "提出内容",
+        "type": "text"
+      },
+      {
+        "key": "score",
+        "sourceHeader": "評価",
+        "evalHeader": "評価",
+        "sendHeader": "評価",
+        "type": "score_grade"
+      },
+      {
+        "key": "reason",
+        "sourceHeader": "評価理由",
+        "evalHeader": "評価理由",
+        "sendHeader": "評価理由",
+        "type": "text"
+      },
+      {
+        "key": "advice",
+        "sourceHeader": "改善点",
+        "evalHeader": "改善点",
+        "sendHeader": "改善点",
+        "type": "text"
+      }
+    ]
+  },
+  "schedule": {
+    "importHour": 5,
+    "deliveryHour": 8,
+    "reminderHour": 16,
+    "reminderEnabled": false
+  }
+}
