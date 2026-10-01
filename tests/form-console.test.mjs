@@ -403,7 +403,7 @@ test('deployed send path records IDs and preserves uncertain journal outcomes wi
   c.Classroom={Courses:{Announcements:{create:()=>{posts++;return {id:'sent-1'};}}}};
   const source=new AdminSheet('回答 1',[['状態'],['']]);
   c.SpreadsheetApp.openById=()=>({getSheets:()=>[source],getSheetByName:()=>source});
-  if(fails){const original=ss.insertSheet;ss.insertSheet=name=>{const sheet=original(name);if(name==='フォーム管理')sheet.beforeWrite=values=>{if(values[0][0]==='announcement')throw Error('registry storage unavailable');};return sheet;};}
+  if(fails){const original=ss.insertSheet;ss.insertSheet=name=>{const sheet=original(name);if(name==='システム管理')sheet.beforeWrite=values=>{if(values[0][0]==='announcement')throw Error('registry storage unavailable');};return sheet;};}
   c.sendMessages();assert.equal(posts,1);
   assert.equal(send.rows[1][headers.indexOf('送信状態')],fails?'送信確認待ち':'済');
   if(!fails)assert.equal(c.getManagedRecords_()[0].postId,'sent-1');

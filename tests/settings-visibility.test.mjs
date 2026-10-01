@@ -16,7 +16,7 @@ test('migration verifies internal settings before retiring all three tabs and pr
 });
 test('new settings and initialization never generate settings tabs',()=>{
  const e=adminEnvironment({config:null});e.c.initializeSheetsUnlocked_();e.c.saveConfig_(e.c.getConfig_());
- assert.deepEqual([...e.sheets.keys()].sort(),['クラス一覧','生徒一覧','採点テンプレ','対応表','送信シート','エラー','フォーム管理'].sort());
+ assert.deepEqual([...e.sheets.keys()].sort(),['クラス一覧','生徒一覧','採点テンプレ','対応表','送信シート','エラー','システム管理'].sort());
 });
 test('migration failure retains every legacy tab and retries safely',()=>{
  const e=adminEnvironment();legacy(e);const save=e.c.saveConfig_;
