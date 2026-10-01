@@ -9,6 +9,35 @@ const PROFILE_CONFIG_KEYS = ['emailHeader', 'studentNameHeader', 'formStatusHead
 
 const MANAGED_FORM_SHEET_ = 'フォーム管理';
 const MANAGED_FORM_HEADERS_ = ['種別', 'ID', '内容(JSON)'];
+const TEMPLATE_FORM_URL_KEY_ = 'TURRET_TEMPLATE_FORM_URL';
+
+/** 最後に準備したひな形を優先し、JSONから読み込んだURLはその後の既定値として使う。 */
+function currentTemplateFormUrl_(records) {
+  records = records || getManagedRecords_();
+  const spreadsheetId = getAppSpreadsheet_().getId(), scriptId = ScriptApp.getScriptId();
+  let recordUrl = '', recordTime = 0;
+  for (let i = records.length - 1; i >= 0; i--) {
+    const record = records[i];
+    if (record.ownerSpreadsheetId !== spreadsheetId || record.ownerScriptId !== scriptId) continue;
+    const id = record.kind === 'batch' && record.input && record.input.templateId || record.kind === 'template' && record.stage === 'created' && record.formId;
+    const time = Date.parse(record.updatedAt || '') || 0;
+    if (id && time >= recordTime) { recordUrl = 'https://docs.google.com/forms/d/' + id + '/edit'; recordTime = time; }
+  }
+  const saved = PropertiesService.getScriptProperties().getProperty(TEMPLATE_FORM_URL_KEY_);
+  if (!saved) return recordUrl;
+  let preferred;
+  try { preferred = JSON.parse(saved); } catch (error) { preferred = { url: saved, savedAt: '' }; }
+  return preferred && typeof preferred.url === 'string' && (Date.parse(preferred.savedAt || '') || 0) >= recordTime ? preferred.url : recordUrl;
+}
+
+function savedTemplateFormUrl_(url) { return JSON.stringify({ url: url, savedAt: new Date().toISOString() }); }
+
+function normalizeTemplateFormUrl_(value) {
+  if (typeof value !== 'string') throw new Error('ひな形フォームのURLが不正です。');
+  const match = value.trim().match(/^https:\/\/docs\.google\.com\/forms\/(?:u\/\d+\/)?d\/([\w-]{15,})\/edit\/?(?:[?#].*)?$/);
+  if (!match) throw new Error('ひな形フォームの編集URLを指定してください。');
+  return 'https://docs.google.com/forms/d/' + match[1] + '/edit';
+}
 
 /** Apps Script エディタから実行し、フォーム連携に必要な同意を求める。データは変更しない。 */
 function authorizeFormIntegration() {
@@ -185,7 +214,7 @@ function getFormConsoleData(options) {
     }
     const result = { records: visibleRecords, scheduleTimer: typeof getManagedFormScheduleSummary_==='function'?getManagedFormScheduleSummary_():null, setupProgress: getFormSetupProgress_(config.formSources.length > 0 && config.formSheetNamePrefix.length > 0, records), classes: classes, classWarning: classWarning, configRevision: getConfigRevision_(config),
       spreadsheetId: ss.getId(), spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/edit',
-      defaults: { emailHeader: config.emailHeader, nameHeader: config.studentNameHeader, gradeHeader: config.scoreSourceHeader, scoreSourceHeader: config.scoreSourceHeader, statusHeader: config.formStatusHeader } };
+      defaults: { emailHeader: config.emailHeader, nameHeader: config.studentNameHeader, gradeHeader: config.scoreSourceHeader, scoreSourceHeader: config.scoreSourceHeader, statusHeader: config.formStatusHeader, templateUrl: currentTemplateFormUrl_(records) } };
     if(returnHistory)result.returnHistory=returnHistory;
     return result;
   });
@@ -1824,10 +1853,249 @@ function exportSettingsProfile(includeConnections) {
 function buildSettingsProfile_(source, includeConnections) {
   const config = {};
   PROFILE_CONFIG_KEYS.forEach(function(key) { config[key] = source[key]; });
+  const separate = includeConnections && typeof includeConnections === 'object';
   if (includeConnections === true) { config.formSources = source.formSources; config.reminderTo = source.reminderTo; }
-  const profile = { application: 'turret', schemaVersion: 3, exportedAt: new Date().toISOString(),
+  if (separate && includeConnections.reminderTo === true) config.reminderTo = source.reminderTo;
+  const profile = { application: 'turret', schemaVersion: separate ? 4 : 3, exportedAt: new Date().toISOString(),
     includesConnections: includeConnections === true, config: config, schedule: getAutomationSchedule_() };
-  return { filename: 'turret-settings-' + new Date().toISOString().slice(0, 10) + '.json', json: JSON.stringify(profile, null, 2) };
+  if (separate && includeConnections.templateFormUrl === true) {
+    const url = currentTemplateFormUrl_();
+    if (!url) throw new Error('保存済みのひな形フォームURLがありません。「フォームを準備」でひな形からフォームを作成してください。');
+    profile.templateFormUrl = normalizeTemplateFormUrl_(url);
+  }
+  return { filename: configurationFilename_('settings'), json: JSON.stringify(profile, null, 2) };
+}
+
+/** 各画面で同じ種類・運用名・日本時間のファイル名を使う。 */
+function configurationFilename_(kind, date) {
+  const ss = getAppSpreadsheet_();
+  const rawName = typeof ss.getName === 'function' ? ss.getName() : '運用';
+  const name = Array.from(String(rawName || '運用').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').replace(/_+/g, '_').replace(/^[.\s]+|[.\s]+$/g, '')).slice(0, 80).join('') || '運用';
+  const japan = new Date((date || new Date()).getTime() + 9 * 60 * 60 * 1000).toISOString();
+  const timestamp = japan.slice(0, 10).replace(/-/g, '') + '-' + japan.slice(11, 19).replace(/:/g, '');
+  return 'turret-' + kind + '-' + name + '-' + timestamp + '.json';
+}
+
+function requireConfigurationKind_(kind) {
+  if (['settings', 'scoring', 'templates', 'bundle'].indexOf(kind) < 0) throw new Error('設定ファイルの種類を選んでください。');
+}
+
+/** ファイル名ではなく既存JSONの識別情報を使い、不明な形式を推測で適用しない。 */
+function detectConfigurationKind_(json) {
+  if (typeof json !== 'string' || utf8ByteLength_(json) > configurationFileLimit_('bundle')) throw new Error('設定JSONは1MiB以内にしてください。');
+  let payload;
+  try { payload = JSON.parse(json); } catch (error) { throw new Error('JSONを読み取れません。書き出したファイルを選んでください。'); }
+  requireProfileObject_(payload, '設定JSON');
+  const unknown = '設定JSONの種類を判定できません。turretから書き出したファイルを選んでください。';
+  if (payload.type !== undefined) {
+    if (payload.type === 'configuration-bundle' && payload.application === 'turret' && payload.meta === undefined) return 'bundle';
+    throw new Error(unknown);
+  }
+  if (payload.application !== undefined) {
+    if (payload.application === 'turret' && payload.meta === undefined) return 'settings';
+    throw new Error(unknown);
+  }
+  if (payload.meta && payload.meta.type !== undefined) {
+    if (payload.meta.type === 'turret-grading-template-pack') return 'templates';
+    if (payload.meta.type === 'screen-config') return 'scoring';
+    throw new Error(unknown);
+  }
+  // 識別情報がない旧採点設定だけは、採点固有の必須キーで判定する。
+  const config = payload.config || payload;
+  if (config && typeof config === 'object' && ['scoreCols', 'displayCols', 'colChecks'].every(function(key) { return Object.prototype.hasOwnProperty.call(config, key); })) return 'scoring';
+  throw new Error(unknown);
+}
+
+/** 既存の個別JSONの形式を保ち、一括出力だけ3種類を包む。 */
+function exportConfigurationFile(kind, includeConnections) {
+  assertWebOperator_();
+  requireConfigurationKind_(kind);
+  return withAppLock_(function() {
+    let payload;
+    if (kind === 'settings') payload = JSON.parse(buildSettingsProfile_(getConfig_(), includeConnections).json);
+    else if (kind === 'scoring') payload = scoringLegacyApiExportConfig_();
+    else if (kind === 'templates') payload = scoringExportTemplatePack();
+    else payload = { application: 'turret', type: 'configuration-bundle', schemaVersion: 1, exportedAt: new Date().toISOString(),
+      management: JSON.parse(buildSettingsProfile_(getConfig_(), includeConnections).json),
+      scoring: scoringLegacyApiExportConfig_(), templates: scoringExportTemplatePack() };
+    const json = JSON.stringify(payload, null, 2);
+    if (utf8ByteLength_(json) > configurationFileLimit_(kind)) throw new Error('設定ファイルが大きすぎます。個別の出力、または内容の整理を行ってください。');
+    return { filename: configurationFilename_(kind), json: json };
+  });
+}
+
+function configurationFileLimit_(kind) { return kind === 'settings' ? 131072 : 1048576; }
+
+function parseConfigurationScoring_(payload) {
+  requireProfileObject_(payload, '採点設定');
+  const copy = JSON.parse(JSON.stringify(payload));
+  const config = copy.config || copy;
+  requireProfileObject_(config, '採点設定');
+  // 回答タブの指定は運用先で選ぶ。旧採点JSONも同じ検証を使う。
+  config.sheetName = '';
+  scoringValidateConfigInput_(config);
+  return scoringParseImportedConfig_(copy);
+}
+
+function parseConfigurationTemplates_(payload) {
+  requireProfileObject_(payload, '採点テンプレパック');
+  profileKeys_(payload, ['meta', 'templates'], '採点テンプレパック');
+  if (!payload.meta || payload.meta.type !== 'turret-grading-template-pack' || payload.meta.version !== 1) throw new Error('採点テンプレ形式のパックを指定してください。旧形式は取り込めません。');
+  const templates = scoringNormalizeTemplates_(payload.templates);
+  const validation = scoringValidateTemplateTable_({ templates: templates });
+  if (!validation.ok) throw new Error(validation.issues.filter(function(i) { return i.severity === 'error'; }).map(function(i) { return i.message; }).slice(0, 5).join('\n'));
+  return { templates: templates, warnings: validation.issues.filter(function(i) { return i.severity === 'warning'; }).slice(0, 10).map(function(i) { return i.message; }) };
+}
+
+function parseConfigurationFile_(kind, json) {
+  requireConfigurationKind_(kind);
+  if (typeof json !== 'string' || utf8ByteLength_(json) > configurationFileLimit_(kind)) throw new Error(kind === 'settings' ? '管理設定JSONは128KiB以内にしてください。' : '設定JSONは1MiB以内にしてください。');
+  let payload;
+  try { payload = JSON.parse(json); } catch (error) { throw new Error('JSONを読み取れません。書き出したファイルを選んでください。'); }
+  requireProfileObject_(payload, '設定JSON');
+  const parsed = { kind: kind, warnings: [] };
+  if (kind === 'bundle') {
+    profileKeys_(payload, ['application', 'type', 'schemaVersion', 'exportedAt', 'management', 'scoring', 'templates'], '一括設定JSON');
+    if (payload.application !== 'turret' || payload.type !== 'configuration-bundle' || payload.schemaVersion !== 1) throw new Error('未対応の一括設定JSONの形式またはバージョンです。');
+    parsed.management = parseSettingsProfile_(JSON.stringify(payload.management));
+    parsed.scoring = parseConfigurationScoring_(payload.scoring);
+    const pack = parseConfigurationTemplates_(payload.templates);
+    parsed.templates = pack.templates; parsed.warnings = pack.warnings;
+    if (parsed.scoring.ruleTemplateId && !parsed.templates.some(function(t) { return t.name === parsed.scoring.ruleTemplateId; })) throw new Error('採点設定で選択したテンプレートがパッケージにありません: ' + parsed.scoring.ruleTemplateId);
+  } else if (kind === 'settings') parsed.management = parseSettingsProfile_(json);
+  else if (kind === 'scoring') parsed.scoring = parseConfigurationScoring_(payload);
+  else { const pack = parseConfigurationTemplates_(payload); parsed.templates = pack.templates; parsed.warnings = pack.warnings; }
+  return parsed;
+}
+
+/** 確認したファイルと、読み込み先の関連設定をまとめて照合する。 */
+function configurationFileRevision_(kind, json) {
+  const value = { kind: kind, json: json, spreadsheetId: getAppSpreadsheet_().getId() };
+  if (kind === 'settings' || kind === 'bundle') {
+    value.management = getConfigRevision_(getConfig_()); value.schedule = getAutomationSchedule_();
+    const payload = JSON.parse(json), profile = kind === 'bundle' ? payload.management : payload;
+    if (profile.templateFormUrl) value.templateFormUrl = currentTemplateFormUrl_();
+  }
+  if (kind === 'scoring' || kind === 'bundle') value.scoring = PropertiesService.getScriptProperties().getProperty('TURRET_SCORING_CONFIG');
+  if (kind !== 'settings') value.templates = scoringReadTemplateTable_().revision;
+  return scoringDigest_(value);
+}
+
+function configurationIncomingTemplates_(parsed, current) {
+  if (parsed.kind === 'bundle') return parsed.templates;
+  const names = new Set(current.templates.map(function(t) { return t.name; }));
+  parsed.templates.forEach(function(t) { if (names.has(t.name)) throw new Error('同名のテンプレートがあります: ' + t.name); });
+  const combined = scoringNormalizeTemplates_(current.templates.concat(parsed.templates));
+  return combined;
+}
+
+function inspectConfigurationFile(kind, json) {
+  assertWebOperator_();
+  if (kind === 'auto') kind = detectConfigurationKind_(json);
+  const parsed = parseConfigurationFile_(kind, json);
+  return withAppLock_(function() {
+    const lines = [], warnings = parsed.warnings.slice();
+    if (parsed.management) {
+      const p = parsed.management;
+      const changed = [];
+      if (p.includesConnections) changed.push('フォーム回答スプレッドシートのURL');
+      if (p.templateFormUrl) changed.push('ひな形フォームのURL');
+      if (p.includesConnections || Object.prototype.hasOwnProperty.call(p.config, 'reminderTo')) changed.push('通知先メール');
+      lines.push('管理設定を置き換えます。取り込み項目 ' + p.config.fields.length + '件／本文 ' + p.config.messageTemplate.length + '文字／' + (changed.length ? changed.join('・') + 'も置き換えます。' : 'フォームのURL・通知先メールは保持します。'));
+      warnings.push('自動実行を停止してから適用してください。適用しても自動実行は開始しません。');
+    }
+    if (parsed.scoring) {
+      lines.push('採点設定を置き換えます。テンプレート：' + (parsed.scoring.ruleTemplateId || '未選択'));
+      warnings.push('採点画面の未保存の設定を先に保存してください。適用後は採点画面を開き直し、列設定を確認してください。');
+      if (kind === 'scoring' && parsed.scoring.ruleTemplateId && !scoringReadTemplateTable_().templates.some(function(t) { return t.name === parsed.scoring.ruleTemplateId; })) warnings.push('選択したテンプレートは読み込み先にありません。テンプレパックも読み込んでください。');
+    }
+    if (parsed.templates) {
+      configurationIncomingTemplates_(parsed, scoringReadTemplateTable_());
+      lines.push('採点テンプレート ' + parsed.templates.length + '件を' + (kind === 'bundle' ? '適用し、既存のテンプレートをすべて置き換えます。' : '追加します。同名のテンプレートは追加できません。'));
+      warnings.push('テンプレ編集画面の未保存の内容を先に保存してください。適用後はシートから再読込してください。');
+    }
+    return { kind: kind, summary: lines.join('\n'), warnings: warnings, revision: configurationFileRevision_(kind, json) };
+  });
+}
+
+/** 復元も一括書込みし、先に既存テンプレートを消去しない。 */
+function restoreConfigurationTemplates_(ss, snapshot, revision) {
+  const sheet = ss.getSheetByName('採点テンプレ');
+  if (!snapshot.exists) { if (sheet) ss.deleteSheet(sheet); }
+  else {
+    const target = sheet || ss.insertSheet('採点テンプレ');
+    const height = Math.max(snapshot.values.length, target.getLastRow(), 1), width = Math.max(snapshot.values[0] ? snapshot.values[0].length : 0, target.getLastColumn(), 16);
+    // 既存シートから退避した数式だけは数式として復元する。JSON由来の文字列とは区別する。
+    const rows = Array.from({ length: height }, function(_, r) { return Array.from({ length: width }, function(_, c) {
+      if (snapshot.formulas[r] && snapshot.formulas[r][c]) return snapshot.formulas[r][c];
+      return snapshot.values[r] && snapshot.values[r][c] != null ? scoringSheetLiteral_(snapshot.values[r][c]) : '';
+    }); });
+    target.getRange(1, 1, height, width).setValues(rows);
+  }
+  if (scoringReadTemplateTable_().revision !== revision) throw new Error('採点テンプレートの復元値が一致しません。');
+}
+
+function applyConfigurationFile(kind, json, expectedRevision) {
+  assertWebOperator_();
+  const parsed = parseConfigurationFile_(kind, json);
+  return withAppLock_(function() {
+    if (typeof expectedRevision !== 'string' || expectedRevision !== configurationFileRevision_(kind, json)) throw new Error('確認後にファイルまたは設定が変更されました。再読み込みしてから適用してください。');
+    const ss = getAppSpreadsheet_(), props = PropertiesService.getScriptProperties();
+    let management, oldSchedule, currentTemplates, templates, snapshot;
+    if (parsed.management) {
+      const automation = getAutomationStateUnlocked_(), ownership = getAutomationSummary_();
+      if (ownership.hasManagedOwner && !ownership.managedByCurrentUser) throw new Error('別の管理者が自動実行を管理しています。同じ管理者アカウントで設定を適用してください。');
+      if (automation.enabled || automation.legacyCount > 0) throw new Error('設定JSONを適用する前に、自動実行を停止してください。');
+      management = normalizeAppConfig_(Object.assign({}, getConfig_(), parsed.management.config));
+      validateConfigDraft_(management); validateConfigSheetLayouts_(management);
+      if (utf8ByteLength_(JSON.stringify(management)) > 8000) throw new Error('管理設定はUTF-8で8,000バイト以内にしてください。');
+      oldSchedule = getAutomationSchedule_();
+    }
+    if (parsed.templates) {
+      currentTemplates = scoringReadTemplateTable_(); templates = configurationIncomingTemplates_(parsed, currentTemplates);
+      const validation = scoringValidateTemplateTable_({ templates: templates });
+      if (!validation.ok) throw new Error('採点テンプレートに不正な条件があります。');
+      snapshot = snapshotSheetContents_(ss, '採点テンプレ');
+      const templateSheet = ss.getSheetByName('採点テンプレ');
+      snapshot.formulas = templateSheet ? templateSheet.getDataRange().getFormulas() : [];
+    }
+    const keys = [];
+    if (management) keys.push('APP_CONFIG', 'APP_CONFIG_BACKUP', 'APP_CONFIG_STORAGE', 'APP_CONFIG_PARSE_ERROR', 'APP_CONFIG_SAVE_ERROR', AUTOMATION_STATE_KEY_);
+    if (parsed.management && parsed.management.templateFormUrl) keys.push(TEMPLATE_FORM_URL_KEY_);
+    if (parsed.scoring) keys.push('TURRET_SCORING_CONFIG', SCORING_CONFIG_BACKUP_KEY);
+    const previous = keys.map(function(key) { return [key, props.getProperty(key)]; });
+    let templatesAttempted = false, scheduleAttempted = false;
+    try {
+      if (management) {
+        scheduleAttempted = true; saveAutomationScheduleDraft_(parsed.management.schedule); saveConfig_(management);
+        if (parsed.management.templateFormUrl) {
+          const savedUrl = savedTemplateFormUrl_(parsed.management.templateFormUrl);
+          props.setProperty(TEMPLATE_FORM_URL_KEY_, savedUrl);
+          if (props.getProperty(TEMPLATE_FORM_URL_KEY_) !== savedUrl) throw new Error('ひな形フォームURLの保存を確認できません。');
+        }
+      }
+      if (parsed.scoring) {
+        scoringLegacyBackupCurrentConfig_();
+        const serialized = JSON.stringify(parsed.scoring); props.setProperty('TURRET_SCORING_CONFIG', serialized);
+        if (props.getProperty('TURRET_SCORING_CONFIG') !== serialized) throw new Error('採点設定の保存を確認できません。');
+      }
+      if (templates) scoringWriteTemplateTable_(templates, currentTemplates.revision, function() { templatesAttempted = true; });
+    } catch (error) {
+      const failures = [];
+      if (templatesAttempted) { try { restoreConfigurationTemplates_(ss, snapshot, currentTemplates.revision); } catch (restoreError) { failures.push(String(restoreError)); } }
+      if (scheduleAttempted) { try { saveAutomationScheduleDraft_(oldSchedule); } catch (restoreError) { failures.push(String(restoreError)); } }
+      previous.forEach(function(entry) {
+        try { if (entry[1] === null) props.deleteProperty(entry[0]); else props.setProperty(entry[0], entry[1]); if (props.getProperty(entry[0]) !== entry[1]) throw new Error('復元値が一致しません'); }
+        catch (restoreError) { failures.push(entry[0] + ': ' + restoreError); }
+      });
+      if (failures.length) {
+        try { props.setProperty('APP_CONFIG_SAVE_ERROR', failures.join('\n')); } catch (markerError) { Logger.log(markerError); }
+        throw new Error('設定JSONの適用に失敗し、復旧も完了していません。自動実行を停止し、設定JSONと内部設定を確認してください。' + error + '\n' + failures.join('\n'));
+      }
+      throw error;
+    }
+    return { message: '設定JSONを適用しました。' + (management ? '自動実行は開始していません。' : '') + '各画面で設定を再読み込みしてください。' };
+  });
 }
 
 function requireProfileObject_(value, label) {
@@ -1845,14 +2113,16 @@ function parseSettingsProfile_(json) {
   let profile;
   try { profile = JSON.parse(json); } catch (error) { throw new Error('JSONを読み取れません。設定書き出しで作成したファイルを選んでください。'); }
   requireProfileObject_(profile, '設定JSON');
-  profileKeys_(profile, ['application', 'schemaVersion', 'exportedAt', 'includesConnections', 'config', 'schedule'], '設定JSON');
-  if (profile.application !== 'turret' || [1, 2, 3].indexOf(profile.schemaVersion) < 0) throw new Error('未対応の設定ファイル、またはバージョンです。');
+  profileKeys_(profile, ['application', 'schemaVersion', 'exportedAt', 'includesConnections', 'config', 'schedule'].concat(profile.schemaVersion === 4 ? ['templateFormUrl'] : []), '設定JSON');
+  if (profile.application !== 'turret' || [1, 2, 3, 4].indexOf(profile.schemaVersion) < 0) throw new Error('未対応の設定ファイル、またはバージョンです。');
   if (typeof profile.includesConnections !== 'boolean') throw new Error('接続先を含む設定か指定されていません。');
+  if (profile.schemaVersion === 4 && profile.includesConnections) throw new Error('新しい設定JSONでは接続先を個別に選んでください。');
+  if (profile.templateFormUrl !== undefined) profile.templateFormUrl = normalizeTemplateFormUrl_(profile.templateFormUrl);
   requireProfileObject_(profile.config, '設定');
   if (profile.schemaVersion === 1 && !Object.prototype.hasOwnProperty.call(profile.config, 'gradeScale')) {
     profile.config.gradeScale = Array.isArray(profile.config.fields) && profile.config.fields.some(function(field) { return field && field.type === 'score_grade'; }) ? buildLegacyDefaultConfig_().gradeScale : [];
   }
-  profileKeys_(profile.config, PROFILE_CONFIG_KEYS.concat(profile.includesConnections ? ['formSources', 'reminderTo'] : []), '設定');
+  profileKeys_(profile.config, PROFILE_CONFIG_KEYS.concat(profile.includesConnections ? ['formSources', 'reminderTo'] : profile.schemaVersion === 4 ? ['reminderTo'] : []), '設定');
   PROFILE_CONFIG_KEYS.forEach(function(key) {
     if (!Object.prototype.hasOwnProperty.call(profile.config, key)) throw new Error('設定の項目がありません: ' + key);
   });
@@ -1863,6 +2133,9 @@ function parseSettingsProfile_(json) {
   });
   if (profile.includesConnections && (!Array.isArray(profile.config.formSources) || !Array.isArray(profile.config.reminderTo))) {
     throw new Error('フォームURLと通知先は配列で指定してください。');
+  }
+  if (profile.schemaVersion === 4 && Object.prototype.hasOwnProperty.call(profile.config, 'reminderTo') && !Array.isArray(profile.config.reminderTo)) {
+    throw new Error('通知先メールは配列で指定してください。');
   }
   requireProfileObject_(profile.schedule, '自動実行時間');
   profileKeys_(profile.schedule, ['importHour', 'deliveryHour', 'reminderHour', 'reminderEnabled'], '自動実行時間');
@@ -1879,8 +2152,12 @@ function parseSettingsProfile_(json) {
 
 function inspectSettingsProfile(json) {
   const profile = parseSettingsProfile_(json);
+  const changed = [];
+  if (profile.includesConnections) changed.push('フォーム回答スプレッドシートのURL');
+  if (profile.templateFormUrl) changed.push('ひな形フォームのURL');
+  if (profile.includesConnections || Object.prototype.hasOwnProperty.call(profile.config, 'reminderTo')) changed.push('通知先メール');
   return { summary: '取り込み項目 ' + profile.config.fields.length + '件／本文 ' + profile.config.messageTemplate.length + '文字／' +
-    (profile.includesConnections ? 'フォームURL・通知先も置き換えます' : '現在のフォームURL・通知先は保持します'),
+    (changed.length ? changed.join('・') + 'も置き換えます' : 'フォームのURL・通知先メールは保持します'),
     config: profile.config, schedule: profile.schedule,
     warnings: ['適用しても自動実行は開始しません。実行中の自動処理がある場合は、先に停止してください。'] };
 }
@@ -1898,10 +2175,21 @@ function applySettingsProfile(json, expectedRevision) {
     }
     const config = Object.assign({}, current, profile.config);
     const oldSchedule = getAutomationSchedule_();
+    const props = PropertiesService.getScriptProperties();
+    const oldTemplateUrl = profile.templateFormUrl ? props.getProperty(TEMPLATE_FORM_URL_KEY_) : null;
     saveAutomationScheduleDraft_(profile.schedule);
     try {
+      if (profile.templateFormUrl) {
+        const savedUrl = savedTemplateFormUrl_(profile.templateFormUrl);
+        props.setProperty(TEMPLATE_FORM_URL_KEY_, savedUrl);
+        if (props.getProperty(TEMPLATE_FORM_URL_KEY_) !== savedUrl) throw new Error('ひな形フォームURLの保存を確認できません。');
+      }
       applyConfigDraft_(config, expectedRevision);
     } catch (error) {
+      if (profile.templateFormUrl) {
+        try { if (oldTemplateUrl === null) props.deleteProperty(TEMPLATE_FORM_URL_KEY_); else props.setProperty(TEMPLATE_FORM_URL_KEY_, oldTemplateUrl); }
+        catch (restoreError) { throw new Error(String(error.message || error) + '。ひな形フォームURLの復元にも失敗しました。設定を確認してください。'); }
+      }
       try { saveAutomationScheduleDraft_(oldSchedule); } catch (restoreError) {
         throw new Error(String(error.message || error) + '。希望時刻の復元にも失敗しました。再読込して自動実行設定を確認してください。');
       }

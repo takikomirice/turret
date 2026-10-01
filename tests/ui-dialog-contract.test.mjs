@@ -208,6 +208,70 @@ function interactiveModel() {
  return c;
 }
 
+test('management exports every configuration kind through the shared file endpoint',async()=>{
+ const c=interactiveModel();
+ vm.runInContext("const files=[];document={getElementById:id=>({checked:id==='includeTemplateFormUrl'})};offerSettingsDownload=file=>files.push(file);",c);
+ for(const kind of ['settings','scoring','templates','bundle'])await vm.runInContext(`command('export','${kind}')`,c);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls)',c)),['settings','scoring','templates','bundle'].map(kind=>({method:'exportConfigurationFile',args:[kind,{templateFormUrl:true,reminderTo:false}]})));
+ assert.equal(vm.runInContext('files.length',c),4);
+});
+
+test('configuration files use one export selector and one automatic import arranged in two columns',()=>{
+ const c=interactiveModel();vm.runInContext("state.profile={kind:'bundle',inspection:{summary:'<運用>を置き換え',warnings:[]}}",c);
+ const markup=vm.runInContext('renderSettings()',c);
+ for(const kind of ['settings','scoring','templates','bundle'])assert.match(markup,new RegExp('<option value="'+kind+'"'));
+ assert.match(markup,/class="grid two configuration-io"/);
+ assert.equal((markup.match(/type="file"/g)||[]).length,1);
+ assert.equal((markup.match(/data-command="export"/g)||[]).length,1);
+ assert.match(markup,/data-profile-kind="auto"/);assert.match(markup,/判定結果：全部まとめて/);
+ assert.equal((markup.match(/data-command="apply-profile"/g)||[]).length,1);
+ assert.match(markup,/id="includeTemplateFormUrl"/);assert.match(markup,/ひな形フォームのURLを含める/);
+ assert.match(markup,/id="includeReminderTo"/);assert.match(markup,/通知先メールを含める/);
+ assert.match(markup,/&lt;運用&gt;/);assert.match(markup,/全部まとめて/);assert.match(markup,/名簿・回答・採点結果・送信履歴/);
+});
+
+test('imported template form URL becomes the default for form preparation',()=>{
+ const c=interactiveModel();
+ vm.runInContext("state.forms={defaults:{templateUrl:'https://docs.google.com/forms/d/template_12345678901234567890/edit'}}",c);
+ assert.equal(vm.runInContext('defaultFormDraft().templateId',c),'https://docs.google.com/forms/d/template_12345678901234567890/edit');
+});
+
+test('applying an imported template URL updates a blank form draft but preserves a different unsaved URL',async()=>{
+ const c=interactiveModel();
+ vm.runInContext("refresh=async()=>{};state.forms={defaults:{templateUrl:'old-url'}};state.formDraft={templateId:''};state.profile={kind:'settings',json:JSON.stringify({templateFormUrl:'new-url'}),revision:'r1',inspection:{summary:'ひな形フォームのURL',warnings:[]}}",c);
+ await vm.runInContext('applyProfile()',c);
+ assert.equal(vm.runInContext('state.formDraft.templateId',c),'new-url');
+ vm.runInContext("state.formDraft.templateId='unsaved-url';state.profile={kind:'settings',json:JSON.stringify({templateFormUrl:'another-url'}),revision:'r2',inspection:{summary:'ひな形フォームのURL',warnings:[]}}",c);
+ await vm.runInContext('applyProfile()',c);
+ assert.equal(vm.runInContext('state.formDraft.templateId',c),'unsaved-url');
+});
+
+test('export selection survives rerender and only changes the exported type',async()=>{
+ const c=interactiveModel();
+ vm.runInContext("state.exportKind='templates';state.profile={kind:'scoring',inspection:{summary:'採点設定',warnings:[]}};document={getElementById:()=>({checked:true})};offerSettingsDownload=()=>{};",c);
+ assert.match(vm.runInContext('renderSettings()',c),/<option value="templates" selected/);
+ await vm.runInContext("command('export')",c);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls[0])',c)),{method:'exportConfigurationFile',args:['templates',{templateFormUrl:true,reminderTo:true}]});
+ assert.equal(vm.runInContext('state.profile.kind',c),'scoring');
+});
+
+test('automatic file inspection stores the detected kind and does not apply before confirmation',async()=>{
+ const c=interactiveModel();c.file={size:2,text:async()=> '{}'};
+ vm.runInContext("rpc=async(method,...args)=>{calls.push({method,args});return {kind:'bundle',summary:'全設定',warnings:[],revision:'auto-r'}}",c);
+ await vm.runInContext('inspectFile(file)',c);
+ assert.equal(vm.runInContext('state.profile.kind',c),'bundle');assert.equal(vm.runInContext('state.profile.revision',c),'auto-r');
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls)',c)),[{method:'inspectConfigurationFile',args:['auto','{}']}]);
+});
+
+test('file inspection keeps the kind and server revision; failed file selection clears an older preview',async()=>{
+ const c=interactiveModel();c.file={size:2,text:async()=> '{}'};
+ await vm.runInContext("inspectFile(file,'bundle')",c);
+ assert.equal(vm.runInContext('state.profile.kind',c),'bundle');assert.equal(vm.runInContext('state.profile.revision',c),'r2');
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls[0])',c)),{method:'inspectConfigurationFile',args:['bundle','{}']});
+ c.file={size:1048577,text:async()=> '{}'};await vm.runInContext("inspectFile(file,'bundle')",c);
+ assert.equal(vm.runInContext('state.profile',c),null);assert.equal(vm.runInContext('calls.length',c),1);
+});
+
 test('manual return has prepare and send actions without an evaluation step',()=>{
  const c=model();
  vm.runInContext("state.data={config:{},counts:{evalRows:0,pendingSend:0,reviewSend:0},sheets:[]};",c);
@@ -431,7 +495,7 @@ test('file inspection is read only and apply cannot discard pending edits',async
  const c=interactiveModel();
  c.file={size:20,text:async()=>'{"version":1}'};
  await vm.runInContext('inspectFile(file)',c);
- assert.equal(vm.runInContext('calls[0].method',c),'inspectSettingsProfile');
+ assert.equal(vm.runInContext('calls[0].method',c),'inspectConfigurationFile');
  vm.runInContext("putDraft('template',{messageTemplate:'pending'});",c);
  await vm.runInContext('applyProfile()',c);
  assert.equal(vm.runInContext('calls.length',c),1);
@@ -445,7 +509,7 @@ test('local file apply is explicit and uses inspection revision',async()=>{
  assert.equal(vm.runInContext('calls.length',c),0);
  vm.runInContext('confirmAction=async()=>true;',c);
  await vm.runInContext('applyProfile()',c);
- assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls[0])',c)),{method:'applySettingsProfile',args:['{}','r1']});
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls[0])',c)),{method:'applyConfigurationFile',args:['settings','{}','r1']});
 });
 
 test('server-provided strings and template payload are escaped in markup',()=>{

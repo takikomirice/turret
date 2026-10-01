@@ -82,6 +82,12 @@ button.context-help:focus-visible{outline:2px solid var(--focus);outline-offset:
 .actions{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:8px}
 .grid{display:grid;gap:8px 12px;align-items:start}
 .two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.configuration-io>section{min-width:0}
+.configuration-io [hidden]{display:none}
+.configuration-io h3{margin-bottom:8px}
+.configuration-io .profile-file{margin-top:0}
+.configuration-io .check-line{width:max-content;max-width:100%;margin-bottom:4px}
+.configuration-io .profile-summary{white-space:pre-line;overflow-wrap:anywhere}
 .form-item+.form-item{margin-top:8px}
 .source-grid .form-item{margin:0;min-width:0}
 .divider{border:0;border-top:1px solid var(--line);margin:8px 0}
@@ -236,7 +242,7 @@ const steps = [
  {id:'automation',title:'自動実行',subtitle:'日本時間・開始と停止'}
 ];
 const requiredSteps=['prepare','classes','students','sources','mapping','fields','template'];
-const state = { data:null, automation:null, drafts:{}, headers:[], panel:'setup', step:'prepare', busy:false, profile:null, preview:null, diagnostic:null, includeConnections:false, returnPanel:null, openGrades:[], commonGradeOpen:false, bootstrap:null, forms:null, formDraft:null, formPlan:null, formsLoading:false, formsLoadingPromise:null, formsError:'' };
+const state = { data:null, automation:null, drafts:{}, headers:[], panel:'setup', step:'prepare', busy:false, profile:null, preview:null, diagnostic:null, includeTemplateFormUrl:false, includeReminderTo:false, exportKind:'bundle', returnPanel:null, openGrades:[], commonGradeOpen:false, bootstrap:null, forms:null, formDraft:null, formPlan:null, formsLoading:false, formsLoadingPromise:null, formsError:'' };
 const $ = id => document.getElementById(id);
 const esc = value => String(value == null ? '' : value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const copy = value => JSON.parse(JSON.stringify(value));
@@ -271,7 +277,9 @@ function setBusy(busy) {
 }
 function rpc(method,...args) { return new Promise((resolve,reject)=>{google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[method](...args);}); }
 function offerSettingsDownload(result,container){
+ if(state.downloadUrl)URL.revokeObjectURL(state.downloadUrl);
  const url=URL.createObjectURL(new Blob([result.json],{type:'application/json;charset=utf-8'})),a=document.createElement('a');
+ state.downloadUrl=url;
  a.href=url;a.download=result.filename;a.textContent=' 設定JSONを保存';(container||document.body).appendChild(a);a.click();
  // ブラウザが自動ダウンロードを止めても使えるよう、リンクを残す。
  if(!container){a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
@@ -431,7 +439,15 @@ function renderMaintenance(){
  return renderHealth()+'<div class="actions">'+button('フォームの受付・資料投稿','data-step="publish"')+'</div>'+renderReturnHistory()+renderOperationCopy()+'<div class="card"><h3>シートを確認・編集</h3><div class="sheet-links">'+maintenanceSheetLinks()+'</div></div><div class="card"><h3>データのクリア</h3>'+(count('evalRows')?actionRow('旧評価データ（移行元）',count('evalRows')+' 行 · 未移行 '+count('legacyPending')+' 件。移行前にクリアしないでください。','clearEval','クリア',true):'')+actionRow('送信シート',count('sendRows')+' 行 · 未送信 '+count('pendingSend')+' 件 · 確認待ち '+count('reviewSend')+' 件','clearSend','クリア',true)+actionRow('エラーログ',count('errorRows')+' 行','clearErrors','クリア',true)+'</div>';
 }
 function renderSettings(){
- return '<div class="compact-heading"><h2>設定を保存・出力</h2>'+button('前の画面に戻る','data-command="settings-back"')+'</div><div class="card"><div class="compact-heading"><div>'+helpHeading('編集中の設定','フォーム・項目・本文をまとめて保存')+'</div>'+button('変更を保存','data-command="save-all"',true)+'</div>'+(state.drafts.automation?'<p class="notice">時間帯の入力は未確定です。ここで保存しても自動実行は変わりません。</p><div class="actions">'+button('自動実行で時間帯を確定','data-step="automation"')+'</div>':'')+'</div><div class="card">'+helpHeading('JSONを書き出す','保存済みの設定と時間帯。名簿・送信履歴・自動実行の有効状態は含みません。')+'<label class="check-line"><input type="checkbox" id="includeConnections"'+(state.includeConnections?' checked':'')+'>フォームURL・通知先メールも含める</label><div class="actions">'+button('JSONを書き出す','data-command="export"')+'</div>'+(dirtySections().length?'<p class="help">書き出す前に未保存の設定を保存してください。時間帯は自動実行画面で確定します。</p>':'')+'</div><div class="card"><h3>JSONを読み込む</h3><label for="profileFile" class="help">ファイルを選び、内容を確認して適用</label><input id="profileFile" class="profile-file" type="file" accept=".json,application/json">'+(state.profile?'<div class="notice"><p class="profile-summary">'+esc(profileSummary(state.profile.inspection))+'</p></div><div class="actions">'+button('確認した設定を適用','data-command="apply-profile"',true)+button('読み込みを取り消す','data-command="cancel-profile"')+'</div>':'')+'</div>';
+ const choices=[
+  {kind:'bundle',title:'全部まとめて（引っ越し用）',description:'管理設定・採点設定・採点テンプレパックを1ファイルにまとめます。読み込みでは3種類とも置き換えます。'},
+  {kind:'settings',title:'管理設定',description:'取り込み項目・返信本文・採点済みの判定列・自動実行の希望時刻を保存します。読み込みでは管理設定を置き換えます。'},
+  {kind:'scoring',title:'採点設定',description:'表示列・得点列・講評列・テンプレートの選択を保存します。読み込みでは採点設定を置き換えます。テンプレート本体は含みません。'},
+  {kind:'templates',title:'採点テンプレパック',description:'テンプレートの条件・講評文・各枠の点数を保存します。読み込みでは追加し、同名のテンプレートがある場合は取り込みません。'}
+ ];
+ const selected=choices.find(choice=>choice.kind===state.exportKind)||choices[0];
+ const detected=state.profile&&choices.find(choice=>choice.kind===state.profile.kind);
+ return '<div class="compact-heading"><h2>設定を保存・出力</h2>'+button('前の画面に戻る','data-command="settings-back"')+'</div><div class="card"><div class="compact-heading"><div>'+helpHeading('編集中の設定','フォーム・項目・本文をまとめて保存')+'</div>'+button('変更を保存','data-command="save-all"',true)+'</div>'+(state.drafts.automation?'<p class="notice">時間帯の入力は未確定です。ここで保存しても自動実行は変わりません。</p><div class="actions">'+button('自動実行で時間帯を確定','data-step="automation"')+'</div>':'')+'<p class="help">書き出しは保存済みの内容が対象です。管理・採点・テンプレ編集の各画面で変更を保存してください。時間帯は自動実行画面で確定します。</p></div><div class="card">'+helpHeading('JSONの入出力','名簿・送信履歴・自動実行の有効状態に加え、回答・採点結果・フォーム受付終了予約も含みません。')+'<p class="help">名簿・回答・採点結果・送信履歴の移行はスプレッドシート側で行ってください。</p><div class="grid two configuration-io"><section><h3>出力</h3><label for="configurationExportKind">出力する種類</label><select id="configurationExportKind">'+choices.map(choice=>'<option value="'+choice.kind+'"'+(selected.kind===choice.kind?' selected':'')+'>'+choice.title+'</option>').join('')+'</select><p class="help">'+esc(selected.description)+'</p><label class="check-line"'+(!['settings','bundle'].includes(selected.kind)?' hidden':'')+'><input type="checkbox" id="includeTemplateFormUrl"'+(state.includeTemplateFormUrl?' checked':'')+'>ひな形フォームのURLを含める</label><label class="check-line"'+(!['settings','bundle'].includes(selected.kind)?' hidden':'')+'><input type="checkbox" id="includeReminderTo"'+(state.includeReminderTo?' checked':'')+'>通知先メールを含める</label><div class="actions">'+button('JSONを書き出す','data-command="export"',true)+'</div></section><section><h3>入力</h3><label for="profileFile">読み込むJSONファイル</label><input id="profileFile" class="profile-file" data-profile-kind="auto" type="file" accept=".json,application/json"><p class="help">種類はファイルの内容から自動判定します。内容を確認してから適用してください。</p>'+(detected?'<div class="notice"><strong>判定結果：'+esc(detected.title)+'</strong><p class="profile-summary">'+esc(profileSummary(state.profile.inspection))+'</p></div><div class="actions">'+button('確認した設定を適用','data-command="apply-profile"',true)+button('読み込みを取り消す','data-command="cancel-profile"')+'</div>':'')+'</section></div></div>';
 }
 function renderLegacyMigration(){return count('evalRows')?'<div class="card">'+helpHeading('旧評価データの移行','「送信データを準備」で、旧取り込み値を優先して引き継ぎます。旧シートは確認用に残ります。')+'<p>未移行 '+count('legacyPending')+' 件</p>'+sheetButton('evaluation','旧評価データを確認')+'</div>':'';}
 function renderManual(){return '<div class="card"><div class="stats">'+stat('送信データ',count('sendRows'))+stat('未送信',count('pendingSend'))+stat('確認待ち',count('reviewSend'))+'</div>'+actionRow('1　送信データを準備','採点済みの回答 → 返信本文と宛先を送信シートに保存','prepare','準備する')+actionRow('2　生徒に送信','保存済みの未送信本文 → Classroom','send','送信内容を確認')+'<p class="help">準備後の採点・テンプレート変更で、保存済みの本文は自動更新されません。</p></div>'+renderLegacyMigration()+renderDiagnostics()+'<div class="card">'+actionRow('担当者に通知','未採点・エラーのリマインダー','remind','通知先を確認')+'</div><div class="actions">'+sheetButton('send','送信シート')+sheetButton('errors','エラー')+'</div>';}
@@ -525,10 +541,10 @@ async function configureSchedule(stop){
   catch(error){status(message+'\nただし、停止後の画面更新に失敗しました。「状態を更新」で再取得してください。\n'+String(error.message||error),'error');}
  });
 }
-function profileSummary(inspection){const summary=typeof inspection.summary==='string'?inspection.summary:JSON.stringify(inspection.summary,null,2);return summary+((inspection.warnings||[]).length?'\n\n確認事項：\n'+inspection.warnings.join('\n'):'')+'\n\n適用しても自動実行は開始しません。';}
-async function inspectFile(file){if(!file)return;if(file.size>131072){status('設定ファイルは128KiB以下のJSONを選んでください。','error');return;}await task(async()=>{const json=await file.text();const inspection=await rpc('inspectSettingsProfile',json);state.profile={json,inspection,revision:state.data.revision};render();status('読み込んだ設定の内容を確認してください。まだ適用していません。');});}
-async function applyProfile(){if(!state.profile)return;readCurrent();if(!requireSaved())return;const profile=state.profile;if(!await confirmAction('読み込んだ設定を適用する',profileSummary(profile.inspection),'適用する'))return;await task(async()=>{const result=await rpc('applySettingsProfile',profile.json,profile.revision);state.profile=null;state.preview=null;await refresh(false);status(result.message||'設定を適用しました。自動実行は停止したままです。','success');});}
-async function command(name){
+function profileSummary(inspection){const summary=typeof inspection.summary==='string'?inspection.summary:JSON.stringify(inspection.summary,null,2);return summary+((inspection.warnings||[]).length?'\n\n確認事項：\n'+inspection.warnings.join('\n'):'');}
+async function inspectFile(file,kind='auto'){if(!file)return;state.profile=null;render();const limit=kind==='settings'?131072:1048576;if(file.size>limit){status('設定ファイルは'+(kind==='settings'?'128KiB':'1MiB')+'以下のJSONを選んでください。','error');return;}await task(async()=>{const json=await file.text();const inspection=await rpc('inspectConfigurationFile',kind,json);state.profile={kind:inspection.kind||kind,json,inspection,revision:inspection.revision};render();status('読み込んだ設定の内容を確認してください。まだ適用していません。');});}
+async function applyProfile(){if(!state.profile)return;readCurrent();if(!requireSaved())return;const profile=state.profile;if(!await confirmAction('読み込んだ設定を適用する',profileSummary(profile.inspection),'適用する'))return;await task(async()=>{const result=await rpc('applyConfigurationFile',profile.kind||'settings',profile.json,profile.revision);const imported=JSON.parse(profile.json),management=profile.kind==='bundle'?imported.management:profile.kind==='settings'?imported:null;if(management?.templateFormUrl&&state.formDraft&&(!state.formDraft.templateId||state.formDraft.templateId===state.forms?.defaults?.templateUrl))state.formDraft.templateId=management.templateFormUrl;state.profile=null;state.preview=null;status(result.message||'設定を適用しました。','success');try{await refresh(false);}catch(error){status('設定は適用しましたが、画面の更新に失敗しました。「状態を更新」で再取得してください。\n'+String(error.message||error),'error');}});}
+async function command(name,exportKind=state.exportKind){
  if(name==='save-all'){await saveAllSettings();return;}
  if(name==='settings-back'){const previous=state.returnPanel||{panel:'setup',step:'prepare'};state.panel=previous.panel;state.step=previous.step;render();if(showsFormData())refreshFormsInBackground();return;}
  if(name==='mapping-sources'){state.panel='setup';state.step='sources';render();return;}
@@ -540,7 +556,7 @@ async function command(name){
  if(name==='add-field'){readCurrent();const c=draftValue('fields');c.fields.push({key:'',sourceHeader:'',evalHeader:'',sendHeader:'',type:'text',gradeScale:[]});putDraft('fields',c);render();$('field-'+(c.fields.length-1)+'-sourceHeader').focus();return;}
  if(name==='preview'){readCurrent();const payload=Object.assign({},state.data.config,draftValue('fields'),draftValue('template'));await task(async()=>{state.preview=await rpc('previewReplyTemplate',payload);render();status('架空の値で本文を生成しました。実際の生徒への送信は行っていません。','success');});return;}
  if(name==='automation-start'||name==='automation-stop'){await configureSchedule(name==='automation-stop');return;}
- if(name==='export'){readCurrent();if(!requireSaved())return;const include=$('includeConnections').checked;await task(async()=>{const result=await rpc('exportSettingsProfile',include);offerSettingsDownload(result);status('設定ファイルを書き出しました。','success');});return;}
+ if(name==='export'){readCurrent();if(!requireSaved())return;const include={templateFormUrl:$('includeTemplateFormUrl')?.checked===true,reminderTo:$('includeReminderTo')?.checked===true};await task(async()=>{const result=await rpc('exportConfigurationFile',exportKind,include);status('設定ファイルを書き出しました。自動で保存されない場合はリンクから保存してください。','success');offerSettingsDownload(result,$('statusRegion'));});return;}
  if(name==='apply-profile'){await applyProfile();return;}
  if(name==='cancel-profile'){state.profile=null;render();}
 }
@@ -562,7 +578,7 @@ async function handleClick(event){
  else if(b.dataset.removeFieldGrade!==undefined){readCurrent();const c=draftValue('fields'),i=Number(b.dataset.removeFieldGrade);c.fields[i].gradeScale.splice(Number(b.dataset.gradeRow),1);state.openGrades=[i];putDraft('fields',c);render();}
  else if(b.dataset.removeGrade!==undefined){readCurrent();const c=draftValue('fields');c.gradeScale.splice(Number(b.dataset.removeGrade),1);putDraft('fields',c);render();}
  else if(b.dataset.token){const area=$('messageTemplate'),start=area.selectionStart,end=area.selectionEnd,token='{'+b.dataset.token+'}';area.setRangeText(token,start,end,'end');area.focus();readCurrent();state.preview=null;}
- else if(b.dataset.command)await command(b.dataset.command);
+ else if(b.dataset.command)await command(b.dataset.command,b.dataset.exportKind||state.exportKind);
 }
 function renderWebWelcome(){
  $('rail').hidden=true;$('workspace').classList.remove('setup-layout');
@@ -571,7 +587,7 @@ function renderWebWelcome(){
 }
 function defaultFormDraft(){
  const d=state.forms&&state.forms.defaults||{};
- return {templateId:'',folderId:'',titlePattern:'{class_label} 授業の振り返り',materialTitlePattern:'{class_label} 授業の振り返り',description:'',prefix:'フォーム回答',emailHeader:d.emailHeader||'メールアドレス',nameHeader:d.nameHeader||'名前',statusHeader:d.statusHeader||'送信状態',domains:'',emails:'',additionalColumns:[],labels:{}};
+ return {templateId:d.templateUrl||'',folderId:'',titlePattern:'{class_label} 授業の振り返り',materialTitlePattern:'{class_label} 授業の振り返り',description:'',prefix:'フォーム回答',emailHeader:d.emailHeader||'メールアドレス',nameHeader:d.nameHeader||'名前',statusHeader:d.statusHeader||'送信状態',domains:'',emails:'',additionalColumns:[],labels:{}};
 }
 function readFormDraft(){
  readScheduleDrafts();
@@ -822,7 +838,7 @@ function boot(){
  initHelp();
  document.addEventListener('click',event=>{handleClick(event).catch(error=>status(error.message||String(error),'error'));});
  document.addEventListener('input',event=>{if(event.target.closest('#content')){readCurrent();if(state.step==='template'){state.preview=null;const preview=$('previewText');if(preview)preview.textContent='本文を変更しました。もう一度プレビューしてください。';}}});
- document.addEventListener('change',event=>{if(event.target.id==='profileFile')inspectFile(event.target.files[0]);else if(event.target.id==='includeConnections')state.includeConnections=event.target.checked;else if(event.target.closest('#content')){readCurrent();if(event.target.dataset.fieldProp==='type')render();}});
+ document.addEventListener('change',event=>{if(event.target.dataset.profileKind)inspectFile(event.target.files[0],event.target.dataset.profileKind);else if(event.target.id==='configurationExportKind'){state.exportKind=event.target.value;render();}else if(event.target.id==='includeTemplateFormUrl')state.includeTemplateFormUrl=event.target.checked;else if(event.target.id==='includeReminderTo')state.includeReminderTo=event.target.checked;else if(event.target.closest('#content')){readCurrent();if(event.target.dataset.fieldProp==='type')render();}});
  $('confirmCheck').addEventListener('change',()=>{$('confirmAccept').disabled=!$('confirmCheck').checked;});
  window.addEventListener('beforeunload',event=>{if(dirtySections().length){event.preventDefault();event.returnValue='';}});
  task(async()=>{state.bootstrap=await rpc('getWebConsoleBootstrap');[['scoringScreenLink',state.bootstrap.scoringUrl],['operationScreenLink',state.bootstrap.url]].forEach(([id,url])=>{const a=$(id);if(a&&url){a.href=url;a.hidden=false;}});if(state.bootstrap.connected){await refresh(true);}else renderWebWelcome();});

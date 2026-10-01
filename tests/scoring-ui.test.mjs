@@ -5,15 +5,45 @@ import vm from 'node:vm';
 
 function page(){
  const html=fs.readFileSync('Scoring.html','utf8'),visible=html.split('<template id="ruleBuilderTemplate">')[0],elements=new Map(),events={},calls=[],storage=new Map();
- const element=()=>({value:'',textContent:'',innerHTML:'',style:{},dataset:{},children:[],classList:{add(){},remove(){},contains(){return false;}},addEventListener(name,handler){const previous=this['on'+name];this['on'+name]=function(...args){if(previous)previous.apply(this,args);handler.apply(this,args);};},setAttribute(){},getAttribute(){return '';},appendChild(e){this.children.push(e);return e;},replaceChildren(){this.children=[];},get options(){return this.children;},querySelectorAll(){return [];},querySelector(){return null;},focus(){},select(){},showModal(){this.open=true;},close(){this.open=false;}});
+ const element=()=>({value:'',textContent:'',innerHTML:'',style:{},dataset:{},children:[],classList:{add(){},remove(){},contains(){return false;}},addEventListener(name,handler){const previous=this['on'+name];this['on'+name]=function(...args){if(previous)previous.apply(this,args);handler.apply(this,args);};},setAttribute(){},getAttribute(){return '';},appendChild(e){this.children.push(e);return e;},replaceChildren(){this.children=[];},get options(){return this.children;},querySelectorAll(){return [];},querySelector(){return null;},focus(){},select(){},click(){this.clicked=true;},remove(){},showModal(){this.open=true;},close(){this.open=false;}});
  for(const match of visible.matchAll(/\bid="([^"]+)"/g))elements.set(match[1],element());
  const groups={'.score-input':Array.from({length:5},element)};
  const document={body:element(),readyState:'loading',getElementById:id=>elements.get(id)||null,createElement:element,createDocumentFragment:element,createTextNode:text=>({textContent:text}),querySelectorAll:s=>groups[s]||[],addEventListener:(name,fn)=>{events[name]=fn;}};
  const window={__SCORING_TOOL_ENABLE_TEST_HOOKS__:true,addEventListener(name,fn){events["window:"+name]=fn;}};
- const c=vm.createContext({document,window,console,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout:()=>1,clearTimeout(){},google:{script:{get run(){const run={withSuccessHandler(fn){this.success=fn;return this;},withFailureHandler(fn){this.failure=fn;return this;}};return new Proxy(run,{get:(o,k)=>k in o?o[k]:payload=>calls.push({method:k,payload,success:o.success,failure:o.failure})});}}}});
+ const c=vm.createContext({document,window,console,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout:()=>1,clearTimeout(){},google:{script:{get run(){const run={withSuccessHandler(fn){this.success=fn;return this;},withFailureHandler(fn){this.failure=fn;return this;}};return new Proxy(run,{get:(o,k)=>k in o?o[k]:(...args)=>calls.push({method:k,payload:args[0],args,success:o.success,failure:o.failure})});}}}});
  const script=html.match(/<script>([\s\S]*?)<\/script>/)[1].replace('window.__scoringToolTestHooks = {','window.__scoringToolTestHooks = {state,els,loadRuleTemplates_,resolveRuleOutputSlots_,loadInitData,saveConfig,markDirty,reviewLabel_,comparisonCard_,handleScoresChanged,finishPendingFeedback_,saveCurrentRow,loadPendingEditFromLocalStorage,loadCurrentTemplateRules,renderRulesSummary,openComparison_,adoptComparison_,');
- vm.runInContext(script.replace('function tokenizeWhenExpr(expr) {','function tokenizeWhenExpr(expr) { window.parseCount=(window.parseCount||0)+1;'),c);return {events,calls,elements,window,storage,h:window.__scoringToolTestHooks};
+ vm.runInContext(script.replace('function tokenizeWhenExpr(expr) {','function tokenizeWhenExpr(expr) { window.parseCount=(window.parseCount||0)+1;'),c);return {events,calls,elements,window,storage,document,c,h:window.__scoringToolTestHooks};
 }
+
+test('scoring settings and template packs download the shared JSON files with server filenames',async()=>{
+ const p=page();p.events.DOMContentLoaded();p.h.state.config={};const blobs=[];
+ p.c.Blob=Blob;p.c.URL={createObjectURL:blob=>{blobs.push(blob);return 'blob:download';},revokeObjectURL(){}};
+ for(const [button,kind] of [['exportConfigBtn','scoring'],['exportTemplatePackBtn','templates']]) {
+  p.elements.get(button).onclick();const request=p.calls.at(-1);assert.equal(request.method,'exportConfigurationFile');assert.equal(request.payload,kind);
+  request.success({filename:'turret-'+kind+'-化学-20261001-153000.json',json:'{"saved":true}'});
+  const link=p.elements.get(kind==='scoring'?'exportResult':'templatePackResult').children.at(-1);assert.equal(link.download,'turret-'+kind+'-化学-20261001-153000.json');assert.equal(link.clicked,true);
+ }
+ assert.equal(await blobs[0].text(),'{"saved":true}');assert.equal(await blobs[1].text(),'{"saved":true}');
+});
+
+test('scoring imports inspect before confirmation and apply only the inspected file revision',()=>{
+ const p=page();p.events.DOMContentLoaded();p.h.state.config={};const prompts=[];
+ p.c.FileReader=class {readAsText(){this.onload({target:{result:'{"config":{}}'}});}};
+ p.window.confirm=text=>{prompts.push(text);return true;};
+ const input=p.elements.get('importConfigFileInput');input.files=[{size:13}];input.onchange({target:input});
+ const inspection=p.calls.at(-1);assert.equal(inspection.method,'inspectConfigurationFile');assert.deepEqual(inspection.args,['scoring','{"config":{}}']);assert.equal(prompts.length,0);
+ inspection.success({summary:'採点設定を置き換えます',warnings:['列を確認してください'],revision:'file-revision'});
+ const apply=p.calls.at(-1);assert.equal(apply.method,'applyConfigurationFile');assert.deepEqual(apply.args,['scoring','{"config":{}}','file-revision']);assert.match(prompts[0],/置き換え/);assert.match(prompts[0],/列を確認/);
+});
+
+test('template import cancellation and oversized file selection do not apply or discard grading edits',()=>{
+ const p=page();p.events.DOMContentLoaded();p.h.state.config={};p.c.FileReader=class {readAsText(){this.onload({target:{result:'{}'}});}};
+ p.window.confirm=()=>false;
+ const input=p.elements.get('importTemplatePackFileInput');input.files=[{size:2}];input.onchange({target:input});const inspection=p.calls.at(-1);
+ assert.equal(inspection.method,'inspectConfigurationFile');assert.equal(inspection.payload,'templates');
+ const n=p.calls.length;inspection.success({summary:'追加します',warnings:[],revision:'file-revision'});assert.equal(p.calls.length,n);
+ input.files=[{size:1048577}];input.onchange({target:input});assert.equal(p.calls.length,n);assert.match(p.elements.get('templatePackResult').textContent,/1MiB/);
+});
 
 function readyPage(){
  const p=page();p.events.DOMContentLoaded();

@@ -1,7 +1,7 @@
 import {adminEnvironment, AdminSheet, validConfig, sourceId} from './admin-environment.mjs';
 export {AdminSheet, sourceId};
-export function scoringEnvironment() {
- const e=adminEnvironment();
+export function scoringEnvironment(options={}) {
+ const e=adminEnvironment(options);
  e.c.Session.getActiveUser=e.c.Session.getEffectiveUser=()=>({getEmail:()=> 'owner@example.com'});
  e.c.ScriptApp.getScriptId=()=> 'scoring-test';
  const books=new Map();

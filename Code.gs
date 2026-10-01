@@ -350,7 +350,7 @@ function scoringEnsureTemplateTable_() {
   return sheet;
 }
 function scoringGetTemplateTable() {assertWebOperator_();return scoringReadTemplateTable_();}
-function scoringWriteTemplateTable_(templates,revision) {
+function scoringWriteTemplateTable_(templates,revision,onBeforeWrite) {
   const normalized=scoringNormalizeTemplates_(templates),validation=scoringValidateTemplateTable_({templates:normalized});
   const errors=validation.issues.filter(function(i){return i.severity==='error';});
   if(errors.length)throw new Error(errors.slice(0,5).map(function(i){return i.message;}).join('\n'));
@@ -361,6 +361,8 @@ function scoringWriteTemplateTable_(templates,revision) {
     const rules=t.rules.length?t.rules:[{conditions:['','','','',''],outputs:['','',''],enabled:true,visible:true}];
     rules.forEach(function(r,i){rows.push([t.name].concat(r.conditions,r.outputs,[r.enabled?'1':'0',r.visible?'1':'0'],i===0?t.domains.map(function(d){return d.join(',');}):['','','','','']));});
   });
+  // 競合検査を通り、実際の変更に入る時点を一括読み込み側へ通知する。
+  if(onBeforeWrite)onBeforeWrite();
   const sheet=scoringEnsureTemplateTable_(),oldRows=sheet.getLastRow();
   if(sheet.getMaxRows()<rows.length)sheet.insertRowsAfter(sheet.getMaxRows(),rows.length-sheet.getMaxRows());
   // 一度の書込みに末尾の消去も含め、先に既存内容を消さない。
@@ -4062,6 +4064,9 @@ function scoringRowCells_(plan,row) {
 
 function scoringLegacyApiExportConfig_() {
   var cfg = scoringLegacyApiGetConfig_();
+  // 未保存時の表示列3件も、読み込み形式の5枠へ空欄で補う。保存先は変更しない。
+  cfg.displayCols = cfg.displayCols.slice();
+  while (cfg.displayCols.length < 5) cfg.displayCols.push('');
   return {
     meta: {
       version: 'v0.1.0',
@@ -4673,6 +4678,15 @@ function scoringLegacyBackupCurrentConfig_() {
  * @return {Object} 保存後の設定
  */
 function scoringLegacyApiImportConfig_(payload) {
+  var imported = scoringParseImportedConfig_(payload);
+  scoringLegacyBackupCurrentConfig_();
+  var props = scoringLegacyGetScriptProps_();
+  props.setProperty('TURRET_SCORING_CONFIG', JSON.stringify(imported));
+  return scoringLegacyApiGetConfig_();
+}
+
+/** 旧採点JSONの検証を、保存せずに実行する。 */
+function scoringParseImportedConfig_(payload) {
   if (!payload || typeof payload !== 'object') {
     throw new Error('インポートデータが不正です');
   }
@@ -4698,10 +4712,8 @@ function scoringLegacyApiImportConfig_(payload) {
   }
 
   scoringLegacyValidateImportedConfigStrict_(imported);
-  scoringLegacyBackupCurrentConfig_();
-  var props = scoringLegacyGetScriptProps_();
-  props.setProperty('TURRET_SCORING_CONFIG', JSON.stringify(imported));
-  return scoringLegacyApiGetConfig_();
+  if (utf8ByteLength_(JSON.stringify(imported)) > 8000) throw new Error('採点設定はUTF-8で8,000バイト以内にしてください。');
+  return imported;
 }
 
 /**

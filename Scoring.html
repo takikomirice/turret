@@ -1047,7 +1047,8 @@ button.help-icon:focus-visible,button.context-help:focus-visible{outline:2px sol
               <span id="settingsStatus" style="font-size:12px; margin-left:8px; color:var(--muted);"></span>
             </div>
             <div style="margin-top:12px; padding-top:12px; border-top:1px solid var(--line-soft);">
-              <div style="font-size:13px; font-weight:900; margin-bottom:8px;">画面上設定のエクスポート/インポート</div>
+              <div style="font-size:13px; font-weight:900; margin-bottom:8px;">採点設定のエクスポート/インポート</div>
+              <p class="muted">保存済みの設定をJSONファイルに保存します。編集中の設定は先に「設定を保存」で保存してください。テンプレート本体は別のテンプレパックに含まれます。</p>
               <div style="display:flex; gap:8px;">
                 <button id="exportConfigBtn" type="button">エクスポート</button>
                 <button id="importConfigBtn" type="button">インポート</button>
@@ -4432,29 +4433,13 @@ function initHelpPopovers_() {
 
         google.script.run
           .withSuccessHandler(function (result) {
-            var json = JSON.stringify(result, null, 2);
-            // クリップボードにコピー
-            var textarea = document.createElement('textarea');
-            textarea.value = json;
-            textarea.style.position = 'fixed';
-            textarea.style.opacity = '0';
-            document.body.appendChild(textarea);
-            textarea.select();
-            try {
-              document.execCommand('copy');
-              els.exportResult.textContent = 'エクスポート完了（クリップボードにコピーしました）';
-              els.exportResult.style.color = 'var(--teal)';
-            } catch (e) {
-              els.exportResult.textContent = 'エクスポート完了（コピーに失敗しました。下記を手動でコピーしてください）:\n\n' + json;
-              els.exportResult.style.color = 'var(--muted)';
-            }
-            document.body.removeChild(textarea);
+            offerConfigurationDownload_(result, els.exportResult);
           })
           .withFailureHandler(function (err) {
             els.exportResult.textContent = 'エクスポートエラー: ' + (err && err.message ? err.message : err);
             els.exportResult.style.color = 'var(--red)';
           })
-          .scoringExportConfig();
+          .exportConfigurationFile('scoring');
       }
 
       function showTemplatePackResult_(text, color) {
@@ -4464,21 +4449,14 @@ function initHelpPopovers_() {
         els.templatePackResult.style.color = color || 'var(--muted)';
       }
 
-      function copyTextForExport_(text) {
-        var textarea = document.createElement('textarea');
-        textarea.value = text;
-        textarea.style.position = 'fixed';
-        textarea.style.opacity = '0';
-        document.body.appendChild(textarea);
-        textarea.select();
-        try {
-          document.execCommand('copy');
-          return true;
-        } catch (e) {
-          return false;
-        } finally {
-          document.body.removeChild(textarea);
-        }
+      function offerConfigurationDownload_(result, container) {
+        if (container.downloadUrl) URL.revokeObjectURL(container.downloadUrl);
+        var url = URL.createObjectURL(new Blob([result.json], {type:'application/json;charset=utf-8'}));
+        container.downloadUrl = url;
+        container.textContent = 'JSONを書き出しました。自動で保存されない場合はリンクから保存してください。 ';
+        container.style.display = 'block'; container.style.color = 'var(--teal)';
+        var link = document.createElement('a'); link.href = url; link.download = result.filename; link.textContent = result.filename;
+        container.appendChild(link); link.click();
       }
 
       function exportTemplatePack() {
@@ -4486,17 +4464,12 @@ function initHelpPopovers_() {
 
         google.script.run
           .withSuccessHandler(function (result) {
-            var json = JSON.stringify(result, null, 2);
-            if (copyTextForExport_(json)) {
-              showTemplatePackResult_('テンプレパックのエクスポート完了（クリップボードにコピーしました）', 'var(--teal)');
-            } else {
-              showTemplatePackResult_('テンプレパックのエクスポート完了（コピーに失敗しました。下記を手動でコピーしてください）:\n\n' + json, 'var(--muted)');
-            }
+            offerConfigurationDownload_(result, els.templatePackResult);
           })
           .withFailureHandler(function (err) {
             showTemplatePackResult_('テンプレパックのエクスポートエラー: ' + (err && err.message ? err.message : err), 'var(--red)');
           })
-          .scoringExportTemplatePack();
+          .exportConfigurationFile('templates');
       }
 
       function ensureRuleSheetsFromSettings_() {
@@ -4523,90 +4496,40 @@ function initHelpPopovers_() {
       }
 
       function handleImportConfigFile_(ev) {
-        var file = ev && ev.target && ev.target.files && ev.target.files[0] ? ev.target.files[0] : null;
-        if (!file) return;
-
-        var reader = new FileReader();
-        reader.onload = function (e) {
-          var text = String((e && e.target && e.target.result) || '');
-          var payload = null;
-          try {
-            payload = JSON.parse(text);
-          } catch (err) {
-            els.exportResult.textContent = 'インポートエラー: JSONの形式が不正です';
-            els.exportResult.style.display = 'block';
-            els.exportResult.style.color = 'var(--red)';
-            return;
-          }
-
-          if (!window.confirm('現在の画面上設定をインポート内容で上書きします（検証に通った場合のみ反映）。続行しますか？')) {
-            return;
-          }
-
-          els.exportResult.textContent = 'インポート中...';
-          els.exportResult.style.display = 'block';
-          els.exportResult.style.color = 'var(--muted)';
-
-          if (!preserveCurrentEdit_()) return;
-          google.script.run
-            .withSuccessHandler(function () {
-              els.exportResult.textContent = 'インポート完了';
-              els.exportResult.style.color = 'var(--teal)';
-              initSheetsAndConfig();
-            })
-            .withFailureHandler(function (err2) {
-              els.exportResult.textContent = 'インポートエラー: ' + (err2 && err2.message ? err2.message : err2);
-              els.exportResult.style.color = 'var(--red)';
-            })
-            .scoringImportConfig(payload);
-        };
-        reader.onerror = function () {
-          els.exportResult.textContent = 'インポートエラー: ファイルを読み込めませんでした';
-          els.exportResult.style.display = 'block';
-          els.exportResult.style.color = 'var(--red)';
-        };
-        reader.readAsText(file, 'UTF-8');
+        importConfigurationFile_(ev, 'scoring', els.exportResult, initSheetsAndConfig);
       }
 
       function handleImportTemplatePackFile_(ev) {
+        importConfigurationFile_(ev, 'templates', els.templatePackResult, function () {
+          loadRuleTemplates_(state.config && state.config.ruleTemplateId || '');
+        });
+      }
+
+      /** 管理画面と同じ検査・適用処理を使い、確認した内容だけを読み込む。 */
+      function importConfigurationFile_(ev, kind, container, onApplied) {
         var file = ev && ev.target && ev.target.files && ev.target.files[0] ? ev.target.files[0] : null;
         if (!file) return;
-
+        function show(text, color) { container.textContent = text; container.style.display = 'block'; container.style.color = color || 'var(--muted)'; }
+        function failed(error) { show('インポートエラー: ' + (error && error.message ? error.message : error), 'var(--red)'); }
+        ev.target.value = '';
+        if (file.size > 1048576) { failed('設定ファイルは1MiB以下のJSONを選んでください。'); return; }
+        show('設定ファイルを確認中...');
         var reader = new FileReader();
         reader.onload = function (e) {
           var text = String((e && e.target && e.target.result) || '');
-          var payload = null;
-          try {
-            payload = JSON.parse(text);
-          } catch (err) {
-            showTemplatePackResult_('テンプレパックのインポートエラー: JSONの形式が不正です', 'var(--red)');
-            return;
-          }
-
-          if (!window.confirm('テンプレパックを採点テンプレに追加します。同名のテンプレートがある場合は取り込みません。続行しますか？')) {
-            return;
-          }
-
-          showTemplatePackResult_('テンプレパックをインポート中...', 'var(--muted)');
-
           google.script.run
-            .withSuccessHandler(function (res) {
-              var imported = res && res.imported ? res.imported : { templates: 0, rules: 0 };
-              showTemplatePackResult_(
-                'テンプレパックのインポート完了: テンプレート ' + imported.templates + ' 件、ルール ' + imported.rules + ' 件',
-                'var(--teal)'
-              );
-              var currentTemplateId = state.config && state.config.ruleTemplateId ? state.config.ruleTemplateId : '';
-              loadRuleTemplates_(currentTemplateId);
+            .withSuccessHandler(function (inspection) {
+              var message = inspection.summary + ((inspection.warnings || []).length ? '\n\n確認事項：\n' + inspection.warnings.join('\n') : '');
+              if (!window.confirm(message + '\n\nこの内容を適用しますか？')) { show('読み込みを取り消しました。'); return; }
+              if (!preserveCurrentEdit_()) { failed('未保存の採点を保持できません。先に採点を保存してください。'); return; }
+              show('インポート中...');
+              google.script.run.withSuccessHandler(function (result) {
+                show(result.message || 'インポート完了', 'var(--teal)'); onApplied();
+              }).withFailureHandler(failed).applyConfigurationFile(kind, text, inspection.revision);
             })
-            .withFailureHandler(function (err2) {
-              showTemplatePackResult_('テンプレパックのインポートエラー: ' + (err2 && err2.message ? err2.message : err2), 'var(--red)');
-            })
-            .scoringImportTemplatePack(payload);
+            .withFailureHandler(failed).inspectConfigurationFile(kind, text);
         };
-        reader.onerror = function () {
-          showTemplatePackResult_('テンプレパックのインポートエラー: ファイルを読み込めませんでした', 'var(--red)');
-        };
+        reader.onerror = function () { failed('ファイルを読み込めませんでした'); };
         reader.readAsText(file, 'UTF-8');
       }
 
