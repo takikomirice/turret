@@ -16,7 +16,7 @@ test('migration verifies internal settings before retiring all three tabs and pr
 });
 test('new settings and initialization never generate settings tabs',()=>{
  const e=adminEnvironment({config:null});e.c.initializeSheetsUnlocked_();e.c.saveConfig_(e.c.getConfig_());
- assert.deepEqual([...e.sheets.keys()].sort(),['クラス一覧','生徒一覧'].sort());
+ assert.deepEqual([...e.sheets.keys()].sort(),['クラス一覧','生徒一覧','採点テンプレ','対応表','送信シート','エラー','フォーム管理'].sort());
 });
 test('migration failure retains every legacy tab and retries safely',()=>{
  const e=adminEnvironment();legacy(e);const save=e.c.saveConfig_;
@@ -62,4 +62,15 @@ test('stale console revision cannot overwrite settings saved in another console'
  e.c.saveSetupSection('template',{messageTemplate:'first'},revision);
  assert.throws(()=>e.c.saveSetupSection('template',{messageTemplate:'stale'},revision),/変更/);
  assert.equal(e.c.getConfig_().messageTemplate,'first');
+});
+
+
+test('prepare sheets creates template, mapping and error headers and preserves their populated rows on repeat',()=>{
+ const e=adminEnvironment();e.c.initializeSheetsUnlocked_();
+ assert.deepEqual(e.sheets.get('採点テンプレ').rows[0].slice(0,9),['テンプレート名','枠1','枠2','枠3','枠4','枠5','出力1','出力2','出力3']);
+ assert.deepEqual(e.sheets.get('対応表').rows[0],['元SS_ID','元スプシ名','元シート名','クラス名','courseId','メモ']);
+ assert.equal(e.sheets.get('エラー').rows[0][5],'エラー種別');
+ const before={};for(const name of ['クラス一覧','生徒一覧','採点テンプレ','対応表','エラー']){e.sheets.get(name).rows.push(['既存データ']);before[name]=plain(e.sheets.get(name).rows);}
+ e.c.runAdminAction('initialize',null,e.c.getConfigRevision_(e.c.getConfig_()));
+ for(const name of Object.keys(before))assert.deepEqual(plain(e.sheets.get(name).rows),before[name]);assert.equal(e.isLocked(),false);
 });

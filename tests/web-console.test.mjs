@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
+import fs from 'node:fs';
 import {adminEnvironment,AdminSheet} from './helpers/admin-environment.mjs';
 
 test('web opens only the stored operation; bound copy stays on its own workbook',()=>{
@@ -71,10 +72,46 @@ for(const url of ['https://script.google.com/macros/s/test/exec',null])test('web
  if(url){assert.ok(content.includes(url));assert.match(content,/readonly/);assert.match(content,/URLをコピー/);assert.match(content,/target="_blank"/);assert.match(content,/select\(\)/);}
  else {assert.match(content,/デプロイ/);assert.doesNotMatch(content,/href="null"/);}
 });
-test('spreadsheet menu has one web console entry point',()=>{
+test('spreadsheet menu opens both independent web screens',()=>{
  const {c}=adminEnvironment();const entries=[];const menu={addItem(label,handler){entries.push([label,handler]);return this;},addToUi(){}};
  c.SpreadsheetApp.getUi=()=>({createMenu:()=>menu});c.onOpen();
- assert.deepEqual(entries,[['管理画面を開く','connectWebConsole']]);
+ assert.deepEqual(entries,[['管理画面を開く','connectWebConsole'],['採点画面を開く','connectScoringConsole'],['採点テンプレ作成画面へ','openScoringRuleEditor']]);
+});
+
+for(const [page,file] of [[undefined,'Setting'],['settings','Setting'],['scoring','Scoring'],['templates','Scoring'],['../../Code','Setting']])test('web routing validates page and keeps operator authorization: '+page,()=>{
+ const {c}=adminEnvironment();c.Session.getActiveUser=c.Session.getEffectiveUser=()=>({getEmail:()=> 'owner@example.com'});
+ c.ScriptApp.getScriptId=()=> 'current';c.ScriptApp.getService=()=>({getUrl:()=>null});
+ const html={content:fs.readFileSync(file+'.html','utf8'),getContent(){return this.content;},setContent(value){this.content=value;return this;},setTitle(){return this;},addMetaTag(){return this;}};
+ c.HtmlService={createHtmlOutputFromFile:name=>{if(name==='Setting'&&file==='Scoring')return {getContent:()=>fs.readFileSync('Setting.html','utf8')};assert.equal(name,file);return html;}};
+ assert.equal(c.doGet({parameter:{page}}),html);
+ c.Session.getActiveUser=()=>({getEmail:()=> 'other@example.com'});assert.throws(()=>c.doGet({parameter:{page}}),/本人/);
+});
+
+test('scoring and standalone template editor share HTML and palette without a sidebar',()=>{
+ const {c}=adminEnvironment();c.ScriptApp.getScriptId=()=> 'current';
+ c.Session.getActiveUser=c.Session.getEffectiveUser=()=>({getEmail:()=> 'owner@example.com'});
+ c.HtmlService={createHtmlOutputFromFile:name=>({content:fs.readFileSync(name+'.html','utf8'),getContent(){return this.content;},setContent(value){this.content=value;return this;},setTitle(){return this;}})};
+ const theme=fs.readFileSync('Setting.html','utf8').match(/<style id="app-theme">[\s\S]*?<\/style>/)[0];
+ function check(html){
+  const content=html.getContent(),builder=content.match(/<template id="ruleBuilderTemplate">([\s\S]*?)<\/template>/)[1];
+  assert.equal(content.split(theme).length-1,2);
+  assert.ok(builder.includes(theme));
+  assert.match(content,/<head>\s*<style id="app-theme">/);
+ }
+ check(c.createAppHtmlOutput_('Scoring'));
+ const dedicated=c.createAppHtmlOutput_('Templates').getContent();
+ assert.equal(dedicated.split(theme).length-1,1);assert.match(dedicated,/採点テンプレ作成/);assert.match(dedicated,/id="templateSelect"/);assert.doesNotMatch(dedicated,/<iframe|id="sheetSelect"|rule-sidebar/);
+ assert.doesNotMatch(fs.readFileSync('Administration.gs','utf8'),/showSidebar/);
+ c.HtmlService.createHtmlOutputFromFile=()=>({getContent:()=>'<head></head>'});
+ assert.throws(()=>c.createAppHtmlOutput_('Scoring'),/共通配色/);
+});
+
+test('scoring menu preserves the verified deployment and adds the scoring route',()=>{
+ const {c}=adminEnvironment();let html='';c.ScriptApp.getScriptId=()=> 'current';
+ c.ScriptApp.getService=()=>({getUrl:()=> 'https://script.google.com/macros/s/test/exec'});c.rememberWebConsoleUrl_();
+ c.HtmlService={createHtmlOutput:value=>{html=value;return {setWidth(){return this;},setHeight(){return this;}};}};
+ c.SpreadsheetApp.getUi=()=>({showModelessDialog(){}});c.connectScoringConsole();
+ assert.match(html,/\/exec\?page=scoring/);assert.match(html,/採点画面/);
 });
 
 for(const allowed of [true,false])test('copy URL works or leaves selected text with a keyboard fallback: '+allowed,async()=>{
@@ -145,4 +182,15 @@ for(const outcome of ['opened','blocked','error'])test('menu automatically opens
  assert.equal(attempts,1);
  if(outcome==='opened'){assert.equal(popup.location.href,input.value);assert.equal(popup.opener,null);assert.equal(closed,1);}
  else {assert.equal(closed,0);assert.match(status.textContent,/リンク/);assert.match(html,/target="_blank"/);assert.match(html,/URLをコピー/);}
+});
+
+
+test('template menu launches the verified web editor route with a usable popup fallback',()=>{
+ const {c}=adminEnvironment();let html='',label='';c.ScriptApp.getScriptId=()=> 'current';
+ c.ScriptApp.getService=()=>({getUrl:()=> 'https://script.google.com/macros/s/test/exec'});c.rememberWebConsoleUrl_();
+ c.HtmlService={createHtmlOutput:value=>{html=value;return {setWidth(){return this;},setHeight(){return this;}};}};
+ c.SpreadsheetApp.getUi=()=>({showModelessDialog(_,title){label=title;}});c.openScoringRuleEditor();
+ assert.equal(label,'採点テンプレ作成画面');assert.match(html,/exec\?page=templates/);assert.doesNotMatch(html,/docs\.google\.com|↗/);
+ const status={};vm.runInNewContext(html.match(/<script>([\s\S]*?)<\/script>/)[1],{window:{open:()=>null},document:{getElementById:()=>status}});
+ assert.match(status.textContent,/採点テンプレ作成画面/);
 });

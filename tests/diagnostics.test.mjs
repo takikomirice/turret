@@ -54,7 +54,7 @@ test('pending evaluation renders stored converted values, not a changed conversi
     ['元SS_ID','元シート名','元行番号','メールアドレス','名前','処理状態','点数'],
     [sourceId,'回答1',2,'student@example.invalid','生徒','','以前の評価']
   ]));
-  const r=e.run();assert.equal(r.counts.eligible,1);assert.equal(r.samples[0].stage,'本文生成待ち');assert.match(r.samples[0].body,/評価：以前の評価/);
+  const r=e.run();assert.equal(r.counts.eligible,1);assert.equal(r.samples[0].stage,'旧評価データの移行待ち');assert.match(r.samples[0].body,/評価：以前の評価/);
 });
 
 test('unknown template fields and stale settings cannot be reported as valid',()=>{
@@ -71,13 +71,30 @@ test('diagnosis counts 500 candidates but bounds returned personal samples',()=>
 });
 
 test('diagnosis enforces runtime column order and all mapping columns',()=>{
-  const e=environment(),headers=plain(e.c.getConfiguredEvalHeaders_(e.c.getConfig_()));
+  const e=environment(),headers=plain(e.c.getConfiguredSendHeaders_(e.c.getConfig_()));
   [headers[0],headers[1]]=[headers[1],headers[0]];
-  e.sheets.set('評価データ',new AdminSheet('評価データ',[headers]));
+  e.sheets.set('送信シート',new AdminSheet('送信シート',[headers,['保存行']]));
   assert.equal(e.run().status,'error');
-  e.sheets.delete('評価データ');
+  e.sheets.delete('送信シート');
   e.sheets.set('対応表',new AdminSheet('対応表',[['元SS_ID','元シート名','courseId'],[sourceId,'回答1','course-1']]));
   assert.equal(e.run().status,'error');
+});
+
+test('empty send sheet from initial setup can adapt to later settings without a false diagnostic error',()=>{
+  const e=environment();e.c.ensureSendSheet_(e.c.buildDefaultConfig_());
+  const before=e.snapshot(),result=e.run();
+  assert.equal(result.status,'ok');assert.equal(result.counts.eligible,1);
+  assert.ok(result.checks.some(c=>/送信シート/.test(c.title)&&/準備/.test(c.detail)));
+  assert.equal(e.snapshot(),before);
+});
+
+test('diagnosis rejects ambiguous legacy field mappings before migration',()=>{
+  const e=environment(),config=e.c.getConfig_();
+  e.sheets.set('評価データ',new AdminSheet('評価データ',[plain(e.c.getConfiguredEvalHeaders_(config)),[sourceId,'回答1',2,'student@example.invalid','生徒','','A']]));
+  config.fields.push({...config.fields[0],key:'raw',sendHeader:'元点数',type:'text'});
+  e.props.set('APP_CONFIG',JSON.stringify(config));
+  const result=e.run();assert.equal(result.status,'error');
+  assert.ok(result.checks.some(c=>/旧評価データ/.test(c.title)&&/重複/.test(c.detail)));
 });
 
 test('diagnosis matches last-row numbering and deduplicates pending evaluations',()=>{

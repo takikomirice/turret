@@ -28,7 +28,7 @@ function pipeline(count = 500, { uncachedStatusUpdates = false } = {}) {
   };
   c.SpreadsheetApp.openById = id => {
     assert.equal(id, config.formSources[0].id); calls.opens++;
-    return { getSheets: () => [source], getSheetByName: () => missing.sheet ? null : source };
+    return { getSheets: () => missing.sheet ? [] : [source], getSheetByName: () => missing.sheet ? null : source };
   };
   c.SpreadsheetApp.flush = () => { calls.flushes++; };
   c.Utilities = { sleep() {} };
@@ -53,9 +53,7 @@ function pipeline(count = 500, { uncachedStatusUpdates = false } = {}) {
 
 test('500 rows retain recipients, configured content and every send checkpoint with one source open per phase', t => {
   const e = pipeline();
-  e.c.importFromFormsToEval();
-  const afterImport = { opens: e.calls.opens, headers: e.calls.headers };
-  e.c.evalToSendSheet();
+  e.c.prepareSendData();
   const afterPrepare = { opens: e.calls.opens, headers: e.calls.headers };
   e.c.sendMessages();
   assert.equal(e.calls.posts.length, 500);
@@ -68,27 +66,26 @@ test('500 rows retain recipients, configured content and every send checkpoint w
   const send = e.sheets.get('送信シート'), statusColumn = send.rows[0].indexOf('送信状態');
   assert.ok(send.rows.slice(1).every(row => row[statusColumn] === '済'));
   assert.ok(e.source.rows.slice(1).every(row => row[2] === '済'));
-  assert.equal(e.calls.flushes, 1005, '1000 send flushes, 2 batch commits, 3 lock-finally flushes remain');
-  assert.deepEqual(afterImport, { opens: 1, headers: 0 });
-  assert.deepEqual(afterPrepare, { opens: 2, headers: 1 });
-  assert.equal(e.calls.opens, 3);
+  assert.equal(e.calls.flushes, 1003, '1000 send flushes, 1 batch commit, 2 lock-finally flushes remain');
+  assert.deepEqual(afterPrepare, { opens: 1, headers: 1 });
+  assert.equal(e.calls.opens, 2);
   assert.equal(e.calls.headers, 2);
   const baseline = pipeline(500, { uncachedStatusUpdates: true });
-  baseline.c.importFromFormsToEval(); baseline.c.evalToSendSheet(); baseline.c.sendMessages();
-  assert.equal(baseline.calls.opens, 1501);
-  assert.equal(baseline.calls.headers, 1500);
+  baseline.c.prepareSendData(); baseline.c.sendMessages();
+  assert.equal(baseline.calls.opens, 1002);
+  assert.equal(baseline.calls.headers, 1002);
   assert.deepEqual(e.calls.posts, baseline.calls.posts, 'cache changes I/O counts without changing content or recipients');
   assert.equal(e.calls.checkpoints, baseline.calls.checkpoints);
   assert.equal(e.calls.flushes, baseline.calls.flushes);
-  t.diagnostic('500 rows, one source: cached opens=3/header-only reads=2; uncached opens=1501/header-only reads=1500; both posts=500/checkpoints=500/flushes=1005. No elapsed-time claim.');
+  t.diagnostic('500 rows, one source: cached opens=2/header-only reads=2 (including default lesson-date detection); uncached opens=1002/header-only reads=1002; both posts=500/checkpoints=500/flushes=1003. No elapsed-time claim.');
   e.c.sendMessages();
   assert.equal(e.calls.posts.length, 500, 'completed rows are not resent');
 });
 
 test('missing email during preparation creates an actionable error record', () => {
-  const e = pipeline(1); e.c.importFromFormsToEval();
-  const evaluation = e.sheets.get('評価データ');
-  evaluation.rows[1][evaluation.rows[0].indexOf('メールアドレス')] = '';
+  const e = pipeline(1);
+  const evaluation = sheet([plain(e.c.getConfiguredEvalHeaders_(e.config)),[e.config.formSources[0].id,'Responses 1',2,'','生徒1','','優']]);
+  e.sheets.set('評価データ',evaluation);
   e.c.evalToSendSheet();
   assert.equal(evaluation.rows[1][evaluation.rows[0].indexOf('処理状態')], '準備×');
   assert.ok(e.sheets.get('エラー').rows.some(row => row[5] === 'CONFIG' && /メール/.test(row[6])));

@@ -134,7 +134,7 @@ test('background rerender keeps typed input, focus, selection, expanded details 
 test('console is modeless so sheet tables can be edited', () => {
   const code = ['Code.gs', 'Administration.gs'].filter(existsSync).map(file => readFileSync(file, 'utf8')).join('\n');
   assert.match(code, /showModelessDialog\(/);
-  assert.doesNotMatch(code, /showSidebar\(/);
+  assert.doesNotMatch(code.match(/function connectWebScreen_\([^]*?\n\}/)[0], /showSidebar\(/);
   assert.equal(existsSync('Sidebar.html'), false);
 });
 test('guided console offers every step, local JSON files, and accessible confirmation', () => {
@@ -207,6 +207,61 @@ function interactiveModel() {
  `,c);
  return c;
 }
+
+test('manual return has prepare and send actions without an evaluation step',()=>{
+ const c=model();
+ vm.runInContext("state.data={config:{},counts:{evalRows:0,pendingSend:0,reviewSend:0},sheets:[]};",c);
+ const markup=vm.runInContext('renderManual()',c);
+ assert.match(markup,/送信データを準備/);assert.match(markup,/data-action="prepare"/);
+ assert.doesNotMatch(markup,/data-action="import"|評価データ/);
+});
+
+test('legacy migration is shown only while old evaluation rows exist',()=>{
+ const c=model();
+ vm.runInContext("state.data={config:{},counts:{evalRows:2,legacyPending:1,pendingSend:0,reviewSend:0},sheets:[]};",c);
+ const markup=vm.runInContext('renderManual()',c);
+ assert.match(markup,/旧評価データ/);assert.match(markup,/未移行/);
+});
+
+test('paged return history renders the server page and actions for only the displayed records',()=>{
+ const c=interactiveModel();
+ vm.runInContext(`acceptFormConsoleData({classes:[],defaults:{},records:[{id:'last',kind:'announcement',title:'最終履歴',postId:'p',stage:'published'}],returnHistory:{page:2,pageSize:50,total:101}})`,c);
+ const rendered=vm.runInContext("renderFormRecords('returns')",c);
+ assert.match(rendered,/返却 101〜101 \/ 101件/);assert.match(rendered,/最終履歴/);
+ assert.match(rendered,/data-form-command="delete"/);assert.match(rendered,/data-form-command="next-page" disabled/);
+ assert.equal(vm.runInContext('state.formPage',c),2);
+});
+test('history navigation requests a page and commits it only on success while keeping drafts',async()=>{
+ const c=interactiveModel();
+ vm.runInContext(`
+ state.panel='maintenance';state.formDraft={description:'入力保持'};renderUpdatedForms=()=>{};
+ acceptFormConsoleData({records:[{id:'old',kind:'announcement'}],returnHistory:{page:0,pageSize:50,total:120}});
+ let resolvePage;rpc=(method,...args)=>{calls.push({method,args});return new Promise(resolve=>{resolvePage=resolve;});};
+ `,c);
+ const pending=vm.runInContext("formCommand('next-page')",c);
+ assert.equal(vm.runInContext('state.formPage',c),0);assert.equal(vm.runInContext('state.forms.records[0].id',c),'old');
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls)',c)),[{method:'getFormConsoleData',args:[{returnPage:1}]}]);
+ vm.runInContext("resolvePage({records:[{id:'new',kind:'announcement'}],returnHistory:{page:1,pageSize:50,total:120}})",c);await pending;
+ assert.equal(vm.runInContext('state.formPage',c),1);assert.equal(vm.runInContext('state.formDraft.description',c),'入力保持');
+ vm.runInContext("rpc=async()=>{throw Error('取得失敗');}",c);await vm.runInContext("formCommand('previous-page')",c);
+ assert.equal(vm.runInContext('state.formPage',c),1);assert.equal(vm.runInContext('state.forms.records[0].id',c),'new');
+ assert.match(vm.runInContext('messages.at(-1)[0]',c),/取得失敗/);assert.equal(vm.runInContext('state.busy',c),false);
+});
+test('refresh and background loading retain the requested history page without coupling the admin and automation endpoints',async()=>{
+ const c=interactiveModel();
+ vm.runInContext(`
+ state.panel='maintenance';
+ renderUpdatedForms=()=>{};
+ acceptFormConsoleData({records:[],returnHistory:{page:2,pageSize:50,total:101}});
+ rpc=async(method,...args)=>{calls.push({method,args});if(method==='getAdminConsoleData')return state.data;if(method==='getAutomationState')return state.automation;return {records:[],returnHistory:{page:1,pageSize:50,total:100}};};
+ `,c);
+ await vm.runInContext('refresh(false)',c);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls)',c)),[
+  {method:'getAdminConsoleData',args:[]},{method:'getAutomationState',args:[]},{method:'getFormConsoleData',args:[{returnPage:2}]}
+ ]);
+ await vm.runInContext('refreshFormsInBackground()',c);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls.at(-1))',c)),{method:'getFormConsoleData',args:[{returnPage:1}]});
+});
 
 test('new template autofills its URL while preserving form inputs and unrelated drafts',async()=>{
  const c=interactiveModel();
@@ -302,6 +357,64 @@ test('stop works with unfinished setup and unrelated edits and explicitly includ
  await vm.runInContext('configureSchedule(true)',c);
  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls[0])',c)),{method:'stopAutomation',args:['r1',true]});
  assert.equal(vm.runInContext("draftValue('template').messageTemplate",c),'pending');
+});
+
+for(const panel of ['manual','settings','automation'])test('refresh skips cached form details outside their visible panels: '+panel,async()=>{
+ const c=interactiveModel();c.testPanel=panel;
+ vm.runInContext(`state.panel=testPanel==='automation'?'setup':testPanel;state.step='automation';
+ state.data.progress.find(p=>p.id==='forms').state='pending';
+ acceptFormConsoleData({records:[],setupProgress:{forms:{id:'forms',state:'complete'}}});state.formsError='古い取得エラー';`,c);
+ await vm.runInContext('refresh(false)',c);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls.map(c=>c.method))',c)),['getAdminConsoleData','getAutomationState']);
+ assert.equal(vm.runInContext("visibleProgress('forms').state",c),'pending');
+ assert.equal(vm.runInContext('state.formsStale',c),true);
+});
+
+for(const step of ['forms','publish'])test('refresh re-fetches cached form details when their step is visible: '+step,async()=>{
+ const c=interactiveModel();c.testStep=step;
+ vm.runInContext(`state.panel='setup';state.step=testStep;renderUpdatedForms=()=>{};
+ acceptFormConsoleData({records:[]});rpc=async(method,...args)=>{calls.push({method,args});return method==='getAdminConsoleData'?state.data:method==='getAutomationState'?state.automation:{records:[],setupProgress:{forms:{state:'complete'}}};};`,c);
+ await vm.runInContext('refresh(false)',c);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(calls.map(c=>c.method))',c)),['getAdminConsoleData','getAutomationState','getFormConsoleData']);
+ assert.equal(vm.runInContext('state.formsStale',c),false);
+});
+
+for(const failure of ['getAdminConsoleData','getAutomationState'])test('confirmed stop is retained when subsequent refresh fails: '+failure,async()=>{
+ const c=interactiveModel();c.failedMethod=failure;
+ vm.runInContext(`state.automation.enabled=true;state.automation.revision='auto-before';
+ putDraft('template',{messageTemplate:'入力保持'});putDraft('automation',{importHour:4,deliveryHour:8,reminderHour:16,reminderEnabled:false});
+ rpc=async(method,...args)=>{calls.push({method,args});if(method==='stopAutomation')return {...state.automation,enabled:false,revision:'auto-stopped',triggers:[]};if(method===failedMethod)throw Error('読込失敗');return method==='getAdminConsoleData'?state.data:state.automation;};`,c);
+ await vm.runInContext('configureSchedule(true)',c);
+ assert.equal(vm.runInContext('state.automation.enabled',c),false);
+ assert.equal(vm.runInContext('state.automation.revision',c),'auto-stopped');
+ assert.equal(vm.runInContext("draftRevision('automation')",c),'auto-stopped');
+ assert.equal(vm.runInContext("draftValue('template').messageTemplate",c),'入力保持');
+ assert.match(vm.runInContext('messages.at(-1)[0]',c),/自動実行を停止しました。[\s\S]*停止後の画面更新に失敗/);
+ assert.doesNotMatch(vm.runInContext('messages.at(-1)[0]',c),/再実行してください/);
+ assert.equal(vm.runInContext("calls.filter(c=>c.method==='stopAutomation').length",c),1);
+ assert.equal(vm.runInContext('state.busy',c),false);
+});
+
+test('failed stop never reports success or starts a general refresh',async()=>{
+ const c=interactiveModel();
+ vm.runInContext("state.automation.enabled=true;rpc=async(method,...args)=>{calls.push({method,args});throw Error('停止の結果を取得できません');};",c);
+ await vm.runInContext('configureSchedule(true)',c);
+ assert.equal(vm.runInContext('state.automation.enabled',c),true);
+ assert.doesNotMatch(vm.runInContext('JSON.stringify(messages)',c),/停止しました/);
+ assert.equal(vm.runInContext('calls.length',c),1);
+});
+
+test('stop result is shown before refresh finishes and remaining legacy triggers stay visible',async()=>{
+ const c=interactiveModel();
+ vm.runInContext(`state.automation.enabled=true;state.automation.legacyCount=1;let finishRefresh;
+ rpc=async()=>({...state.automation,enabled:false,revision:'stopped',warnings:['旧トリガーの削除失敗']});
+ refresh=()=>new Promise(resolve=>{finishRefresh=resolve;});`,c);
+ const pending=vm.runInContext('configureSchedule(true)',c);
+ await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(vm.runInContext('state.automation.enabled',c),false);
+ assert.match(vm.runInContext('messages.at(-1)[0]',c),/以前の処理のトリガーが残っています/);
+ vm.runInContext('finishRefresh()',c);await pending;
+ assert.equal(vm.runInContext('messages.at(-1)[1]',c),'error');
 });
 
 test('automation start needs confirmation and carries editable hours',async()=>{
@@ -585,7 +698,7 @@ test('sources use two-row URL entries and single-line email entries',()=>{
 
 test('top settings panel owns export and import; management keeps only operational controls',()=>{
  const c=interactiveModel();
- assert.match(html,/<div class="header-tools"><button type="button" data-panel="settings">設定を保存・出力/);
+ assert.match(html,/<div class="header-tools">[\s\S]*?<button type="button" data-panel="settings">設定を保存・出力/);
  const markup=vm.runInContext('renderSettings()',c);
  assert.match(markup,/data-command="save-all"/);assert.match(markup,/data-command="export"/);assert.match(markup,/id="profileFile"/);
  assert.doesNotMatch(vm.runInContext('renderMaintenance()',c),/profileFile|data-command="export"|MAINTENANCE/);
@@ -634,9 +747,9 @@ test('removing last field conversion never falls back to common mapping',async()
 test('compact tokens offer keyboard-accessible explanation buttons',()=>{
  const c=interactiveModel();
  const markup=vm.runInContext('renderTemplate()',c);
- assert.match(markup,/data-token-info="student_name" aria-label="生徒の名前の説明"/);
+ assert.match(markup,/data-help-title="生徒の名前"[^>]*aria-label="生徒の名前の説明"/);
  assert.match(markup,/<strong>\{student_name\}<\/strong>/);
- assert.match(html,/<dialog id="tokenInfoDialog"/);
+ assert.match(html,/<div id="contextTooltip"[^>]*role="tooltip"/);
  assert.doesNotMatch(markup,/<small>.*を挿入/);
 });
 

@@ -14,7 +14,7 @@ export const validConfig = () => ({
 });
 
 export class AdminSheet {
-  constructor(name, rows = []) { this.name = name; this.rows = rows.map(row => [...row]); this.maxColumns = 26; this.sheetId = nextSheetId++; }
+  constructor(name, rows = []) { this.name = name; this.rows = rows.map(row => [...row]); this.notes=[]; this.maxColumns = 26; this.sheetId = nextSheetId++; }
   getSheetId() { return this.sheetId; }
   getName() { return this.name; }
   getLastRow() { let n = this.rows.length; while(n && this.rows[n - 1].every(v => v === '' || v == null)) n--; return n; }
@@ -27,7 +27,10 @@ export class AdminSheet {
     const range = {
       getValues: read, getDisplayValues: () => read().map(r=>r.map(String)), getValue: () => read()[0][0],
       getFormulas: () => read().map(r=>r.map(v=>typeof v==='string' && v.startsWith('=') ? v : '')),
-      getNotes: () => read().map(r=>r.map(()=>'')), setNotes: () => range,
+      getColumn:()=>col, getNumColumns:()=>width,
+      getNote:()=>this.notes[row-1]?.[col-1] || '',
+      setNote:value=>{this.notes[row-1]??=[];this.notes[row-1][col-1]=value;return range;},
+      getNotes: () => Array.from({length:height},(_,y)=>Array.from({length:width},(_,x)=>this.notes[row+y-1]?.[col+x-1] || '')), setNotes: () => range,
       setValue: value => range.setValues([[value]]),
       setValues: values => { this.beforeWrite?.(values); values.forEach((r,y)=>r.forEach((value,x)=>{this.rows[row+y-1] ??=[]; this.rows[row+y-1][col+x-1]=value;})); return range; },
       clearContent: () => range.setValues(Array.from({length:height},()=>Array(width).fill(''))),
@@ -42,7 +45,10 @@ export class AdminSheet {
   deleteRows(row,count) { this.rows.splice(row-1,count); return this; }
   deleteColumns(start,count) { this.maxColumns-=count; return this; }
   insertColumnsAfter(start,count) { this.maxColumns+=count; return this; }
+  moveColumns(range,to) {const from=range.getColumn()-1,width=this.getLastColumn();for(const rows of [this.rows,this.notes])for(const row of rows){while(row.length<width)row.push('');const [value]=row.splice(from,1);row.splice(to-1-(from<to-1?1:0),0,value);}return this;}
   setFrozenRows() { return this; }
+  setColumnWidths() { return this; }
+  insertRowsAfter(start,count) { return this; }
   autoResizeColumns() { return this; }
   hideSheet() { this.hidden=true; return this; }
   showSheet() { this.hidden=false; return this; }
@@ -68,10 +74,11 @@ export function adminEnvironment({config = validConfig(), includeAdmin = true, a
   vm.runInContext(readFileSync('Code.gs','utf8'),c,{filename:'Code.gs'});
   if(includeAdmin && existsSync('Administration.gs')) vm.runInContext(readFileSync('Administration.gs','utf8'),c,{filename:'Administration.gs'});
   const schedule={importHour:5,deliveryHour:8,reminderHour:16,reminderEnabled:true};
+  if(!actualAutomation) {
   c.getAutomationSchedule_=()=>({...schedule});
   c.getAutomationSummary_=()=>({schedule:{...schedule},enabled:false,managedByCurrentUser:true,hasManagedOwner:false});
   c.getAutomationStateUnlocked_=()=>({schedule:{...schedule},enabled:false,legacyCount:0,triggers:[],warnings:[],revision:'automation-test'});
   c.saveAutomationScheduleDraft_=value=>Object.assign(schedule,plain(value));
-  if(actualAutomation) vm.runInContext(readFileSync('Automation.gs','utf8'),c,{filename:'Automation.gs'});
+  }
   return {c,props,userProps,sheets,ss,schedule,triggers,activeSheet:()=>activeSheet,isLocked:()=>locked};
 }

@@ -3,7 +3,10 @@ import vm from 'node:vm';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-const code = existsSync('Automation.gs') ? readFileSync('Automation.gs', 'utf8') : '';
+const administration = readFileSync('Administration.gs', 'utf8');
+const automationStart = administration.indexOf('const AUTOMATION_STATE_KEY_');
+assert.notEqual(automationStart, -1, 'automation implementation must be present');
+const code = administration.slice(automationStart);
 const schedule = { importHour: 5, deliveryHour: 8, reminderHour: 16, reminderEnabled: false };
 const plain = value => JSON.parse(JSON.stringify(value));
 
@@ -42,7 +45,7 @@ function environment() {
     getConfig_: () => { if (faults.readConfig) throw Error('config recovery required'); return config; },
     assertAdminReadyForAutomation_: () => { assert.equal(locked, true); if (faults.readiness) throw Error('setup incomplete'); },
     validateAppConfig_: () => { calls.push('validate'); if (faults.config) throw Error('incomplete config'); },
-    importFromFormsToEvalUnlocked_: worker('import'), evalToSendSheetUnlocked_: worker('prepare'),
+    prepareSendDataUnlocked_: worker('prepare'),
     sendMessagesUnlocked_: worker('send'), remindUngradedAndErrorsUnlocked_: worker('reminder')
   });
   c.getAppSpreadsheet_ = () => c.SpreadsheetApp.getActiveSpreadsheet();
@@ -66,9 +69,11 @@ test('explicit start creates only JST daily windows and ordered locked delivery'
   const result = e.start();
   assert.equal(result.enabled, true); assert.equal(result.timezone, 'Asia/Tokyo');
   assert.deepEqual(e.triggers.filter(t => t !== unrelated).map(t => [t.hour, t.days, t.timezone]), [[5, 1, 'Asia/Tokyo'], [8, 1, 'Asia/Tokyo']]);
+  e.calls.length = 0; e.fire(e.triggers.find(t => t.hour === 5));
+  assert.deepEqual(e.calls, ['validate', 'prepare']);
   const delivery = result.triggers.find(t => t.kind === 'delivery');
   e.calls.length = 0; e.fire(e.triggers.find(t => t.id === delivery.id));
-  assert.deepEqual(e.calls, ['validate', 'prepare', 'send']); assert.equal(e.isLocked(), false);
+  assert.deepEqual(e.calls, ['validate', 'send']); assert.equal(e.isLocked(), false);
   assert.equal(e.state().lastRuns[0].status, 'success');
 });
 
@@ -90,6 +95,27 @@ test('legacy clock triggers require explicit replacement; unrelated and non-cloc
   assert.ok(!e.triggers.includes(legacy)); assert.ok(e.triggers.includes(other)); assert.ok(e.triggers.includes(edit));
 });
 
+test('direct preparation clock triggers are detected for managed replacement and stopping',()=>{
+  for(const operation of ['replace','stop']) {
+    const e=environment(),direct=e.add('prepareSendData'),edit=e.add('prepareSendData','EDIT');
+    assert.equal(e.state().legacyCount,1);
+    if(operation==='replace') { assert.throws(()=>e.start(),/旧.*確認/);e.start(schedule,true); }
+    else e.c.stopAutomation(e.state().revision,true);
+    assert.ok(!e.triggers.includes(direct));assert.ok(e.triggers.includes(edit));
+  }
+});
+
+test('saved trigger generation continues preparation and sending without recreation after code reload',()=>{
+  const e=environment();e.start();const before=e.props.get('APP_AUTOMATION_STATE'),active=[...e.triggers];
+  // GASの別実行と同様に、保存済みプロパティとトリガーだけを次の実行環境へ渡す。
+  const next=environment();for(const [key,value] of e.props)next.props.set(key,value);
+  const owner=e.c.PropertiesService.getUserProperties().getProperty('APP_AUTOMATION_OWNER');
+  next.c.PropertiesService.getUserProperties().setProperty('APP_AUTOMATION_OWNER',owner);
+  next.triggers.push(...active);next.fire(active[0]);next.fire(active[1]);
+  assert.deepEqual(next.calls,['validate','prepare','validate','send']);
+  assert.equal(next.props.get('APP_AUTOMATION_STATE'),before);assert.deepEqual(next.triggers,active);
+});
+
 test('stale revisions and different owners cannot change or execute managed automation', () => {
   const e = environment(); const revision = e.state().revision; e.start(); const oldTriggers = [...e.triggers];
   assert.throws(() => e.c.configureAutomation(schedule, revision, false), /変更/);
@@ -107,7 +133,7 @@ test('partial creation and failed persistence keep old generation active; orphan
   e.faults.createAt = 0; e.faults.property = (key, value, after) => key === 'APP_AUTOMATION_STATE' && !after;
   assert.throws(() => e.start({ ...schedule, importHour: 3 }), /保存/);
   assert.equal(e.state().schedule.importHour, 5);
-  e.calls.length = 0; e.fire(old[0]); assert.deepEqual(e.calls, ['validate', 'import']);
+  e.calls.length = 0; e.fire(old[0]); assert.deepEqual(e.calls, ['validate', 'prepare']);
 });
 
 test('write-then-throw commits are recognized and failed old cleanup cannot duplicate execution', () => {
@@ -118,7 +144,7 @@ test('write-then-throw commits are recognized and failed old cleanup cannot dupl
   assert.equal(next.schedule.importHour, 4); assert.ok(next.warnings.some(w => /削除|無効/.test(w)));
   e.calls.length = 0; old.forEach(t => e.fire(t)); assert.deepEqual(e.calls, []);
   e.fire(e.triggers.find(t => next.triggers.some(row => row.id === t.id && row.kind === 'delivery' && row.active)));
-  assert.deepEqual(e.calls, ['validate', 'prepare', 'send']);
+  assert.deepEqual(e.calls, ['validate', 'send']);
 });
 
 test('stop disables allowlist before deleting; cleanup failure cannot execute; failed commit does not delete', () => {
@@ -137,9 +163,9 @@ test('profile draft changes desired schedule without altering actual trigger gen
   assert.ok(e.state().warnings.some(w => /時間帯.*異|反映/.test(w)));
 });
 
-test('preparation failure prevents send; invalid execution config prevents work; run history hides content', () => {
+test('preparation failure records an error without sending; invalid config prevents work', () => {
   const e = environment(); e.start(); const delivery = e.triggers.find(t => t.hour === 8);
-  e.calls.length = 0; e.faults.worker = 'prepare'; assert.throws(() => e.fire(delivery), /private student/);
+  e.calls.length = 0; e.faults.worker = 'prepare'; assert.throws(() => e.fire(e.triggers.find(t => t.hour === 5)), /private student/);
   assert.deepEqual(e.calls, ['validate', 'prepare']); assert.equal(e.state().lastRuns[0].status, 'error');
   assert.ok(!JSON.stringify(e.state().lastRuns).includes('student'));
   e.calls.length = 0; e.faults.config = true; assert.throws(() => e.fire(delivery), /incomplete/);
@@ -203,7 +229,7 @@ test('completed workers with rejected or uncertain deliveries are attention, wit
 test('new logged row failures mark a nonthrowing import as attention but historical logs do not',()=>{
   const e=environment();e.start();e.faults.errorRows=4;const trigger=e.triggers.find(t=>t.hour===5);
   e.fire(trigger);assert.equal(e.state().lastRuns[0].status,'success');
-  e.faults.logOnWorker='import';e.fire(trigger);assert.equal(e.state().lastRuns[0].status,'attention');
+  e.faults.logOnWorker='prepare';e.fire(trigger);assert.equal(e.state().lastRuns[0].status,'attention');
   assert.match(e.state().lastRuns[0].message,/1件/);
 });
 
@@ -223,14 +249,14 @@ test('unknown commit outcome preserves triggers for readback and still gates exa
   e.faults.read = null; e.faults.property = null;
   assert.equal(e.state().schedule.importHour, 4);
   e.calls.length = 0; old.forEach(t => e.fire(t)); assert.deepEqual(e.calls, []);
-  e.fire(e.triggers.find(t => t.hour === 4)); assert.deepEqual(e.calls, ['validate', 'import']);
+  e.fire(e.triggers.find(t => t.hour === 4)); assert.deepEqual(e.calls, ['validate', 'prepare']);
 });
 
 test('run history write failure does not rerun or hide the pipeline outcome', () => {
   const e = environment(); e.start(); const delivery = e.triggers.find(t => t.hour === 8);
   e.faults.property = key => key === 'APP_AUTOMATION_RUNS'; e.calls.length = 0;
-  e.fire(delivery); assert.deepEqual(e.calls, ['validate', 'prepare', 'send']);
-  e.faults.worker = 'prepare'; assert.throws(() => e.fire(delivery), /private student content/);
+  e.fire(delivery); assert.deepEqual(e.calls, ['validate', 'send']);
+  e.faults.worker = 'send'; assert.throws(() => e.fire(delivery), /private student content/);
   assert.equal(e.isLocked(), false);
 });
 
@@ -238,7 +264,7 @@ test('long Japanese attention history stays within property byte budget and keep
   const e = environment(); e.start();
   const delivery = e.triggers.find(t => t.hour === 8);
   e.faults.result = { send: '送信成功：500件、エラー：500件、要確認：500件' };
-  e.faults.logOnWorker = 'prepare';
+  e.faults.logOnWorker = 'send';
   for (let i = 0; i < 30; i++) e.fire(delivery);
   const history = e.props.get('APP_AUTOMATION_RUNS');
   assert.ok(Buffer.byteLength(history, 'utf8') <= 8000);

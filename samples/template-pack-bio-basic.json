@@ -1,0 +1,64 @@
+{
+  "meta": {
+    "type": "turret-grading-template-pack",
+    "version": 1
+  },
+  "templates": [
+    {
+      "name": "生物基礎・記述",
+      "domains": [
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          1,
+          2,
+          3
+        ],
+        [
+          1,
+          2,
+          3
+        ],
+        [],
+        []
+      ],
+      "rules": [
+        {
+          "conditions": [
+            ">=2",
+            ">=2",
+            ">=2",
+            "",
+            ""
+          ],
+          "outputs": [
+            "よくできています。",
+            "",
+            ""
+          ],
+          "enabled": true,
+          "visible": true
+        },
+        {
+          "conditions": [
+            "",
+            "",
+            "",
+            "",
+            ""
+          ],
+          "outputs": [
+            "用語と根拠を確認して、説明を具体的にしましょう。",
+            "",
+            ""
+          ],
+          "enabled": true,
+          "visible": true
+        }
+      ]
+    }
+  ]
+}

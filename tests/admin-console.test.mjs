@@ -1,6 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { adminEnvironment, AdminSheet } from './helpers/admin-environment.mjs';
+import { adminEnvironment, AdminSheet, plain, validConfig } from './helpers/admin-environment.mjs';
+
+test('initial setup creates a send sheet before configuration and safely refreshes empty headers',()=>{
+  const e=adminEnvironment({config:null});
+  let data=e.c.getAdminConsoleData();
+  const result=e.c.runAdminAction('initialize',false,data.revision);
+  assert.match(result.message,/送信シート/);
+  const send=e.sheets.get('送信シート');assert.ok(send);
+  assert.deepEqual(send.rows[0],plain(e.c.getConfiguredSendHeaders_(e.c.getConfig_())));
+  assert.equal(e.sheets.has('評価データ'),false);
+  e.props.set('APP_CONFIG',JSON.stringify(validConfig()));
+  e.c.initializeSheetsUnlocked_();
+  assert.deepEqual(send.rows[0],plain(e.c.getConfiguredSendHeaders_(e.c.getConfig_())));
+  const row=send.rows[0].map((h,i)=>h==='送信状態'?'済':'保存値'+i);send.rows.push(row);
+  e.c.initializeSheetsUnlocked_();assert.deepEqual(send.rows[1],row);
+  const config=e.c.getConfig_();config.replyBodyHeader='別の本文';e.props.set('APP_CONFIG',JSON.stringify(config));
+  const before=plain(send.rows);
+  assert.throws(()=>e.c.initializeSheetsUnlocked_(),/送信シート.*構成/);
+  assert.deepEqual(send.rows,before);assert.equal(e.sheets.has('評価データ'),false);
+});
+
+test('setup completion requires the send sheet to exist',()=>{
+  const e=adminEnvironment();e.c.initializeSheetsUnlocked_();
+  assert.equal(e.c.getAdminConsoleData().progress.find(p=>p.id==='prepare').state,'complete');
+  e.sheets.delete('送信シート');
+  assert.equal(e.c.getAdminConsoleData().progress.find(p=>p.id==='prepare').state,'pending');
+});
 
 test('new empty setup does not claim any completed business setup',()=>{
   const e=adminEnvironment({config:null}); const data=e.c.getAdminConsoleData();
@@ -115,6 +141,8 @@ test('readiness derives actual roster selection and becomes incomplete when clas
   e.sheets.set('クラス一覧',new AdminSheet('クラス一覧',[['クラス名','コースID','同期対象(1)'],['授業','course-1',1]]));
   e.sheets.set('生徒一覧',new AdminSheet('生徒一覧',[['No','メールアドレス','名前','クラス名','コースID','studentId'],[1,'student@example.invalid','生徒','授業','course-1','student-1']]));
   e.props.set('TURRET_ROSTER_SELECTION',JSON.stringify(['course-1']));
+  e.c.ensureSendSheet_(e.c.getConfig_());
+  e.c.managedSheet_(true);
   assert.equal(e.c.getAdminConsoleData().ready,true);
   e.sheets.get('クラス一覧').rows.push(['新しい授業','course-2',1]);
   assert.equal(e.c.getAdminConsoleData().ready,false);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {adminEnvironment, AdminSheet, plain} from './helpers/admin-environment.mjs';
+import {NativeForm} from './helpers/native-forms.mjs';
 
 function env(){
  const e=adminEnvironment();
@@ -13,13 +14,53 @@ function env(){
  return e;
 }
 
-test('blank template creation stays unpublished and retries return the same form',()=>{
+test('template includes one required lesson date with year, stays unpublished and retries reuse it',()=>{
  const {c,props}=env();let creates=0;const before=JSON.stringify([...props]);
- c.FormApp={create:(title,published)=>{creates++;assert.match(title,/ひな形/);assert.equal(published,false);return {getId:()=> 'new-template-form-id'};}};
+ const form=new NativeForm('new-template-form-id');
+ const addDate=form.addDateItem.bind(form);
+ // FormApp.addDateItem returns DateItem, which has no Item.asDateItem cast method.
+ form.addDateItem=()=>new Proxy(addDate(),{get:(item,key)=>key==='asDateItem'?undefined:Reflect.get(item,key)});
+ c.FormApp={create:(title,published)=>{creates++;assert.match(title,/ひな形/);assert.equal(published,false);return form;}};
  const result=c.createTemplateForm('request-1234567890');
  assert.equal(result.editUrl,'https://docs.google.com/forms/d/new-template-form-id/edit');
  assert.deepEqual(plain(c.createTemplateForm('request-1234567890')),plain(result));
  assert.equal(creates,1);assert.equal(JSON.stringify([...props]),before);
+ assert.equal(form.items.length,1);const date=form.items[0];
+ assert.equal(date.getType(),'DATE');assert.equal(date.getTitle(),'授業の日付を入力してください');
+ assert.equal(date.isRequired(),true);assert.equal(date.includesYear(),true);
+ assert.match(date.getHelpText(),/回答する日ではなく/);
+ assert.equal(c.getManagedRecords_()[0].lessonDateItemId,date.getId());
+});
+
+for(const failure of ['add','title','required'])test('template setup retry repairs a partial date item without duplicating the form or question: '+failure,()=>{
+ const {c}=env();const form=new NativeForm('partial-template');let creates=0,failed=false;
+ form.onChange=action=>{if(action===failure&&!failed){failed=true;throw Error('response lost');}};
+ c.FormApp={create:()=>{creates++;return form;},openById:id=>{assert.equal(id,'partial-template');return form;}};
+ assert.throws(()=>c.createTemplateForm('request-1234567890'),/再試行/);
+ assert.match(c.createTemplateForm('request-1234567890').editUrl,/partial-template/);
+ assert.equal(creates,1);assert.equal(form.items.length,1);
+ assert.equal(form.items[0].getTitle(),'授業の日付を入力してください');assert.equal(form.items[0].isRequired(),true);assert.equal(form.items[0].includesYear(),true);
+});
+
+test('retry does not replace a manually edited date question or change email collection',()=>{
+ const {c}=env();const form=new NativeForm('partial-template');form.collects=false;
+ form.onChange=action=>{if(action==='required')throw Error('response lost');};
+ c.FormApp={create:()=>form,openById:()=>form};
+ assert.throws(()=>c.createTemplateForm('request-1234567890'),/再試行/);
+ form.onChange=null;form.items[0].setTitle('先生が変更した項目');
+ const mutations=form.mutations;
+ assert.throws(()=>c.createTemplateForm('request-1234567890'),/設問が変更/);
+ assert.equal(form.mutations,mutations);assert.equal(form.items.length,1);assert.equal(form.collectsEmail(),false);
+});
+
+test('a lost date checkpoint resumes the same question from the saved form ID',()=>{
+ const {c}=env();const form=new NativeForm('partial-template');let creates=0,failed=false;
+ c.FormApp={create:()=>{creates++;return form;},openById:()=>form};
+ const save=c.saveManagedRecord_;
+ c.saveManagedRecord_=r=>{if(r.stage==='initializing'&&r.lessonDateItemId&&!failed){failed=true;throw Error('checkpoint failed');}return save(r);};
+ assert.throws(()=>c.createTemplateForm('request-1234567890'),/再試行/);
+ assert.match(c.createTemplateForm('request-1234567890').editUrl,/partial-template/);
+ assert.equal(form.items.length,1);assert.equal(creates,1);assert.equal(form.items[0].isRequired(),true);
 });
 
 for(const parentId of ['turret-folder','my-drive-root'])test('template is placed beside its workbook: '+parentId,()=>{
@@ -28,7 +69,7 @@ for(const parentId of ['turret-folder','my-drive-root'])test('template is placed
  c.DriveApp={getFolderById:id=>{assert.equal(id,parentId);return folder;},getFileById:id=>id==='test-admin-sheet'
   ?{getParents:()=>({hasNext:()=>true,next:()=>folder})}
   :{getParents:()=>({hasNext:()=>false}),moveTo:target=>{moved=target.getId();}}};
- c.FormApp={create:()=>{creates++;return {getId:()=> 'new-template-id'};}};
+ c.FormApp={create:()=>{creates++;return new NativeForm('new-template-id');}};
  c.createTemplateForm('request-1234567890');
  assert.equal(moved,parentId);assert.equal(creates,1);
 });
@@ -47,7 +88,7 @@ for(const responseLost of [false,true])test('placement retry reuses the created 
  c.DriveApp={getFolderById:()=>folder,getFileById:id=>id==='test-admin-sheet'
   ?{getParents:()=>({hasNext:()=>true,next:()=>folder})}
   :{getParents:()=>({hasNext:()=>inFolder,next:()=>folder}),moveTo:()=>{moves++;if(moves===1){inFolder=responseLost;throw Error('move failed');}inFolder=true;}}};
- c.FormApp={create:()=>{creates++;return {getId:()=> 'new-template-id'};}};
+ c.FormApp={create:()=>{creates++;return new NativeForm('new-template-id');}};
  assert.throws(()=>c.createTemplateForm('request-1234567890'),/再試行/);
  assert.equal(c.createTemplateForm('request-1234567890').editUrl,'https://docs.google.com/forms/d/new-template-id/edit');
  assert.equal(creates,1);assert.equal(moves,responseLost?1:2);
@@ -65,9 +106,9 @@ test('ambiguous template creation cannot be repeated and invalid requests do no 
 
 test('a failed completion checkpoint retries placement without creating another form',()=>{
  const {c}=env();let creates=0,saves=0;
- c.FormApp={create:()=>{creates++;return {getId:()=> 'created-form-id'};}};
+ c.FormApp={create:()=>{creates++;return new NativeForm('created-form-id');}};
  const save=c.saveManagedRecord_;
- c.saveManagedRecord_=r=>{if(++saves===3)throw Error('write failed');return save(r);};
+ c.saveManagedRecord_=r=>{if(r.stage==='created'&&++saves===1)throw Error('write failed');return save(r);};
  assert.throws(()=>c.createTemplateForm('request-1234567890'),/再試行/);
  assert.match(c.createTemplateForm('request-1234567890').editUrl,/created-form-id/);
  assert.equal(creates,1);
@@ -75,7 +116,7 @@ test('a failed completion checkpoint retries placement without creating another 
 
 test('template creation refuses copied journals and does not repeat after checkpoint failure',()=>{
  const {c}=env();let creates=0;
- c.FormApp={create:()=>{creates++;return {getId:()=> 'created-form-id'};}};
+ c.FormApp={create:()=>{creates++;return new NativeForm('created-form-id');}};
  const save=c.saveManagedRecord_;let saves=0;
  c.saveManagedRecord_=r=>{if(++saves===2)throw Error('write failed');return save(r);};
  assert.throws(()=>c.createTemplateForm('request-1234567890'),/created-form-id/);
@@ -243,7 +284,7 @@ test('optional columns allow no comments or grades without changing the existing
  const e=provisioningEnv();flexibleInput(e);
  const [r]=e.begin();const done=e.c.prepareFormTarget(r.id,r.revision);
  assert.equal(done.stage,'registered');
- assert.deepEqual(e.sheets.get('回答 1-1').rows[0],['メール','質問','名前','状態']);
+ assert.deepEqual(e.sheets.get('回答 1-1').rows[0],['メール','質問','名前','管理','状態']);
  assert.equal(e.c.getConfig_().scoreSourceHeader,'点数');
  assert.equal(e.c.getConfig_().fields.length,1);
 });
@@ -254,7 +295,7 @@ test('multiple custom columns use independent optional dropdowns and preserve ex
  e.c.SpreadsheetApp.newDataValidation=()=>{let values;return {requireValueInList(v){values=plain(v);return this;},setAllowInvalid(v){assert.equal(v,false);return this;},build(){return values;}};};
  const insert=e.ss.insertSheet;e.ss.insertSheet=name=>{const sheet=insert(name),getRange=sheet.getRange.bind(sheet);sheet.getRange=(...args)=>{const range=getRange(...args);range.setDataValidation=rule=>{validations.push({args,rule});return range;};return range;};return sheet;};
  const old=plain(e.c.getConfig_().fields[0]);const [r]=e.begin();e.c.prepareFormTarget(r.id,r.revision);
- assert.deepEqual(e.sheets.get('回答 1-1').rows[0],['メール','質問','名前','点数','思考','補足','状態']);
+ assert.deepEqual(e.sheets.get('回答 1-1').rows[0],['メール','質問','名前','点数','思考','補足','管理','状態']);
  assert.deepEqual(validations.map(v=>v.args[1]),[4,5]);
  assert.deepEqual(validations.map(v=>v.rule),[['1','2','3'],['A','B','C']]);
  const config=e.c.getConfig_();assert.deepEqual(plain(config.fields[0]),old);
@@ -291,7 +332,7 @@ test('legacy pending records keep the original four-column layout and completion
  // Simulate records persisted before additionalColumns existed.
  const stored=e.c.loadManagedRecord_(r.id);delete stored.input.additionalColumns;e.c.saveManagedRecord_(stored);
  e.c.prepareFormTarget(stored.id,stored.revision);
- assert.deepEqual(e.sheets.get('回答 1-1').rows[0],['メール','質問','名前','点数','コメント','状態']);
+ assert.deepEqual(e.sheets.get('回答 1-1').rows[0],['メール','質問','名前','点数','コメント','管理','状態']);
  assert.equal(e.c.getConfig_().scoreSourceHeader,'点数');
 });
 
@@ -360,7 +401,8 @@ test('deployed send path records IDs and preserves uncertain journal outcomes wi
   const row=headers.map(h=>({'元SS_ID':'source_12345678901234567890','元シート名':'回答 1','元行番号':'2','No':'1','メールアドレス':'kid@example.com','名前':'生徒','コースID':'100','studentId':'student-1','送信状態':'未','返信本文':'確認用','点数':'5'}[h]||''));
   const send=new AdminSheet('送信シート',[headers,row]);sheets.set('送信シート',send);
   c.Classroom={Courses:{Announcements:{create:()=>{posts++;return {id:'sent-1'};}}}};
-  c.SpreadsheetApp.openById=()=>({getSheetByName:()=>new AdminSheet('回答 1',[['状態'],['']])});
+  const source=new AdminSheet('回答 1',[['状態'],['']]);
+  c.SpreadsheetApp.openById=()=>({getSheets:()=>[source],getSheetByName:()=>source});
   if(fails){const original=ss.insertSheet;ss.insertSheet=name=>{const sheet=original(name);if(name==='フォーム管理')sheet.beforeWrite=values=>{if(values[0][0]==='announcement')throw Error('registry storage unavailable');};return sheet;};}
   c.sendMessages();assert.equal(posts,1);
   assert.equal(send.rows[1][headers.indexOf('送信状態')],fails?'送信確認待ち':'済');
@@ -371,7 +413,7 @@ test('deployed send path records IDs and preserves uncertain journal outcomes wi
 test('regular import backfills names missed by a busy event without changing grades',()=>{
  const {c,sheets}=env();
  const answer=new AdminSheet('回答 1',[['メール','名前','点数','状態'],['kid@example.com','','5','済']]);answer.getSheetId=()=>99;
- sheets.set('回答 1',answer);sheets.set('生徒一覧',new AdminSheet('生徒一覧',[['メールアドレス','名前','コースID'],['kid@example.com','生徒','100']]));
+ sheets.set('回答 1',answer);sheets.set('生徒一覧',new AdminSheet('生徒一覧',[['メールアドレス','名前','コースID','クラス名','studentId'],['kid@example.com','生徒','100','クラス','kid']]));
  c.saveManagedRecord_({id:'form:100',kind:'form',courseId:'100',responseSheetId:99,stage:'published',input:{emailHeader:'メール',nameHeader:'名前'}});
  for(const s of sheets.values())if(!s.getSheetId)s.getSheetId=()=>1;
  c.SpreadsheetApp.openById=()=>({getSheets:()=>[]});

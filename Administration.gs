@@ -10,7 +10,7 @@ const PROFILE_CONFIG_KEYS = ['emailHeader', 'studentNameHeader', 'formStatusHead
 const MANAGED_FORM_SHEET_ = 'フォーム管理';
 const MANAGED_FORM_HEADERS_ = ['種別', 'ID', '内容(JSON)'];
 
-/** Run from the Apps Script editor to request missing form integration consent. No data mutations. */
+/** Apps Script エディタから実行し、フォーム連携に必要な同意を求める。データは変更しない。 */
 function authorizeFormIntegration() {
   ScriptApp.requireScopes(ScriptApp.AuthMode.FULL, [
     'https://www.googleapis.com/auth/forms',
@@ -63,7 +63,7 @@ function loadManagedRecord_(id, revision) {
   return record;
 }
 
-/** Caller holds the application lock. Persist before external mutations, including deletes. */
+/** 呼び出し元はアプリ共通ロックを保持する。削除を含む外部変更より先に保存する。 */
 function saveManagedRecord_(record, cache) {
   if (record.ownerSpreadsheetId) assertManagedOwner_(record);
   const records = cache && !cache.failed ? cache.records : getManagedRecords_();
@@ -83,7 +83,7 @@ function saveManagedRecord_(record, cache) {
   return record;
 }
 
-/** A stable client request key prevents a retry from creating a second blank template. */
+/** 一定のクライアント要求キーを使い、再試行でひな形が重複作成されるのを防ぐ。 */
 function createTemplateForm(requestKey) {
   if (typeof requestKey !== 'string' || !/^[A-Za-z0-9_-]{16,100}$/.test(requestKey)) {
     throw new Error('ひな形作成の識別情報が不正です。画面を開き直してください。');
@@ -99,24 +99,57 @@ function createTemplateForm(requestKey) {
       if (existing.kind === 'template' && existing.stage === 'placing' && existing.formId && existing.folderId) {
         return placeTemplateForm_(existing);
       }
+      if (existing.kind === 'template' && existing.stage === 'initializing' && existing.formId && existing.folderId) {
+        return initializeTemplateForm_(existing);
+      }
       throw new Error('ひな形の作成結果を確認できません。二重作成を防ぐため停止しました。マイドライブの「turret ひな形」を確認し、作成済みなら編集URLを入力してください。');
     }
     const parents = DriveApp.getFileById(getAppSpreadsheet_().getId()).getParents();
     if (!parents.hasNext()) throw new Error('turretスプレッドシートの保存先フォルダを取得できません。Driveの配置とアクセス権を確認してください。');
     const record = { id: id, kind: 'template', stage: 'creating', folderId: parents.next().getId() };
     saveManagedRecord_(record);
-    // Deliberately blank and unpublished; the teacher edits questions and verified-email collection in Forms.
+    // 公開しない。確認済みメールアドレスの収集はフォームエディタで設定する必要がある。
     const form = FormApp.create('turret ひな形', false);
     record.formId = form.getId();
     const editUrl = 'https://docs.google.com/forms/d/' + record.formId + '/edit';
-    record.stage = 'placing';
+    record.stage = 'initializing';
     try { saveManagedRecord_(record); }
     catch (error) { throw new Error('ひな形は作成済みですが履歴を保存できませんでした。次の編集URLを入力してください：' + editUrl); }
-    return placeTemplateForm_(record);
+    return initializeTemplateForm_(record, form);
   });
 }
 
-/** Caller holds the lock; the form ID is durable before attempting a move. */
+/** 呼び出し元はロックを保持する。最初の日付項目の作成が中断された場合、重複させずに復旧する。 */
+function initializeTemplateForm_(record, form) {
+  const title = '授業の日付を入力してください';
+  try {
+    form = form || FormApp.openById(record.formId);
+    const items = form.getItems();
+    let item;
+    if (record.lessonDateItemId != null) {
+      item = items.find(function(candidate) { return String(candidate.getId()) === String(record.lessonDateItemId); });
+    } else if (!items.length) {
+      item = form.addDateItem();
+    } else if (items.length === 1 && (!items[0].getTitle() || items[0].getTitle() === title)) {
+      item = items[0];
+    }
+    if (!item || String(item.getType()) !== 'DATE' || (item.getTitle() && item.getTitle() !== title)) {
+      throw new Error('ひな形の設問が変更されています。編集画面で授業日の項目を確認してください。');
+    }
+    record.lessonDateItemId = item.getId();
+    saveManagedRecord_(record);
+    const dateItem = typeof item.asDateItem === 'function' ? item.asDateItem() : item;
+    dateItem.setTitle(title).setHelpText('回答する日ではなく、振り返りの対象となる授業の日付を入力してください。')
+      .setIncludesYear(true).setRequired(true);
+    record.stage = 'placing';
+    saveManagedRecord_(record);
+  } catch (error) {
+    throw new Error('ひな形は作成済みですが初期設定が完了していません。同じ画面から再試行してください。編集URL：https://docs.google.com/forms/d/' + record.formId + '/edit\n' + String(error && error.message || error));
+  }
+  return placeTemplateForm_(record);
+}
+
+/** 呼び出し元はロックを保持する。移動を試みる前にフォーム ID を保存する。 */
 function placeTemplateForm_(record) {
   const editUrl = 'https://docs.google.com/forms/d/' + record.formId + '/edit';
   try {
@@ -134,20 +167,31 @@ function placeTemplateForm_(record) {
   return { editUrl: editUrl };
 }
 
-function getFormConsoleData() {
+function getFormConsoleData(options) {
   return withAppLock_(function() {
     const config = getConfig_();
     let classes = [], classWarning = '';
     try { classes = getSelectedClassRecords_(); } catch (error) { classWarning = String(error.message || error); }
     const ss = getAppSpreadsheet_();
     const records = getManagedRecords_();
-    return { records: records, scheduleTimer: typeof getManagedFormScheduleSummary_==='function'?getManagedFormScheduleSummary_():null, setupProgress: getFormSetupProgress_(config.formSources.length > 0 && config.formSheetNamePrefix.length > 0, records), classes: classes, classWarning: classWarning, configRevision: getConfigRevision_(config),
+    // 開いたままの旧管理画面からの呼び出しには、従来の応答形式を維持する。
+    let visibleRecords=records, returnHistory;
+    if(options && options.returnPage != null) {
+      if(!Number.isSafeInteger(options.returnPage) || options.returnPage<0)throw new Error('履歴のページ番号が不正です。');
+      const history=records.filter(function(r){return r.kind==='announcement';}).reverse(), pageSize=50;
+      const page=Math.min(options.returnPage,Math.max(0,Math.ceil(history.length/pageSize)-1));
+      returnHistory={page:page,pageSize:pageSize,total:history.length};
+      visibleRecords=records.filter(function(r){return r.kind!=='announcement';}).concat(history.slice(page*pageSize,(page+1)*pageSize).reverse());
+    }
+    const result = { records: visibleRecords, scheduleTimer: typeof getManagedFormScheduleSummary_==='function'?getManagedFormScheduleSummary_():null, setupProgress: getFormSetupProgress_(config.formSources.length > 0 && config.formSheetNamePrefix.length > 0, records), classes: classes, classWarning: classWarning, configRevision: getConfigRevision_(config),
       spreadsheetId: ss.getId(), spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/edit',
       defaults: { emailHeader: config.emailHeader, nameHeader: config.studentNameHeader, gradeHeader: config.scoreSourceHeader, scoreSourceHeader: config.scoreSourceHeader, statusHeader: config.formStatusHeader } };
+    if(returnHistory)result.returnHistory=returnHistory;
+    return result;
   });
 }
 
-/** Local journal only: showing setup progress never contacts Forms or Classroom. */
+/** 設定の進捗表示では内部記録だけを読み、Forms や Classroom には接続しない。 */
 function getFormSetupProgress_(sourceReady, records) {
   const managed = (records || getManagedRecords_()).filter(function(r) {
     return r.kind === 'form' && r.ownerSpreadsheetId === getAppSpreadsheet_().getId() && r.ownerScriptId === ScriptApp.getScriptId();
@@ -189,7 +233,7 @@ function normalizeFormSetup_(raw) {
   if (![input.titlePattern, input.materialTitlePattern].every(function(title) { return title.includes('{class_label}') || title.includes('{class}'); })) throw new Error('タイトルに {class_label} を含めてください。');
   if (legacy) input.gradeChoices = normalizeManagedChoices_(String(raw.gradeChoices || '').split(/[\s,、]+/));
   else input.additionalColumns = normalizeManagedColumns_(raw.additionalColumns === undefined ? [] : raw.additionalColumns);
-  const headers = [input.emailHeader,input.nameHeader,input.statusHeader].concat(managedCustomColumns_(input).map(function(c) { return c.header; }));
+  const headers = [input.emailHeader,input.nameHeader,input.statusHeader,SCORING_MANAGEMENT_HEADER].concat(managedCustomColumns_(input).map(function(c) { return c.header; }));
   if (new Set(headers).size !== headers.length) throw new Error('列名が重複しています。');
   function list(value) { return Array.from(new Set(String(value || '').split(/[\s,、]+/).map(function(v) { return v.trim().toLowerCase(); }).filter(Boolean))); }
   input.policy = { domains: list(raw.domains), emails: list(raw.emails) };
@@ -218,7 +262,7 @@ function normalizeManagedColumns_(columns) {
   });
 }
 
-/** Old journal rows retain their exact order when a partially completed job resumes. */
+/** 未完了の処理を再開しても、既存の記録行の順序を変えない。 */
 function managedCustomColumns_(input) {
   return Array.isArray(input.additionalColumns) ? input.additionalColumns : [
     {header:input.gradeHeader,choices:input.gradeChoices || []}, {header:input.commentHeader,choices:[]}
@@ -266,7 +310,7 @@ function nativeTypedItem_(item) {
   return suffix ? item['as' + suffix + 'Item']() : item;
 }
 
-/** Read only fields exposed by FormApp. Never claim collectsEmail proves VERIFIED. */
+/** FormApp が公開する項目だけを読む。collectsEmail だけで「確認済み」と判定しない。 */
 function nativeFormItem_(generic) {
   const type = String(generic.getType()), item = nativeTypedItem_(generic);
   const result = {itemId:String(item.getId()),title:item.getTitle() || '',description:item.getHelpText() || '',native:{type:type}};
@@ -320,8 +364,9 @@ function validateResponderAccess_(permissions, policy, students, collectsEmail) 
   return true;
 }
 
-function managedRoster_(courseId) {
-  const values = adminSheetValues_(getAppSpreadsheet_().getSheetByName(STUDENT_SHEET_NAME));
+function managedRoster_(courseId, context) {
+  const values = context && context.rosterValues || adminSheetValues_(getAppSpreadsheet_().getSheetByName(STUDENT_SHEET_NAME));
+  if(context)context.rosterValues=values;
   const map = createHeaderMap_(values[0] || []);
   if (['メールアドレス','名前','コースID'].some(function(k) { return !(k in map); })) throw new Error('生徒一覧を取得してください。');
   return values.slice(1).filter(function(row) { return String(row[map['コースID']]) === courseId; }).map(function(row) {
@@ -337,7 +382,7 @@ function previewFormSetupUnlocked_(raw, expectedConfigRevision) {
   const config = getConfig_();
   if (expectedConfigRevision !== getConfigRevision_(config)) throw new Error('設定が更新されました。状態を更新してください。');
   const input = normalizeFormSetup_(raw), ss = getAppSpreadsheet_();
-  managedSourceConfig_(input, config); // Validate column registration before creating anything.
+  managedSourceConfig_(input, config); // 作成を始める前に列の登録内容を検証する。
   const template = FormApp.openById(input.templateId);
   if (!template.supportsAdvancedResponderPermissions()) throw new Error('ひな形を新しい公開方式のフォームへ更新してください。');
   const metadata = formMetadata_(input.templateId);
@@ -395,14 +440,16 @@ function ensureCopiedResponderPolicy_(record) {
   });
 }
 
-function managedAnswerSheet_(record) {
+function managedAnswerSheet_(record, context) {
   const ss = getAppSpreadsheet_();
+  const sheets = context && context.sheets || ss.getSheets();
+  if(context)context.sheets=sheets;
   if (record.responseSheetId != null) {
-    const found = ss.getSheets().find(function(s) { return String(s.getSheetId()) === String(record.responseSheetId); });
+    const found = sheets.find(function(s) { return String(s.getSheetId()) === String(record.responseSheetId); });
     if (found) return found;
     throw new Error('登録済み回答タブが見つかりません。');
   }
-  return ss.getSheets().find(function(sheet) {
+  return sheets.find(function(sheet) {
     const url = sheet.getFormUrl();
     return url && FormApp.openByUrl(url).getId() === record.formId;
   });
@@ -451,7 +498,9 @@ function prepareFormTarget(id, expectedRevision) {
     if (!headers.includes(r.input.emailHeader)) throw new Error('回答タブにメール列「'+r.input.emailHeader+'」がありません。列名を確認してください。');
     if (new Set(headers.filter(Boolean)).size!==headers.filter(Boolean).length) throw new Error('フォームの質問見出しが重複しています。');
     const custom = managedCustomColumns_(r.input);
-    const additional=[r.input.nameHeader].concat(custom.map(function(c) { return c.header; }), [r.input.statusHeader]);
+    const legacyAdditional=[r.input.nameHeader].concat(custom.map(function(c) { return c.header; }), [r.input.statusHeader]);
+    const legacyTail=r.baseColumnCount && JSON.stringify(headers.slice(r.baseColumnCount,r.baseColumnCount+legacyAdditional.length))===JSON.stringify(legacyAdditional);
+    const additional=legacyTail?legacyAdditional:[r.input.nameHeader].concat(custom.map(function(c) { return c.header; }), [SCORING_MANAGEMENT_HEADER,r.input.statusHeader]);
     if (!r.baseColumnCount) {
       if (additional.some(function(h){return headers.includes(h);})) throw new Error('追加列と質問名が重複しています。');
       r.baseColumnCount=headers.length;r.baseHeaders=headers;saveManagedRecord_(r);
@@ -461,6 +510,7 @@ function prepareFormTarget(id, expectedRevision) {
     const tail=sheet.getRange(1,r.baseColumnCount+1,1,additional.length).getDisplayValues()[0];
     if (tail.some(function(h,i){return h && h!==additional[i];})) throw new Error('追加列の配置が変わっています。');
     sheet.getRange(1,r.baseColumnCount+1,1,additional.length).setValues([additional.map(managedLiteral_)]);
+    if(legacyTail)scoringManagementColumn_(sheet,true,r.input.statusHeader);
     custom.forEach(function(column,i) {
       if (!column.choices.length) return;
       const rule=SpreadsheetApp.newDataValidation().requireValueInList(column.choices,true).setAllowInvalid(false).build();
@@ -506,21 +556,30 @@ function registerManagedSource_(r) {
 
 function managedLiteral_(value) { return /^[=+\-@]/.test(String(value)) ? "'"+value : value; }
 
-function fillManagedNames_(record, sheet, firstRow, numberRows) {
-  const map=new Map();
-  managedRoster_(record.courseId).forEach(function(s){if(map.has(s.email)&&map.get(s.email)!==s.name)map.set(s.email,'');else if(!map.has(s.email))map.set(s.email,s.name);});
+function fillManagedNames_(record, sheet, firstRow, numberRows, context) {
+  context=context||{};
+  if(!context.nameMaps)context.nameMaps=new Map();
+  if(!context.nameMaps.has(record.courseId)) {
+    const names=new Map();
+    managedRoster_(record.courseId,context).forEach(function(s){if(names.has(s.email)&&names.get(s.email)!==s.name)names.set(s.email,'');else if(!names.has(s.email))names.set(s.email,s.name);});
+    context.nameMaps.set(record.courseId,names);
+  }
+  const map=context.nameMaps.get(record.courseId);
   const headers=createHeaderMap_(sheet.getRange(1,1,1,sheet.getLastColumn()).getDisplayValues()[0]);
   if (!(record.input.emailHeader in headers) || !(record.input.nameHeader in headers)) throw new Error('名前補完用の列がありません。');
   const start=firstRow||2, length=numberRows||Math.max(0,sheet.getLastRow()-start+1);
   const result={updated:0,unmatched:0,skipped:0};if(!length)return result;
-  const values=sheet.getRange(start,1,length,sheet.getLastColumn()).getDisplayValues();
-  values.forEach(function(row,i){
-    if(String(row[headers[record.input.nameHeader]]||'').trim()){result.skipped++;return;}
-    const email=String(row[headers[record.input.emailHeader]]||'').trim().toLowerCase(),name=map.get(email);
+  const nameCol=headers[record.input.nameHeader]+1, nameRange=sheet.getRange(start,nameCol,length,1);
+  const names=nameRange.getDisplayValues(), formulas=nameRange.getFormulas();
+  const emails=sheet.getRange(start,headers[record.input.emailHeader]+1,length,1).getDisplayValues(), blocks=[];
+  emails.forEach(function(row,i){
+    if(String(names[i][0]||'').trim() || formulas[i][0]){result.skipped++;return;}
+    const email=String(row[0]||'').trim().toLowerCase(),name=map.get(email);
     if(!email){result.skipped++;return;}
     if(!name){result.unmatched++;return;}
-    sheet.getRange(start+i,headers[record.input.nameHeader]+1).setValue(managedLiteral_(name));result.updated++;
+    blocks.push({row:start+i,col:nameCol,values:[managedLiteral_(name)]});result.updated++;
   });
+  scoringWriteBlocks_(sheet,blocks);
   return result;
 }
 
@@ -528,17 +587,18 @@ function refreshManagedNames(id, revision) {
   return withAppLock_(function(){const r=loadManagedRecord_(id,revision);if(r.formUpdate)throw new Error('フォームの更新を完了してから名前を補完してください。');return fillManagedNames_(r,managedAnswerSheet_(r));});
 }
 
-/** Catch up missed/busy submission events before the regular import. */
+/** 通常の取り込み前に、取りこぼした送信イベントや処理中だったイベントを補完する。 */
 function refreshAllManagedNames_() {
+  const context={}; // この実行中だけ使う。次回の取り込みでは名簿の変更を反映する。
   getManagedRecords_().filter(function(r){return r.kind==='form'&&r.responseSheetId!=null;}).forEach(function(r){
-    assertManagedOwner_(r);fillManagedNames_(r,managedAnswerSheet_(r));
+    assertManagedOwner_(r);fillManagedNames_(r,managedAnswerSheet_(r,context),undefined,undefined,context);
   });
 }
 
 function managedPostService_(r) { return r.kind==='announcement' ? Classroom.Courses.Announcements : Classroom.Courses.CourseWorkMaterials; }
 function managedPostId_(r) { return r.kind==='announcement' ? r.postId : r.materialId; }
 
-/** Form updates keep item/question identities; response rows are never rewritten. */
+/** フォーム更新では項目と質問の ID を維持し、回答行は書き換えない。 */
 function managedItemQuestions_(item) {
   if (item.native) {
     if (['SECTION_HEADER','PAGE_BREAK','IMAGE','VIDEO'].includes(item.native.type)) return [];
@@ -585,7 +645,7 @@ function managedItemKind_(item) {
   return kind + (q ? ':' + Object.keys(q).filter(function(k) {return /Question$/.test(k);}).sort().join(',') : '');
 }
 
-/** Stable representation ignores object key order and output-only media URLs. */
+/** 比較用の表現では、オブジェクトのキー順と出力専用のメディア URL を無視する。 */
 function managedFormShape_(value) {
   if (Array.isArray(value)) return value.map(managedFormShape_);
   if (!value || typeof value !== 'object') return value;
@@ -612,14 +672,14 @@ function managedWritableItem_(value) {
   return result;
 }
 
-/** Image download URLs expire/change on read. Compare the content, never the URL. */
+/** 画像のダウンロード URL は期限切れや読み取り時の変化があるため、URL ではなく内容を比較する。 */
 function managedUpdateMetadata_(id) {
   return formMetadata_(id);
 }
 
 function managedItemChanged_(before, after) {
   if (JSON.stringify(managedFormShape_(before)) !== JSON.stringify(managedFormShape_(after))) return true;
-  // Raw metadata callers (e.g. migration) have not downloaded media yet.
+  // 移行処理など、元のメタデータを渡す呼び出し元は、まだメディアをダウンロードしていない。
   return JSON.stringify(before).includes('contentUri') && !JSON.stringify(before).includes('_turretImageHash') && JSON.stringify(before) !== JSON.stringify(after);
 }
 
@@ -640,7 +700,7 @@ function buildManagedFormUpdate_(record, template, target, headers) {
     if (!headers.includes(header)) throw new Error('既存の回答列を確認できません: ' + header);
     oldColumnMap[q.id] = header;
   });
-  const management = [record.input.nameHeader].concat(managedCustomColumns_(record.input).map(function(c) {return c.header;}), [record.input.statusHeader]);
+  const management = [record.input.nameHeader].concat(managedCustomColumns_(record.input).map(function(c) {return c.header;}), headers.includes(SCORING_MANAGEMENT_HEADER)?[SCORING_MANAGEMENT_HEADER,record.input.statusHeader]:[record.input.statusHeader]);
   management.concat(record.input.emailHeader).forEach(function(h) {
     if (!headers.includes(h)) throw new Error('管理用の回答列がありません: ' + h);
   });
@@ -649,7 +709,7 @@ function buildManagedFormUpdate_(record, template, target, headers) {
     if (source.native && (!NATIVE_FORM_TYPES_[source.native.type] || source.native.type === 'VIDEO') || managedItemQuestions_(source).some(function(q) {return q.fileUploadQuestion;})) throw new Error('未対応の質問種類があります。動画・ファイルアップロードなどを含むフォームはフォーム画面で編集してください。');
     const mappedId = record.formSync ? previous.itemMap && previous.itemMap[source.itemId] : source.itemId;
     let old = oldItems.find(function(i) {return i.itemId === mappedId;});
-    // Older copies have no identity journal. Only an unambiguous title/type match is adopted.
+    // 旧コピーには ID の記録がない。タイトルと種類から一意に特定できる場合だけ引き継ぐ。
     if (!old && !record.formSync) {
       const matches = oldItems.filter(function(i) {return !used.has(i.itemId) && i.title === source.title && managedItemKind_(i) === managedItemKind_(source);});
       if (matches.length > 1) throw new Error('ひな形と配付先の質問の対応が重複しています。');
@@ -659,7 +719,7 @@ function buildManagedFormUpdate_(record, template, target, headers) {
     if (old && managedItemKind_(old) !== managedItemKind_(source)) throw new Error('質問の種類を変更する場合は、ひな形で別の質問として追加してください: ' + source.title);
     if (source.native && source.native.type === 'IMAGE' && (!old || old.native.imageHash !== source.native.imageHash)) throw new Error('画像の追加・差し替えは自動更新の対象外です。各フォームの画面で設定してください。初回複製では画像も引き継ぎます。');
     const item = JSON.parse(JSON.stringify(source));
-    // IDs supplied on create make a lost batch response safe to reconcile.
+    // 作成時に指定した ID により、一括処理の応答を失っても安全に照合できる。
     item.itemId = old ? old.itemId : source.native ? 'new:' + source.itemId : source.itemId;
     if (!old && oldItems.some(function(i) {return i.itemId === item.itemId;})) throw new Error('追加する質問のIDが配付先と衝突しています。');
     itemMap[source.itemId] = item.itemId;
@@ -680,7 +740,7 @@ function buildManagedFormUpdate_(record, template, target, headers) {
     else if (managedItemChanged_(old,item)) changes.push('変更: ' + (item.title || '説明・セクション'));
     return item;
   });
-  // Branch destinations are item IDs from the source, not the copied form.
+  // 分岐先にはコピー先ではなく、元フォームの項目 ID が入っている。
   items.forEach(function(item) {
     if (item.native) {
       (item.native.choices || []).concat(item.native.navigation ? [item.native.navigation] : []).forEach(function(option) {
@@ -701,7 +761,7 @@ function buildManagedFormUpdate_(record, template, target, headers) {
   managedUniqueHeaders_(desiredColumns.map(function(q) {return q.header;}));
   desiredColumns.forEach(function(q) {
     const stable = oldColumnMap[q.id] || q.header;
-    if (management.includes(q.header) || q.header === record.input.emailHeader || (headers.includes(q.header) && q.header !== oldColumnMap[q.id])) {
+    if (q.header===SCORING_MANAGEMENT_HEADER || management.includes(q.header) || q.header === record.input.emailHeader || (headers.includes(q.header) && q.header !== oldColumnMap[q.id])) {
       throw new Error('質問名が既存の回答列・管理列と衝突しています: ' + q.header);
     }
     columns[q.id] = stable;
@@ -709,7 +769,7 @@ function buildManagedFormUpdate_(record, template, target, headers) {
   });
   const archivedHeaders = Array.from(new Set((previous.archivedHeaders || []).concat(oldColumns.filter(function(q) {return !columns[q.id];}).map(function(q) {return oldColumnMap[q.id];}))));
   const fixedHeaders = previous.fixedHeaders || headers.filter(function(h) {return !Object.values(oldColumnMap).includes(h) && !management.includes(h) && !archivedHeaders.includes(h);});
-  // Keep known system columns at the front; unrelated manual columns stay after management.
+  // 既知のシステム列を先頭に置き、無関係な手動追加列は管理列の後に残す。
   const systemHeaders = fixedHeaders.filter(function(h) {return headers.indexOf(h) < Math.min.apply(null, oldColumns.map(function(q) {return headers.indexOf(oldColumnMap[q.id]);}).concat([headers.length]));});
   const otherHeaders = headers.filter(function(h) {return !systemHeaders.includes(h) && !Object.values(oldColumnMap).includes(h) && !management.includes(h) && !archivedHeaders.includes(h);});
   const order = systemHeaders.concat(desiredColumns.map(function(q) {return columns[q.id];}),management,otherHeaders);
@@ -731,7 +791,7 @@ function buildManagedFormUpdate_(record, template, target, headers) {
   });
   const description = (template.info || {}).description || '';
   if (description !== ((target.info || {}).description || '')) {requests.push({updateFormInfo:{info:{description:description},updateMask:'description'}});changes.push('フォームの説明文を変更');}
-  return {items:items,description:description,requests:requests,changes:changes,order:order,restoreHeaders:restoreHeaders,
+  return {items:items,description:description,requests:requests,changes:changes,order:order,restoreHeaders:restoreHeaders,statusHeader:record.input.statusHeader,
     sync:{engine:template.engine,itemMap:itemMap,questionMap:questionMap,columns:columns,archivedHeaders:archivedHeaders,fixedHeaders:systemHeaders},
     archivedHeaders:archivedHeaders};
 }
@@ -752,7 +812,7 @@ function managedColumnHasData_(sheet, column) {
 function arrangeManagedFormColumns_(sheet, plan) {
   let headers = managedSheetHeaders_(sheet);
   managedUniqueHeaders_(headers);
-  // Validate the complete layout before the first mutation. Sheets creation can lag Forms.
+  // 最初の変更前に列配置全体を検証する。Sheets 側の作成は Forms 側より遅れる場合がある。
   const projected = headers.map(function(h) {const rename = plan.restoreHeaders.find(function(r) {return r.from === h;});return rename ? rename.to : h;});
   managedUniqueHeaders_(projected);
   if (plan.order.some(function(h) {return !projected.includes(h);})) throw new Error('回答列の反映待ちです。「更新を再開」で再確認してください。');
@@ -766,11 +826,12 @@ function arrangeManagedFormColumns_(sheet, plan) {
     headers = managedSheetHeaders_(sheet);
     const index = headers.indexOf(header);
     if (index < 0) return;
-    // A value of 0, false, whitespace or an empty-result formula is still data.
+    // 0、false、空白文字、結果が空の数式もデータとして扱う。
     if (managedColumnHasData_(sheet,index+1)) retained.push(header);
     else {sheet.deleteColumns(index+1,1);deleted.push(header);}
   });
-  const order = plan.order.concat(retained);
+  let order = plan.order.concat(retained);
+  if(order.includes(SCORING_MANAGEMENT_HEADER))order=order.filter(function(h){return h!==SCORING_MANAGEMENT_HEADER && h!==plan.statusHeader;}).concat([SCORING_MANAGEMENT_HEADER,plan.statusHeader]);
   order.forEach(function(header,index) {
     headers = managedSheetHeaders_(sheet);
     const current = headers.indexOf(header);
@@ -889,7 +950,7 @@ function nativeAssignCreatedId_(plan, temporaryId, actualId) {
   plan.items.forEach(function(i) {(i.native.choices || []).concat(i.native.navigation ? [i.native.navigation] : []).forEach(function(c) {if (c.goToSectionId === temporaryId) c.goToSectionId = actualId;});});
 }
 
-/** One journaled FormApp setter at a time; reconcile a lost response before retrying. */
+/** FormApp の更新操作は記録を残して1件ずつ行い、応答を失った場合は再試行前に結果を照合する。 */
 function applyNativeFormUpdate_(record, form) {
   const update = record.formUpdate, plan = update.plan, started = Date.now();
   if (!update.checkpoint) throw new Error('旧方式の更新が途中です。保存済みの更新計画を確認してください。');
@@ -927,7 +988,7 @@ function runManagedFormUpdate(id, fingerprint) {
     delete p.plan.requests;
     r.formUpdate = {phase:'apply',plan:p.plan,accepting:p.accepting,
       checkpoint:p.target,before:managedFormContentDigest_(p.target),after:managedFormContentDigest_({items:p.plan.items,info:{description:p.plan.description}})};
-    // Storage/size failures happen before closing or modifying the form.
+    // 保存容量やサイズによる失敗は、フォームを閉じたり変更したりする前に検出する。
     saveManagedRecord_(r);
     return resumeManagedFormUpdateUnlocked_(r);
   });
@@ -941,7 +1002,7 @@ function resumeManagedFormUpdateUnlocked_(r) {
   if (!r.formUpdate) return r;
   const context = managedUpdateContext_(r), update = r.formUpdate;
   try {
-    // Keep submissions closed until both Forms and Sheets have been read back.
+    // Forms と Sheets の両方を読み戻して確認するまで、回答受付を停止したままにする。
     if (context.form.isAcceptingResponses()) context.form.setAcceptingResponses(false);
     let current = managedUpdateMetadata_(r.formId), digest = managedFormContentDigest_(current);
     if (update.phase === 'apply') {
@@ -955,7 +1016,7 @@ function resumeManagedFormUpdateUnlocked_(r) {
       const result = arrangeManagedFormColumns_(context.sheet,update.plan);
       r.formSync = update.plan.sync;
       r.formSync.archivedHeaders = result.retained;
-      r.baseHeaders = update.plan.order.filter(function(h) {return ![r.input.nameHeader,r.input.statusHeader].concat(managedCustomColumns_(r.input).map(function(c) {return c.header;})).includes(h);});
+      r.baseHeaders = update.plan.order.filter(function(h) {return ![r.input.nameHeader,r.input.statusHeader,SCORING_MANAGEMENT_HEADER].concat(managedCustomColumns_(r.input).map(function(c) {return c.header;})).includes(h);});
       r.baseColumnCount = r.baseHeaders.length;
       update.phase = 'restore';update.result = result;saveManagedRecord_(r);
     }
@@ -964,10 +1025,10 @@ function resumeManagedFormUpdateUnlocked_(r) {
     r.lastFormUpdate = update.result;delete r.formUpdate;
     return saveManagedRecord_(r);
   } catch (error) {
-    // The saved transaction stays resumable even when the error/status write fails.
+    // エラーや状態の書き込みに失敗しても、保存済みの処理は再開できる。
     const saved = loadManagedRecord_(r.id);
     saved.lastError = String(error.message || error).slice(0,500);
-    try {saveManagedRecord_(saved);} catch (ignored) { /* Original checkpoint remains authoritative. */ }
+    try {saveManagedRecord_(saved);} catch (ignored) { /* 元の処理記録を正とする。 */ }
     throw error;
   }
 }
@@ -980,7 +1041,7 @@ function managedCanonicalSnapshot_(value) {
   return result;
 }
 
-/** Strict RFC3339 boundary: reject impossible calendar dates before normalization. */
+/** RFC3339 の入力を厳密に確認し、正規化前に実在しない日付を拒否する。 */
 function managedFutureTime_(value) {
   const text=typeof value==='string'?value:'';
   const parts=text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/);
@@ -1090,13 +1151,13 @@ function runManagedFormAction(id, action, fingerprint, verifiedEmailConfirmed, o
       post=service.create(body,r.courseId);
     }
     if(!post||!post.id)throw new Error('投稿IDを確認できません。Classroomの投稿結果を照合してください。');
-    // Preserve the established immediate-create response contract (ID/link only is sufficient).
+    // 即時作成の従来の応答形式を維持する（ID とリンクだけで十分）。
     if(!changing&&action==='publish'&&!post.state)post.state='PUBLISHED';
     applyManagedMaterialState_(r,post);r.accepting=form.isAcceptingResponses();return saveManagedRecord_(r);
   });
 }
 
-/** Reconcile unknown results without recreating posts; time alone never proves publication. */
+/** 結果が不明な場合は投稿を再作成せずに照合する。時刻だけでは公開済みと判断しない。 */
 function reconcileManagedPost(id, expectedRevision) {
   return withAppLock_(function(){
     const r=loadManagedRecord_(id,expectedRevision),service=managedPostService_(r);
@@ -1117,7 +1178,7 @@ function reconcileManagedPost(id, expectedRevision) {
     }
     if(r.stage==='delete_review'){
       const post=service.get(r.courseId,managedPostId_(r));
-      // 404 also occurs after lost access; only an explicit state confirms deletion.
+      // アクセス権を失った場合も 404 になるため、明示的な状態でのみ削除を確認する。
       if(post.state!=='DELETED')throw new Error('投稿が残っています。対象を確認して削除を再実行できます。');
       r.stage='deleted';r.deletedAt=new Date().toISOString();return saveManagedRecord_(r);
     }
@@ -1143,42 +1204,78 @@ function assertWebOperator_() {
   }
 }
 
-function doGet() {
+/** 採点テンプレの専用画面と埋め込み画面で同じHTML・配色を使う。配置ファイルは増やさない。 */
+function createAppHtmlOutput_(name) {
+  const html = HtmlService.createHtmlOutputFromFile(name === 'Templates' ? 'Scoring' : name);
+  if (name === 'Templates') {
+    const editor=html.getContent().match(/<template id="ruleBuilderTemplate">([\s\S]*?)<\/template>/);
+    if(!editor)throw new Error('採点テンプレ作成画面が見つかりません。Scoring.html を更新してください。');
+    const url=getVerifiedWebConsoleUrl_();
+    const navigation='<nav class="toolbar" aria-label="画面の移動"><strong>採点テンプレ作成</strong>'+
+      (url?' <a class="link" href="'+escapeWebLink_(url)+'" target="_blank" rel="noopener">管理画面</a> <a class="link" href="'+escapeWebLink_(url+'?page=scoring')+'" target="_blank" rel="noopener">採点画面</a>':'')+'</nav>';
+    html.setContent(editor[1].replace('<body>','<body>'+navigation));
+  }
+  if (name === 'Scoring' || name === 'Templates') {
+    const setting = HtmlService.createHtmlOutputFromFile('Setting').getContent();
+    const theme = setting.match(/<style id="app-theme">[\s\S]*?<\/style>/);
+    if (!theme) throw new Error('共通配色が見つかりません。Setting.html を更新してください。');
+    html.setContent(html.getContent().replace(/<head>/g, '<head>\n' + theme[0]));
+  }
+  return html;
+}
+
+function doGet(e) {
   assertWebOperator_();
   rememberWebConsoleUrl_();
-  const html=HtmlService.createHtmlOutputFromFile('Setting');
-  return html.setTitle('turret 管理画面').addMetaTag('viewport', 'width=device-width, initial-scale=1');
+  const page=e && e.parameter && e.parameter.page;
+  const name=page==='scoring'?'Scoring':page==='templates'?'Templates':'Setting';
+  const html=createAppHtmlOutput_(name);
+  return html.setTitle(name==='Scoring'?'turret 採点画面':name==='Templates'?'turret 採点テンプレ作成':'turret 管理画面').addMetaTag('viewport', 'width=device-width, initial-scale=1');
 }
 
 function connectWebConsole() {
+  return connectWebScreen_('settings');
+}
+
+function connectScoringConsole() {
+  return connectWebScreen_('scoring');
+}
+
+function openScoringRuleEditor() {
+  return connectWebScreen_('templates');
+}
+
+function connectWebScreen_(page) {
+  const label = page === 'scoring' ? '採点画面' : page === 'templates' ? '採点テンプレ作成画面' : '管理画面';
   const result = withAppLock_(function() {
     const active = SpreadsheetApp.getActiveSpreadsheet();
     if (!active) throw new Error('接続するスプシのメニューから実行してください。');
     PropertiesService.getScriptProperties().setProperty('TURRET_WEB_TARGET', active.getId());
     PropertiesService.getScriptProperties().setProperty('TURRET_BOUND_TEMPLATE', active.getId());
-    return getVerifiedWebConsoleUrl_();
+    const url = getVerifiedWebConsoleUrl_();
+    return url && (page === 'scoring' || page === 'templates') ? url + '?page=' + page : url;
   });
   const body = result ?
-    '<p id="openStatus" role="status">管理画面を別のタブで開いています。開かない場合は下のリンクを押してください。</p>' +
-    '<p><a href="' + escapeWebLink_(result) + '" target="_blank" rel="noopener">Web管理画面を開く ↗</a></p>' +
+    '<p id="openStatus" role="status">' + label + 'を別のタブで開いています。開かない場合は下のリンクを押してください。</p>' +
+    '<p><a href="' + escapeWebLink_(result) + '" target="_blank" rel="noopener">' + label + 'を開く</a></p>' +
     '<label for="webUrl">WebアプリのURL</label><input id="webUrl" readonly value="' + escapeWebLink_(result) + '" onclick="this.select()">' +
     '<button onclick="copyUrl()">URLをコピー</button><span id="copyStatus" role="status"></span>' +
     '<script>async function copyUrl(){const input=document.getElementById("webUrl");input.focus();input.select();let copied=false;' +
     'try{await navigator.clipboard.writeText(input.value);copied=true;}catch(e){try{copied=document.execCommand("copy");}catch(ignored){}}' +
     'document.getElementById("copyStatus").textContent=copied?"コピーしました":"選択したURLを Ctrl+C / ⌘C でコピーしてください";}' +
     'try{const tab=window.open("about:blank","_blank");if(tab){tab.opener=null;tab.location.href=document.getElementById("webUrl").value;google.script.host.close();}' +
-    'else{document.getElementById("openStatus").textContent="自動で開けませんでした。下のリンクから管理画面を開いてください。";}}' +
-    'catch(e){document.getElementById("openStatus").textContent="下のリンクから管理画面を開いてください。";}</script>' :
+    'else{document.getElementById("openStatus").textContent="自動で開けませんでした。下のリンクから'+label+'を開いてください。";}}' +
+    'catch(e){document.getElementById("openStatus").textContent="下のリンクから'+label+'を開いてください。";}</script>' :
     '<p>このスプシを接続しました。公開したWeb管理画面を一度開くと、ここに正しいURLが登録されます。</p>' +
     '<p>Apps Scriptの「デプロイ → デプロイを管理」でWebアプリのURLを開いてください。未公開なら「新しいデプロイ → ウェブアプリ」で作成します。</p>' +
     '<p>実行ユーザー：自分 ／ アクセスできるユーザー：自分のみ</p>';
   const html = HtmlService.createHtmlOutput('<!doctype html><html lang="ja"><head><meta charset="utf-8"><style>' +
     'body{font:14px sans-serif;padding:12px;color:#183536}input{display:block;box-sizing:border-box;width:100%;padding:10px;margin:8px 0 12px}' +
     'a{color:#126d63}button{padding:8px 14px;cursor:pointer}#copyStatus{display:block;margin-top:10px}</style></head><body>' + body + '</body></html>').setWidth(620).setHeight(280);
-  SpreadsheetApp.getUi().showModelessDialog(html, 'Web管理画面');
+  SpreadsheetApp.getUi().showModelessDialog(html, label);
 }
 
-/** Only doGet calls this: bound getUrl() can return an obsolete copied-project URL. */
+/** doGet からだけ呼ぶ。コンテナに紐付く getUrl() は、コピー元の古い URL を返す場合がある。 */
 function rememberWebConsoleUrl_() {
   const url = ScriptApp.getService().getUrl();
   if (!isPublishedWebConsoleUrl_(url)) return;
@@ -1207,7 +1304,9 @@ function getWebConsoleBootstrap() {
   if (!active) assertWebOperator_();
   const id = active ? active.getId() : PropertiesService.getScriptProperties().getProperty('TURRET_WEB_TARGET');
   return { web: !active, connected: !!id, spreadsheetId: id || '', canCopyOperation:!!active || PropertiesService.getScriptProperties().getProperty('TURRET_BOUND_TEMPLATE')===id,
-    url: id ? 'https://docs.google.com/spreadsheets/d/' + id + '/edit' : '' };
+    url: id ? 'https://docs.google.com/spreadsheets/d/' + id + '/edit' : '',
+    settingsUrl: getVerifiedWebConsoleUrl_() || '',
+    scoringUrl: getVerifiedWebConsoleUrl_() ? getVerifiedWebConsoleUrl_() + '?page=scoring' : '' };
 }
 
 function createWebOperation(name) {
@@ -1257,9 +1356,9 @@ function createNextOperation(name, folder, fingerprint) {
     if(record.copyId===p.sourceId)throw new Error('複製元は変更できません。');
     const copy=SpreadsheetApp.openById(record.copyId);
     record.stage='sanitizing';saveManagedRecord_(record);
-    // Only a newly created copy is sanitized. Never clear the source operation.
+    // 新規作成したコピーだけを初期化し、コピー元の運用データは消さない。
     const keep=['クラス一覧',STUDENT_SHEET_NAME];
-    // Always leave a visible roster tab, even for a copy made before setup.
+    // 設定前に作成したコピーでも、表示可能な名簿タブを必ず残す。
     const classes=copy.getSheetByName('クラス一覧')||copy.insertSheet('クラス一覧');
     if(!classes.getLastRow())classes.getRange(1,1,1,3).setValues([['クラス名','コースID','同期対象(1)']]);
     classes.showSheet();
@@ -1274,7 +1373,7 @@ function nextOperationResult_(record) {
   return Object.assign({},record,{settingsProfile:buildSettingsProfile_(config,true)});
 }
 
-// Compatibility for existing spreadsheet buttons: all administration now opens on the web.
+// 既存のスプレッドシート内ボタンとの互換性を保つ。管理画面はすべて Web で開く。
 function openMaintenanceDialog() { return connectWebConsole(); }
 function openManualActionsDialog() { return connectWebConsole(); }
 function openClassesSheet() { return openAdminSheet('classes'); }
@@ -1297,11 +1396,12 @@ function adminDigest_(value) {
     .map(function(byte) { return ('0' + ((byte + 256) % 256).toString(16)).slice(-2); }).join('');
 }
 
-function adminActionRevision_(action, config) {
+function adminActionRevision_(action, config, snapshots) {
   const names = { send: SEND_SHEET_NAME, clearEval: EVAL_SHEET_NAME, clearSend: SEND_SHEET_NAME, clearErrors: ERROR_SHEET_NAME };
   const name = names[action];
-  const sheet = name ? getAppSpreadsheet_().getSheetByName(name) : null;
-  return adminDigest_([action, getConfigRevision_(config), name ? adminSheetValues_(sheet) : []]);
+  const values = !name ? [] : snapshots && Object.prototype.hasOwnProperty.call(snapshots,name)
+    ? snapshots[name] : adminSheetValues_(getAppSpreadsheet_().getSheetByName(name));
+  return adminDigest_([action, getConfigRevision_(config), values]);
 }
 
 function getAdminConsoleData() { return withAppLock_(getAdminConsoleDataUnlocked_); }
@@ -1312,17 +1412,18 @@ function getAdminConsoleDataUnlocked_() {
   try { migrateConfigStorageUnlocked_(); config = getConfig_(); } catch (error) {
     recoveryRequired = true;
     warnings.push('設定の復旧が必要です。自動実行を停止し、内部設定と設定JSONを確認してください。' + String(error.message || error));
-    // Display-only fallback. Every write and send still calls the fail-closed getConfig_.
+    // 表示専用の代替処理。書き込みと送信では必ず、不正な設定を拒否する getConfig_ を呼ぶ。
     try { config = loadConfig_(); } catch (readError) {
       config = buildDefaultConfig_();
       warnings.push('現在の設定を表示できないため、入力欄は空です。空欄を保存済み設定とみなさないでください。');
     }
   }
   const ss = getAppSpreadsheet_();
-  const values = {};
+  const values = {}, snapshots = {};
   const sheets = ADMIN_SHEETS.map(function(item) {
     const sheet = ss.getSheetByName(item.label);
     values[item.key] = adminSheetValues_(sheet);
+    snapshots[item.label] = values[item.key];
     return { key: item.key, label: item.label, exists: !!sheet, rows: adminNonemptyRows_(values[item.key]).length,
       url: sheet ? adminSheetUrl_(ss, sheet) : '' };
   });
@@ -1371,12 +1472,14 @@ function getAdminConsoleDataUnlocked_() {
   }
   const sendHeaderMap = createHeaderMap_(values.send[0] || []);
   const sendRows = adminNonemptyRows_(values.send);
+  const legacyHeader = createHeaderMap_(values.evaluation[0] || []);
   const counts = { classes: classes.length, selectedClasses: selected.length, students: students.length, mappings: mappings.length,
     evalRows: adminNonemptyRows_(values.evaluation).length, sendRows: sendRows.length,
+    legacyPending: adminNonemptyRows_(values.evaluation).filter(function(row) { return String(row[legacyHeader['処理状態']] || '').trim() !== '準備〇'; }).length,
     pendingSend: sendRows.filter(function(row) { return ['', '未'].indexOf(String(row[sendHeaderMap['送信状態']] || '').trim()) >= 0; }).length,
     reviewSend: sendRows.filter(function(row) { return String(row[sendHeaderMap['送信状態']] || '').trim() === SEND_REVIEW_STATUS; }).length,
     errorRows: adminNonemptyRows_(values.errors).length };
-  const prepared = ['classes', 'students'].every(function(key) { return sheets.some(function(sheet) { return sheet.key === key && sheet.exists; }); });
+  const prepared = !!managedSheet_(false) && ['classes', 'students', 'send'].every(function(key) { return sheets.some(function(sheet) { return sheet.key === key && sheet.exists; }); });
   const progress = [
     { id: 'prepare', title: 'シートの準備', state: prepared ? 'complete' : 'pending', detail: prepared ? '必要なシートを作成済み' : '最初に管理用シートを準備します' },
     { id: 'classes', title: 'クラスの選択', state: selected.length ? 'complete' : 'pending', detail: selected.length ? selected.length + 'クラスを選択中' : '一覧を取得し、同期対象に1を入力します' },
@@ -1394,7 +1497,7 @@ function getAdminConsoleDataUnlocked_() {
     ['forms','publish'].forEach(function(id) { progress.push({id:id,title:id==='forms'?'フォームを準備':'資料を投稿',state:'attention',detail:'フォームの履歴を確認できません。該当手順で再取得してください。'}); });
   }
   const actionRevisions = {};
-  ['send', 'remind', 'clearEval', 'clearSend', 'clearErrors'].forEach(function(action) { actionRevisions[action] = adminActionRevision_(action, config); });
+  ['send', 'remind', 'clearEval', 'clearSend', 'clearErrors'].forEach(function(action) { actionRevisions[action] = adminActionRevision_(action, config, snapshots); });
   const configParseError = PropertiesService.getScriptProperties().getProperty('APP_CONFIG_PARSE_ERROR') === '1';
   if (configParseError) warnings.push('保存済み設定の読み込みに失敗しました。内部バックアップから表示した設定と設定JSONを確認してから保存してください。');
   return { config: config, revision: getConfigRevision_(config), progress: progress, counts: counts, sheets: sheets,
@@ -1404,7 +1507,7 @@ function getAdminConsoleDataUnlocked_() {
     initialPanel: PropertiesService.getUserProperties().getProperty('TURRET_ADMIN_PANEL') || 'setup', actionRevisions: actionRevisions };
 }
 
-/** Read-only recovery guidance. Logs are history, never proof that an issue remains unresolved. */
+/** 読み取り専用の復旧案内。ログは履歴であり、問題が未解決である証拠とは限らない。 */
 function buildAdminHealth_(values, recoveryRequired) {
   const items = [];
   const add = function(code, title, count, detail, action, sheetKey) {
@@ -1417,7 +1520,7 @@ function buildAdminHealth_(values, recoveryRequired) {
   add('SEND_ERROR', '送信できなかった行', countStatus('エラー'), '宛先や権限などの確認が必要です。', 'エラーシートの原因を解消し、宛先・本文と未投稿を確認してから対象の送信状態を「未」に戻します。', 'send');
   add('SEND_RETRY', '再送待ち', countStatus('未'), '送信を拒否された行で、次回の送信対象です。', '制限や設定を確認し、次回の自動実行を待つか、手動実行から送信内容を確認してください。', 'send');
   const evaluation = values.evaluation || [], evalMap = createHeaderMap_(evaluation[0] || []);
-  add('PREPARE_ERROR', '本文を準備できなかった行', adminNonemptyRows_(evaluation).filter(function(row) { return row[evalMap['処理状態']] === '準備×'; }).length,
+  add('PREPARE_ERROR', '旧評価データの移行で準備できなかった行', adminNonemptyRows_(evaluation).filter(function(row) { return row[evalMap['処理状態']] === '準備×'; }).length,
     '生徒・対応表・本文を確認してください。', '設定診断で原因を確認し、修正後に対象の評価データの処理状態を空欄にして本文を再生成します。既存の送信行がある場合は先に照合してください。', 'evaluation');
   const errors = adminNonemptyRows_(values.errors || []);
   add('FORM_UPDATE_ERROR', '元フォームへの書き戻しの記録', errors.filter(function(row) { return row[5] === 'FORM_UPDATE_ERROR'; }).length,
@@ -1440,7 +1543,7 @@ function buildAdminHealth_(values, recoveryRequired) {
   return { status: items.length ? 'attention' : 'ok', items: items, lastRuns: lastRuns };
 }
 
-/** No ensure/create/write functions or Classroom calls are used by this diagnostic. */
+/** この診断では作成・書き込み関数も Classroom 呼び出しも使わない。 */
 function diagnoseSetup(expectedRevision) {
   return withAppLock_(function() {
     const config = getConfig_(), revision = getConfigRevision_(config);
@@ -1505,9 +1608,24 @@ function diagnoseSetup(expectedRevision) {
       if (result.status === 'error') return result;
     }
     const evalValues = read(ss.getSheetByName(EVAL_SHEET_NAME)).display;
-    const sendValues = read(ss.getSheetByName(SEND_SHEET_NAME)).display;
-    const evalValid = !evalValues.length || requireHeaders(evalValues, getConfiguredEvalHeaders_(config), '評価データ', true);
-    const sendValid = !sendValues.length || requireHeaders(sendValues, getConfiguredSendHeaders_(config), '送信シート', true);
+    const sendSheet = ss.getSheetByName(SEND_SHEET_NAME);
+    const sendValues = read(sendSheet).display;
+    const legacyStateColumn = (evalValues[0] || []).indexOf('処理状態');
+    const legacyPending = evalValues.slice(1).some(function(row) { return row.some(function(v) { return String(v).trim(); }) && row[legacyStateColumn] !== '準備〇'; });
+    let evalValid = evalValues.length <= 1 || requireHeaders(evalValues, legacyPending ? getConfiguredEvalHeaders_(config) : EVAL_BASE_HEADERS, '旧評価データ', false);
+    if (legacyPending) {
+      try { validateLegacyEvaluationFields_(config); } catch (error) {
+        evalValid = false;
+        check('error', '旧評価データの項目列', error.message, '旧項目の列対応を確認し、移行を完了してから項目を変更してください。');
+      }
+    }
+    const sendHeaders = getConfiguredSendHeaders_(config);
+    // 初期準備の空シートは、送信データ準備時に現在の設定で見出しを整える。
+    const emptySend = !sendSheet || sendSheet.getLastRow() <= 1;
+    const sendValid = emptySend || requireHeaders(sendValues, sendHeaders, '送信シート', true);
+    if (emptySend && sendValues.length && JSON.stringify(sendValues[0]) !== JSON.stringify(sendHeaders)) {
+      check('info', '送信シートの列', 'データ行はありません。送信データを準備すると、現在の設定に合わせて見出しを更新します。');
+    }
     const eh = createHeaderMap_(evalValues[0] || []), qh = createHeaderMap_(sendValues[0] || []);
     const evalKeys = evalValid ? collectResponseKeys_(evalValues, eh) : new Set();
     const sendKeys = sendValid ? collectResponseKeys_(sendValues, qh) : new Set();
@@ -1565,7 +1683,7 @@ function diagnoseSetup(expectedRevision) {
     });
     const preparedKeys = new Set(sendKeys);
     if (evalValid) evalValues.slice(1).forEach(function(row) {
-      const item = rowItem(row, eh, '本文生成待ち');
+      const item = rowItem(row, eh, '旧評価データの移行待ち');
       const key = makeResponseKey_(item.sourceId, item.sourceSheet, item.sourceRow);
       if (!row.some(function(v) { return String(v).trim(); }) || row[eh['処理状態']] || preparedKeys.has(key)) { result.counts.skipped++; return; }
       config.fields.forEach(function(field) { item.fields[field.key] = String(row[eh[getFieldEvalHeader_(field)]] || '').trim(); });
@@ -1581,7 +1699,7 @@ function diagnoseSetup(expectedRevision) {
       seenSources.add(source.id); result.counts.sources++;
       try {
         const sourceSs = SpreadsheetApp.openById(source.id);
-        const sheets = sourceSs.getSheets().filter(function(sheet) { return sheetMatchesPrefixes_(sheet.getName(), config.formSheetNamePrefix); });
+        const sheets = sourceSs.getSheets().filter(function(sheet) { return !isManagedInternalSheet_(sheet.getName(), source.id) && sheetMatchesPrefixes_(sheet.getName(), config.formSheetNamePrefix); });
         if (!sheets.length) check('error', 'フォームの対象シート', '設定した先頭文字に一致するシートがありません。', '対象シート名の先頭文字を確認してください。');
         sheets.forEach(function(sheet) {
           result.counts.sheets++;
@@ -1592,8 +1710,10 @@ function diagnoseSetup(expectedRevision) {
           values.raw.slice(1).forEach(function(row, index) {
             const rowNo = index + 2, key = makeResponseKey_(source.id, sheet.getName(), rowNo);
             const email = String(row[h[config.emailHeader]] || '').trim();
-            if (!email || String(row[h[config.formStatusHeader]] || '').trim() || String(row[h[config.scoreSourceHeader]] == null ? '' : row[h[config.scoreSourceHeader]]).trim() === '' || evalKeys.has(key) || sendKeys.has(key)) { result.counts.skipped++; return; }
-            const item = { stage: '取り込み待ち', sourceId: source.id, sourceSheet: sheet.getName(), sourceRow: rowNo, email: email, name: String(row[h[config.studentNameHeader]] || '').trim(), fields: {} };
+            const sourceState = String(row[h[config.formStatusHeader]] || '').trim();
+            if (!email || (sourceState && sourceState !== '準備×') || String(row[h[config.scoreSourceHeader]] == null ? '' : row[h[config.scoreSourceHeader]]).trim() === '' || evalKeys.has(key) || sendKeys.has(key)) { result.counts.skipped++; return; }
+            if (sourceState === '準備×') check('error', sheet.getName() + ' ' + rowNo + '行の準備エラー', '前回の送信データ準備に失敗しています。', '下の診断結果を確認・修正し、この回答の状態列を空欄にして送信データを準備してください。');
+            const item = { stage: '送信データ準備待ち', sourceId: source.id, sourceSheet: sheet.getName(), sourceRow: rowNo, email: email, name: String(row[h[config.studentNameHeader]] || '').trim(), fields: {} };
             config.fields.forEach(function(field) {
               const raw = row[h[field.sourceHeader]];
               item.fields[field.key] = processConfiguredFieldValue_(field, raw, values.display[index + 1][h[field.sourceHeader]], config);
@@ -1611,7 +1731,7 @@ function diagnoseSetup(expectedRevision) {
   });
 }
 
-/** Automation calls this under the common lock, before touching any triggers. */
+/** 自動処理が共通ロック中、トリガーを操作する前に呼ぶ。 */
 function assertAdminReadyForAutomation_() {
   const data = getAdminConsoleDataUnlocked_();
   if (!data.ready) {
@@ -1647,12 +1767,12 @@ function runAdminAction(action, confirmed, expectedRevision) {
     }
     let message = '';
     switch (action) {
-      case 'initialize': initializeSheetsUnlocked_(); message = '必要なシートを準備しました。'; break;
+      case 'initialize': initializeSheetsUnlocked_(); message = '必要なシートを準備しました（クラス一覧・生徒一覧・採点テンプレ・対応表・送信シート・エラー・フォーム管理）。'; break;
       case 'classes': classroomdataUnlocked_(); message = 'クラス一覧を更新しました。シートで同期対象に1を入力してください。'; break;
       case 'students': message = studentdataMultiUnlocked_(); break;
       case 'mapping': message = createMappingSheetUnlocked_(); break;
-      case 'import': importFromFormsToEvalUnlocked_(); message = 'フォームからの取り込みが終了しました。'; break;
-      case 'prepare': evalToSendSheetUnlocked_(); message = '送信データの生成が終了しました。送信シートとエラーを確認してください。'; break;
+      case 'import':
+      case 'prepare': prepareSendDataUnlocked_(); message = '送信データの準備が終了しました。送信シートとエラーを確認してください。'; break;
       case 'send': message = sendMessagesUnlocked_(); break;
       case 'remind': remindUngradedAndErrorsUnlocked_(); message = 'リマインダー処理が終了しました。通知対象がある場合のみメールを送信します。'; break;
       default:
@@ -1751,7 +1871,7 @@ function parseSettingsProfile_(json) {
   });
   if (typeof profile.schedule.reminderEnabled !== 'boolean') throw new Error('リマインダーの有効設定が不正です。');
   if (profile.schedule.importHour >= profile.schedule.deliveryHour || (profile.schedule.reminderEnabled && profile.schedule.deliveryHour >= profile.schedule.reminderHour)) {
-    throw new Error('時間帯は取り込み→送信→リマインダーの順に分けてください。');
+    throw new Error('時間帯は送信データ準備→送信→リマインダーの順に分けてください。');
   }
   validateConfigDraft_(profile.config);
   return profile;
@@ -1790,3 +1910,387 @@ function applySettingsProfile(json, expectedRevision) {
     return { message: '設定JSONを適用しました。自動実行は開始していません。各手順の設定を確認してください。', data: getAdminConsoleDataUnlocked_() };
   });
 }
+
+// === 予約処理（旧 Automation.gs） ===
+/** 日次自動処理。古いトリガーや孤立したトリガーが動かないよう、トリガー ID をまとめて確定する。 */
+const AUTOMATION_STATE_KEY_ = 'APP_AUTOMATION_STATE';
+const AUTOMATION_OWNER_KEY_ = 'APP_AUTOMATION_OWNER';
+const AUTOMATION_RUNS_KEY_ = 'APP_AUTOMATION_RUNS';
+const AUTOMATION_TIMEZONE_ = 'Asia/Tokyo';
+const AUTOMATION_HANDLERS_ = {
+  import: 'managedAutomationImport_',
+  delivery: 'managedAutomationDelivery_',
+  reminder: 'managedAutomationReminder_'
+};
+const AUTOMATION_LEGACY_HANDLERS_ = ['prepareSendData', 'importFromFormsToEval', 'evalToSendSheet', 'sendMessages', 'remindUngradedAndErrors'];
+
+/** 回答締切は返却処理から独立させる。共通の時刻トリガーを1つ使い、フォームごとのトリガーは作らない。 */
+const FORM_SCHEDULE_KEY_ = 'TURRET_FORM_SCHEDULE_TRIGGER';
+const FORM_SCHEDULE_HANDLER_ = 'managedFormScheduleTick_';
+
+function readManagedFormSchedule_() {
+  const raw=PropertiesService.getScriptProperties().getProperty(FORM_SCHEDULE_KEY_);
+  if(!raw)return null;
+  let record;try{record=JSON.parse(raw);}catch(error){throw new Error('受付終了タイマーの登録情報を読めません。');}
+  if(!record||!record.id||!record.owner||!record.spreadsheetId||!record.scriptId)throw new Error('受付終了タイマーの登録情報が不正です。');
+  return record;
+}
+
+function assertManagedFormScheduleOwner_() {
+  const record=readManagedFormSchedule_();
+  if(record&&(record.spreadsheetId!==getAppSpreadsheet_().getId()||record.scriptId!==ScriptApp.getScriptId()))throw new Error('別の運用の受付終了タイマーです。');
+  return assertAutomationOwner_(record||{owner:''});
+}
+
+/** 呼び出し元はアプリ共通ロックを保持する。確定済みの ID だけ実行を許可する。 */
+function ensureManagedFormScheduleTrigger_() {
+  const owner=assertManagedFormScheduleOwner_(),old=readManagedFormSchedule_();
+  const triggers=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()===FORM_SCHEDULE_HANDLER_&&t.getEventType()===ScriptApp.EventType.CLOCK;});
+  if(old&&triggers.some(function(t){return String(t.getUniqueId())===old.id;}))return old;
+  if(triggers.length)throw new Error('受付終了タイマーの作成結果が未確認です。Apps Scriptの未登録トリガーを確認してから修復してください。');
+  const trigger=ScriptApp.newTrigger(FORM_SCHEDULE_HANDLER_).timeBased().everyMinutes(5).create();
+  const record={id:String(trigger.getUniqueId()),owner:owner,spreadsheetId:getAppSpreadsheet_().getId(),scriptId:ScriptApp.getScriptId()};
+  const props=PropertiesService.getScriptProperties(),json=JSON.stringify(record);
+  try{props.setProperty(FORM_SCHEDULE_KEY_,json);}catch(error){
+    // 応答が失敗しても登録は完了している可能性がある。結果を推測で決めない。
+    let saved;try{saved=props.getProperty(FORM_SCHEDULE_KEY_);}catch(readError){throw new Error('受付終了タイマーの保存結果が未確認です。状態を更新してください。');}
+    if(saved!==json){try{ScriptApp.deleteTrigger(trigger);}catch(ignored){}throw error;}
+  }
+  return record;
+}
+
+function repairFormScheduleTimer() { return withAppLock_(function(){ensureManagedFormScheduleTrigger_();return getManagedFormScheduleSummary_();}); }
+
+function getManagedFormScheduleSummary_() {
+  try{
+    const record=readManagedFormSchedule_();
+    if(!record)return {registered:false,healthy:false,message:'受付終了日時の設定時に専用タイマーを作成します。'};
+    const owner=PropertiesService.getUserProperties().getProperty(AUTOMATION_OWNER_KEY_);
+    if(record.owner!==owner||record.spreadsheetId!==getAppSpreadsheet_().getId()||record.scriptId!==ScriptApp.getScriptId())return {registered:true,healthy:false,message:'受付終了タイマーを設定した管理者・運用で確認してください。'};
+    const healthy=ScriptApp.getProjectTriggers().some(function(t){return String(t.getUniqueId())===record.id&&t.getHandlerFunction()===FORM_SCHEDULE_HANDLER_;});
+    return {registered:true,healthy:healthy,message:healthy?'受付終了を約5分間隔で確認します。実行時刻は遅れる場合があります。':'受付終了タイマーが見つかりません。「タイマーを修復」を実行してください。'};
+  }catch(error){return {registered:true,healthy:false,message:String(error.message||error)};}
+}
+
+function managedFormScheduleTick_(event) {
+  return withAppLock_(function(){
+    const registration=readManagedFormSchedule_();
+    if(!registration||!event||String(event.triggerUid)!==registration.id||registration.owner!==PropertiesService.getUserProperties().getProperty(AUTOMATION_OWNER_KEY_)||
+      registration.spreadsheetId!==getAppSpreadsheet_().getId()||registration.scriptId!==ScriptApp.getScriptId())return;
+    const started=Date.now(),records=getManagedRecords_(),cache={records:records,sheet:null};
+    const due=records.filter(function(r){return r.kind==='form'&&r.ownerSpreadsheetId===registration.spreadsheetId&&r.ownerScriptId===registration.scriptId&&managedCloseIsDue_(r)&&r.closeState!=='closed';});
+    due.sort(function(a,b){return String(a.closeCheckedAt||'').localeCompare(String(b.closeCheckedAt||''));});
+    due.forEach(function(r){
+      if(Date.now()-started>200000)return;
+      try{
+        const form=FormApp.openById(r.formId);
+        if(form.isAcceptingResponses())form.setAcceptingResponses(false);
+        r.accepting=form.isAcceptingResponses();
+        if(r.accepting)throw new Error('フォームが受付中のままです。');
+        r.closeState='closed';r.closedAt=new Date().toISOString();r.closeError='';
+        if(r.formUpdate)r.formUpdate.accepting=false;
+      }catch(error){r.closeState='error';r.closeError=String(error.message||error).slice(0,500);}
+      r.closeCheckedAt=new Date().toISOString();
+      try{saveManagedRecord_(r,cache);}catch(error){Logger.log('受付終了の結果記録に失敗しました。次回に再確認します。');}
+    });
+  });
+}
+
+/** 日次返却とは別の処理で、メッセージは送信しない。呼び出し元はアプリ共通ロックを保持する。 */
+function ensureManagedResponseTrigger_() {
+  const props=PropertiesService.getScriptProperties(),raw=props.getProperty('TURRET_RESPONSE_TRIGGER');
+  const record=raw?JSON.parse(raw):null,ss=getAppSpreadsheet_();
+  const owner=assertAutomationOwner_(record||{owner:''});
+  if(record && record.spreadsheetId!==ss.getId())throw new Error('別の運用の回答トリガーが登録されています。');
+  const triggers=ScriptApp.getProjectTriggers().filter(function(t){return t.getHandlerFunction()==='managedFormResponseReceived_';});
+  if(record && triggers.some(function(t){return String(t.getUniqueId())===record.id;}))return record;
+  if(triggers.length)throw new Error('回答トリガーの作成結果を確認してください。Apps Scriptで残った未登録トリガーを確認・削除してから再実行してください。');
+  const trigger=ScriptApp.newTrigger('managedFormResponseReceived_').forSpreadsheet(ss).onFormSubmit().create();
+  const next={id:String(trigger.getUniqueId()),owner:owner,spreadsheetId:ss.getId()};
+  props.setProperty('TURRET_RESPONSE_TRIGGER',JSON.stringify(next));return next;
+}
+
+function managedFormResponseReceived_(event) {
+  return withAppLock_(function(){
+    const raw=PropertiesService.getScriptProperties().getProperty('TURRET_RESPONSE_TRIGGER');
+    if(!raw||!event||!event.triggerUid||!event.range||!event.source)return;
+    const registration=JSON.parse(raw), ss=getAppSpreadsheet_();
+    if(registration.id!==String(event.triggerUid)||registration.owner!==PropertiesService.getUserProperties().getProperty(AUTOMATION_OWNER_KEY_)||registration.spreadsheetId!==ss.getId()||event.source.getId()!==ss.getId())return;
+    const sheet=event.range.getSheet(),start=event.range.getRow();
+    if(start<2 || event.range.getNumRows()!==1 || sheet.getParent().getId()!==ss.getId())return;
+    const record=getManagedRecords_().find(function(r){return r.kind==='form'&&String(r.responseSheetId)===String(sheet.getSheetId());});
+    if(!record)return;
+    assertManagedOwner_(record);
+    if(record.formUpdate)return;
+    const result=fillManagedNames_(record,sheet,start,1);
+    if(result.unmatched)ensureErrorSheet_().appendRow([new Date(),sheet.getName(),start,'','','NAME_UNMATCHED','Classroom生徒一覧に照合できません。名簿を更新してフォーム管理の「名前を補完」を実行してください。']);
+  });
+}
+
+function automationRecipientsValid_(config) {
+  return Array.isArray(config.reminderTo) && config.reminderTo.length > 0 && config.reminderTo.every(function(address) {
+    return typeof address === 'string' && /^[^\s@,;]+@[^\s@,;]+\.[^\s@,;]+$/.test(address);
+  });
+}
+
+function validateAutomationSchedule_(schedule) {
+  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) throw new Error('自動実行の時刻設定が不正です。');
+  ['importHour', 'deliveryHour', 'reminderHour'].forEach(function(key) {
+    if (typeof schedule[key] !== 'number' || !Number.isInteger(schedule[key]) || schedule[key] < 0 || schedule[key] > 23) {
+      throw new Error('時刻は0〜23の整数で入力してください。');
+    }
+  });
+  if (typeof schedule.reminderEnabled !== 'boolean') throw new Error('リマインダーの有効・無効を選択してください。');
+  if (schedule.importHour >= schedule.deliveryHour || (schedule.reminderEnabled && schedule.deliveryHour >= schedule.reminderHour)) {
+    throw new Error('時間帯は送信データ準備、送信、リマインダーの順に重ならないよう設定してください。');
+  }
+  return { importHour: schedule.importHour, deliveryHour: schedule.deliveryHour, reminderHour: schedule.reminderHour, reminderEnabled: schedule.reminderEnabled };
+}
+
+function readAutomationRecord_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(AUTOMATION_STATE_KEY_);
+  if (!raw) return {
+    revision: '0', owner: '', enabled: false, active: [], activeSchedule: null,
+    // アプリ設定を読めない場合でも、復旧と停止の操作を可能にする。
+    schedule: { importHour: 5, deliveryHour: 8, reminderHour: 16, reminderEnabled: false }
+  };
+  let record;
+  try { record = JSON.parse(raw); } catch (error) { throw new Error('自動実行の保存情報を読めません。管理者に確認してください。'); }
+  if (!record || typeof record.revision !== 'string' || typeof record.owner !== 'string' || typeof record.enabled !== 'boolean' || !Array.isArray(record.active)) {
+    throw new Error('自動実行の保存情報が不正です。管理者に確認してください。');
+  }
+  record.schedule = validateAutomationSchedule_(record.schedule);
+  return record;
+}
+
+function getAutomationSchedule_() {
+  return readAutomationRecord_().schedule;
+}
+
+function getAutomationSummary_() {
+  const record = readAutomationRecord_();
+  const token = PropertiesService.getUserProperties().getProperty(AUTOMATION_OWNER_KEY_);
+  return { schedule: record.schedule, enabled: record.enabled, hasManagedOwner: !!record.owner, managedByCurrentUser: !!record.owner && record.owner === token };
+}
+
+/** 呼び出し元はアプリ共通ロックを保持する。この関数は ScriptApp にアクセスしない。 */
+function saveAutomationScheduleDraft_(schedule) {
+  const desired = validateAutomationSchedule_(schedule);
+  const record = readAutomationRecord_();
+  record.schedule = desired;
+  writeAutomationRecord_(record);
+  return desired;
+}
+
+function writeAutomationRecord_(record) {
+  record.revision = Utilities.getUuid();
+  const serialized = JSON.stringify(record);
+  const properties = PropertiesService.getScriptProperties();
+  try { properties.setProperty(AUTOMATION_STATE_KEY_, serialized); }
+  catch (error) {
+    // サービスが保存後に失敗を返す場合がある。巻き戻すか判断する前に読み戻す。
+    let current;
+    try { current = properties.getProperty(AUTOMATION_STATE_KEY_); }
+    catch (readError) {
+      const uncertain = new Error('自動実行の保存結果を確認できません。画面を再読込して状態を確認してください。');
+      uncertain.commitUncertain = true;
+      throw uncertain;
+    }
+    if (current !== serialized) throw new Error('自動実行の設定を保存できませんでした。画面を再読込して再実行してください。');
+  }
+}
+
+function assertAutomationRevision_(record, expectedRevision) {
+  if (expectedRevision !== record.revision) throw new Error('自動実行の設定が別の操作で変更されました。画面を再読込してください。');
+}
+
+function assertAutomationOwner_(record) {
+  let token = PropertiesService.getUserProperties().getProperty(AUTOMATION_OWNER_KEY_);
+  if (record.owner && token !== record.owner) throw new Error('別の管理者が自動実行を管理しています。同じ管理者アカウントで操作してください。');
+  if (!token) {
+    token = Utilities.getUuid();
+    PropertiesService.getUserProperties().setProperty(AUTOMATION_OWNER_KEY_, token);
+  }
+  return token;
+}
+
+function listAutomationTriggers_() {
+  return ScriptApp.getProjectTriggers().filter(function(trigger) {
+    return trigger.getEventType() === ScriptApp.EventType.CLOCK;
+  }).map(function(trigger) {
+    const handler = trigger.getHandlerFunction();
+    const kind = Object.keys(AUTOMATION_HANDLERS_).find(function(key) { return AUTOMATION_HANDLERS_[key] === handler; });
+    return { trigger: trigger, id: String(trigger.getUniqueId()), handler: handler, kind: kind || 'legacy', managed: !!kind, legacy: AUTOMATION_LEGACY_HANDLERS_.indexOf(handler) >= 0 };
+  }).filter(function(row) { return row.managed || row.legacy; });
+}
+
+function getAutomationState() {
+  return withAppLock_(getAutomationStateUnlocked_);
+}
+
+function getAutomationStateUnlocked_() {
+  const record = readAutomationRecord_();
+  const token = PropertiesService.getUserProperties().getProperty(AUTOMATION_OWNER_KEY_);
+  const owned = record.owner && record.owner === token;
+  const rows = listAutomationTriggers_();
+  const warnings = [
+    '実行時刻はAsia/Tokyoの指定した時台です。分単位の定刻は保証されません。',
+    '他のアカウントが作成したトリガーは確認できません。管理者を一人に決め、他のアカウントの旧トリガーは各作成者が停止してください。'
+  ];
+  if (record.owner && !owned) warnings.push('別の管理者の自動実行設定です。開始・変更・停止はその管理者アカウントで行ってください。');
+  if (record.enabled && JSON.stringify(record.schedule) !== JSON.stringify(record.activeSchedule)) warnings.push('保存した時間帯と稼働中の時間帯が異なります。「開始・変更」で反映してください。');
+  const triggers = rows.map(function(row) {
+    const active = !!owned && record.enabled && record.active.some(function(item) { return item.id === row.id && item.kind === row.kind; });
+    return { id: row.id, handler: row.handler, kind: row.kind, managed: row.managed, legacy: row.legacy, active: active };
+  });
+  const legacyCount = rows.filter(function(row) { return row.legacy; }).length;
+  if (legacyCount) warnings.push('旧処理のトリガーが' + legacyCount + '件あります。切り替える場合は旧トリガーの置換を確認してください。');
+  if (triggers.some(function(row) { return row.managed && !row.active; })) warnings.push('無効な管理用トリガーが残っています。実行は抑止されています。開始・変更または停止で削除を再試行できます。');
+  if (owned && record.enabled && record.active.some(function(item) { return !triggers.some(function(row) { return row.active && row.id === item.id; }); })) {
+    warnings.push('稼働予定のトリガーが見つかりません。「開始・変更」で作り直してください。');
+  }
+  let lastRuns = [];
+  try { lastRuns = JSON.parse(PropertiesService.getScriptProperties().getProperty(AUTOMATION_RUNS_KEY_) || '[]'); } catch (error) { warnings.push('最近の実行結果を読み取れませんでした。'); }
+  return { schedule: record.schedule, timezone: AUTOMATION_TIMEZONE_, enabled: record.enabled, legacyCount: legacyCount,
+    hasManagedOwner: !!record.owner, managedByCurrentUser: !!owned,
+    triggers: triggers, warnings: warnings, revision: record.revision, lastRuns: Array.isArray(lastRuns) ? lastRuns : [] };
+}
+
+function cleanupAutomationTriggers_(rows) {
+  const failed = [];
+  rows.forEach(function(row) {
+    try { ScriptApp.deleteTrigger(row.trigger || row); } catch (error) { failed.push(row); }
+  });
+  return failed;
+}
+
+function configureAutomation(schedule, expectedRevision, replaceLegacy, expectedConfigRevision) {
+  return withAppLock_(function() {
+    const desired = validateAutomationSchedule_(schedule);
+    const record = readAutomationRecord_();
+    assertAutomationRevision_(record, expectedRevision);
+    if (expectedConfigRevision !== undefined && expectedConfigRevision !== getConfigRevision_(getConfig_())) {
+      throw new Error('画面を開いた後に送信設定が変更されました。再読込して内容を確認してください。');
+    }
+    assertAdminReadyForAutomation_();
+    const owner = assertAutomationOwner_(record);
+    const config = getConfig_();
+    validateAppConfig_(config);
+    if (desired.reminderEnabled && !automationRecipientsValid_(config)) throw new Error('リマインダーの通知先を正しいメールアドレスで設定するか、リマインダーを無効にしてください。');
+    const existing = listAutomationTriggers_();
+    const legacy = existing.filter(function(row) { return row.legacy; });
+    if (legacy.length && replaceLegacy !== true) throw new Error('旧トリガーの置換確認が必要です。対象を確認してから切り替えてください。');
+    const created = [];
+    try {
+      ['import', 'delivery'].concat(desired.reminderEnabled ? ['reminder'] : []).forEach(function(kind) {
+        const trigger = ScriptApp.newTrigger(AUTOMATION_HANDLERS_[kind]).timeBased().atHour(desired[kind + 'Hour']).everyDays(1).inTimezone(AUTOMATION_TIMEZONE_).create();
+        created.push({ trigger: trigger, id: String(trigger.getUniqueId()), kind: kind });
+      });
+    } catch (error) {
+      cleanupAutomationTriggers_(created);
+      throw new Error('自動実行トリガーの作成に失敗しました。新しいトリガーは有効化していません。画面を再読込してください。');
+    }
+    // 旧トリガーには実行制限がないため、新しい世代を有効にする前にすべて削除する。
+    if (cleanupAutomationTriggers_(legacy).length) {
+      cleanupAutomationTriggers_(created);
+      throw new Error('旧トリガーを一部削除できませんでした。新しい自動実行は有効化していません。削除済みの旧時間帯は復元できないため、残った旧トリガーを確認して切り替えを再実行してください。');
+    }
+    record.schedule = desired;
+    record.activeSchedule = desired;
+    record.owner = owner;
+    record.enabled = true;
+    record.active = created.map(function(row) { return { id: row.id, kind: row.kind }; });
+    try { writeAutomationRecord_(record); }
+    catch (error) {
+      if (!error.commitUncertain) cleanupAutomationTriggers_(created);
+      if (legacy.length) throw new Error(error.message + ' 旧トリガーは削除済みで時間帯を復元できません。状態を確認して開始を再実行してください。');
+      throw error;
+    }
+    // ここで失敗しても、確定済みの世代しかイベントの許可リストを通れない。
+    cleanupAutomationTriggers_(existing.filter(function(row) { return row.managed; }));
+    return getAutomationStateUnlocked_();
+  });
+}
+
+function stopAutomation(expectedRevision, includeLegacy) {
+  return withAppLock_(function() {
+    const record = readAutomationRecord_();
+    assertAutomationRevision_(record, expectedRevision);
+    assertAutomationOwner_(record);
+    const existing = listAutomationTriggers_();
+    record.enabled = false;
+    record.active = [];
+    record.activeSchedule = null;
+    writeAutomationRecord_(record);
+    const failed = cleanupAutomationTriggers_(existing.filter(function(row) { return row.managed || (includeLegacy === true && row.legacy); }));
+    const state = getAutomationStateUnlocked_();
+    if (failed.some(function(row) { return row.legacy; })) state.warnings.push('旧トリガーを一部停止できませんでした。旧処理が動く可能性があります。残った旧トリガーを停止してください。');
+    return state;
+  });
+}
+
+function automationErrorRowCount_() {
+  try {
+    const sheet = getAppSpreadsheet_().getSheetByName('エラー');
+    return sheet ? Math.max(0, sheet.getLastRow() - 1) : 0;
+  } catch (error) { return null; }
+}
+
+function recordAutomationRun_(kind, status, startedAt, deliveryResult, errorDelta) {
+  try {
+    const properties = PropertiesService.getScriptProperties();
+    let runs;
+    try { runs = JSON.parse(properties.getProperty(AUTOMATION_RUNS_KEY_) || '[]'); } catch (error) { runs = []; }
+    if (!Array.isArray(runs)) runs = [];
+    let message = status === 'success' ? '処理が完了しました。処理対象の状態とエラーシートも確認してください。' : '処理に失敗しました。Apps Scriptの実行履歴とエラーシートを確認してください。';
+    // 管理画面に渡すのは既知の数値項目だけ。ワーカーやエラーの任意の文章は保存しない。
+    if (status === 'success' && kind === 'delivery' && typeof deliveryResult === 'string') {
+      const sent = deliveryResult.match(/送信成功\s*：\s*(\d+)件/);
+      const errors = deliveryResult.match(/エラー\s*：\s*(\d+)件/);
+      const reviews = deliveryResult.match(/要確認\s*：\s*(\d+)件/);
+      if (sent && errors && reviews) {
+        message = '送信成功：' + sent[1] + '件、エラー：' + errors[1] + '件、要確認：' + reviews[1] + '件。送信シートとエラーシートで確認してください。';
+        if (Number(errors[1]) || Number(reviews[1])) status = 'attention';
+      }
+    }
+    if (status !== 'error' && (errorDelta === null || errorDelta > 0)) {
+      status = 'attention';
+      message += errorDelta === null ? ' エラー記録を確認できませんでした。保守画面で状態を確認してください。' : ' 新しいエラー記録が' + errorDelta + '件あります。保守画面で確認してください。';
+    }
+    const finishedAt = new Date().toISOString();
+    const elapsedMs = Math.max(0, Date.parse(finishedAt) - Date.parse(startedAt));
+    runs.unshift({ kind: kind, status: status, startedAt: startedAt, finishedAt: finishedAt, elapsedMs: isFinite(elapsedMs) ? elapsedMs : 0, message: message });
+    properties.setProperty(AUTOMATION_RUNS_KEY_, JSON.stringify(runs.slice(0, 20)));
+  } catch (error) { Logger.log('自動実行の結果概要を保存できませんでした。'); }
+}
+
+function runManagedAutomation_(kind, event) {
+  return withAppLock_(function() {
+    const record = readAutomationRecord_();
+    const owner = PropertiesService.getUserProperties().getProperty(AUTOMATION_OWNER_KEY_);
+    if (!event || !event.triggerUid || !record.enabled || !record.owner || record.owner !== owner || !record.active.some(function(row) { return row.id === String(event.triggerUid) && row.kind === kind; })) return;
+    const startedAt = new Date().toISOString();
+    const errorsBefore = automationErrorRowCount_();
+    try {
+      let deliveryResult;
+      const config = getConfig_();
+      validateAppConfig_(config);
+      if (kind === 'import') prepareSendDataUnlocked_();
+      if (kind === 'delivery') deliveryResult = sendMessagesUnlocked_();
+      if (kind === 'reminder') {
+        if (!automationRecipientsValid_(config)) throw new Error('リマインダーの通知先が不正です。設定を確認してください。');
+        remindUngradedAndErrorsUnlocked_();
+      }
+      const errorsAfter = automationErrorRowCount_();
+      recordAutomationRun_(kind, 'success', startedAt, deliveryResult,
+        errorsBefore === null || errorsAfter === null ? null : Math.max(0, errorsAfter - errorsBefore));
+    } catch (error) {
+      recordAutomationRun_(kind, 'error', startedAt);
+      throw error;
+    }
+  });
+}
+
+function managedAutomationImport_(event) { return runManagedAutomation_('import', event); }
+function managedAutomationDelivery_(event) { return runManagedAutomation_('delivery', event); }
+function managedAutomationReminder_(event) { return runManagedAutomation_('reminder', event); }

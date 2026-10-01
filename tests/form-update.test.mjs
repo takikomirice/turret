@@ -6,6 +6,14 @@ const question=(id,title)=>({itemId:id,title,questionItem:{question:{questionId:
 const doc=items=>({revisionId:'rev1',info:{title:'クラス別',description:''},settings:{emailCollectionType:'VERIFIED'},items});
 const record=()=>({input:{templateId:'template',emailHeader:'メール',nameHeader:'名前',statusHeader:'状態',additionalColumns:[{header:'コメント',choices:[]}]}});
 const headers=['日時','メール','A','B','C','D','名前','コメント','状態'];
+test('updated forms keep management JSON and visible status at the right, after archived answers',()=>{
+ const {c}=adminEnvironment(),h=['日時','メール','A','B','名前','コメント','管理','状態','手入力'];
+ const p=c.buildManagedFormUpdate_(record(),doc([question('A','A')]),doc([question('A','A'),question('B','B')]),h);
+ const json='{"v":1,"save":{"state":"pending"}}',s=sheet([h,['t','m','a','b','n','comment',json,'済','keep']]);
+ c.arrangeManagedFormColumns_(s,p);c.arrangeManagedFormColumns_(s,p);
+ assert.deepEqual(s.rows[0],['日時','メール','A','名前','コメント','手入力','B','管理','状態']);
+ assert.equal(s.rows[1].at(-2),json);assert.equal(s.rows[1].at(-1),'済');assert.equal(s.rows[1][6],'b');
+});
 function sheet(rows){
  const s=new AdminSheet('回答',rows),get=s.getRange.bind(s);
  s.getRange=(r,c,h,w)=>Object.assign(get(r,c,h,w),{getColumn:()=>c,getNumColumns:()=>w||1});

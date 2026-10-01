@@ -12,6 +12,7 @@ export class NativeForm {
  addMultipleChoiceItem(){return this.add('MULTIPLE_CHOICE');} addListItem(){return this.add('LIST');} addCheckboxItem(){return this.add('CHECKBOX');}
  addGridItem(){return this.add('GRID');} addCheckboxGridItem(){return this.add('CHECKBOX_GRID');} addPageBreakItem(){return this.add('PAGE_BREAK');}
  addSectionHeaderItem(){return this.add('SECTION_HEADER');} addScaleItem(){return this.add('SCALE');}
+ addDateItem(){return this.add('DATE');}
  moveItem(item,index){const i=typeof item==='number'?this.items[item]:item;this.items.splice(this.items.indexOf(i),1);this.items.splice(index,0,i);this.changed('move',i);return i;}
  deleteItem(item){const i=typeof item==='number'?this.items[item]:item;this.items.splice(this.items.indexOf(i),1);this.changed('delete',i);return this;}
 }
@@ -21,6 +22,7 @@ class NativeItem {
  setTitle(v){const old=this.title;this.title=v;this.form.onTitle?.(this,old);this.form.changed('title',this);return this;}
  setHelpText(v){this.help=v;this.form.changed('help',this);return this;}
  isRequired(){return this.required;} setRequired(v){this.required=v;this.form.changed('required',this);return this;}
+ includesYear(){return this.year===true;} setIncludesYear(v){this.year=v;this.form.changed('year',this);return this;}
  getChoices(){return this.choices;} createChoice(value,nav){return {getValue:()=>value,getGotoPage:()=>typeof nav==='object'?nav:null,getPageNavigationType:()=>typeof nav==='string'?nav:null};}
  setChoices(v){this.choices=v;this.form.changed('choices',this);return this;}
  hasOtherOption(){return this.other;} showOtherOption(v){this.other=v;this.form.changed('other',this);return this;}
@@ -29,4 +31,5 @@ class NativeItem {
  getLeftLabel(){return this.labels[0];} getRightLabel(){return this.labels[1];} setLabels(a,b){this.labels=[a,b];this.form.changed('labels',this);return this;}
  getPageNavigationType(){return typeof this.navigation==='string'?this.navigation:'GO_TO_PAGE';} getGoToPage(){return typeof this.navigation==='object'?this.navigation:null;} setGoToPage(v){this.navigation=v;this.form.changed('navigation',this);return this;}
  asTextItem(){return this;} asParagraphTextItem(){return this;} asMultipleChoiceItem(){return this;} asListItem(){return this;} asCheckboxItem(){return this;} asGridItem(){return this;} asCheckboxGridItem(){return this;} asPageBreakItem(){return this;} asSectionHeaderItem(){return this;} asScaleItem(){return this;}
+ asDateItem(){return this;}
 }

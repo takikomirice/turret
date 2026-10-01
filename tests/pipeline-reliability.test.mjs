@@ -104,12 +104,12 @@ test('retry import after a source status failure does not append the response tw
   const e = environment();
   e.source.beforeWrite = () => { throw Error('source permission denied'); };
   e.c.importFromFormsToEval(); e.c.importFromFormsToEval();
-  assert.equal(e.sheets.get('評価データ').rows.length, 2);
+  assert.equal(e.sheets.get('送信シート').rows.length, 2);
   assert.equal(e.source.rows[1][2], '');
 });
 
 test('retry import after an append response is lost reads the committed row before appending', () => {
-  const e = environment(), target = e.sheets.get('評価データ');
+  const e = environment(), target = e.sheets.get('送信シート');
   target.afterBatch = () => { throw Error('append response lost'); };
   assert.throws(() => e.c.importFromFormsToEval(), /append response lost/);
   target.afterBatch = null;
@@ -218,7 +218,7 @@ for (const entrypoint of ['initializeSheets', 'saveSettingsFromDialog', 'classro
   });
 }
 
-test('import commits evaluation rows before advancing source status', () => {
+test('prepare commits send rows before advancing source status', () => {
   const e = environment();
   e.c.SpreadsheetApp.flush = () => { throw Error('flush failed'); };
   assert.throws(() => e.c.importFromFormsToEval(), /flush failed/);
