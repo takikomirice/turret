@@ -82,6 +82,18 @@ test('500 rows retain recipients, configured content and every send checkpoint w
   assert.equal(e.calls.posts.length, 500, 'completed rows are not resent');
 });
 
+test('optional attendance numbers preserve recipients and content throughout preparation and return', () => {
+  const legacy = pipeline(5), current = pipeline(5), roster = current.sheets.get('生徒一覧');
+  roster.rows.forEach((row, index) => row.splice(2, 0, index ? (index === 3 ? '' : String(index).padStart(2, '0')) : '出席番号（任意）'));
+  const before = plain(roster.rows);
+  for (const e of [legacy, current]) { e.c.prepareSendData(); e.c.sendMessages(); }
+  assert.equal(current.calls.posts.length, 5);
+  assert.deepEqual(current.calls.posts, legacy.calls.posts);
+  assert.deepEqual(roster.rows, before);
+  current.c.sendMessages();
+  assert.equal(current.calls.posts.length, 5);
+});
+
 test('missing email during preparation creates an actionable error record', () => {
   const e = pipeline(1);
   const evaluation = sheet([plain(e.c.getConfiguredEvalHeaders_(e.config)),[e.config.formSources[0].id,'Responses 1',2,'','生徒1','','優']]);

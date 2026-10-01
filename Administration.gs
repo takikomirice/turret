@@ -7,9 +7,287 @@ const ADMIN_SHEETS = [
 const PROFILE_CONFIG_KEYS = ['emailHeader', 'studentNameHeader', 'formStatusHeader', 'scoreSourceHeader',
   'replyBodyHeader', 'formSheetNamePrefix', 'fields', 'messageTemplate', 'gradeScale'];
 
-const MANAGED_FORM_SHEET_ = 'フォーム管理';
+const MANAGED_FORM_SHEET_ = 'システム管理';
 const MANAGED_FORM_HEADERS_ = ['種別', 'ID', '内容(JSON)'];
 const TEMPLATE_FORM_URL_KEY_ = 'TURRET_TEMPLATE_FORM_URL';
+
+/** 成績出力。元回答・返却判断から独立した出力用の設定を扱う。 */
+function gradeDefault_() {
+  return {base:{classIds:[],start:'',end:'',dateHeader:'授業の日付を入力してください',valueHeader:'',leading:['roster:number','roster:name'],sort:'name',mapping:{}},calendar:[],rules:{dates:[],answers:[],duplicates:[],fields:[],lessons:[]}};
+}
+function gradeDate_(value) { return scoringLessonDate_(value, 'Asia/Tokyo'); }
+function gradeKey_(parts) { return JSON.stringify(parts); }
+/** RPCがオブジェクトのキー順を変えても同じ内容として照合する。 */
+function gradeDigest_(value) {
+  function canonical(x){if(Object.prototype.toString.call(x)==='[object Date]')return isFinite(x.getTime())?x.toISOString():'Invalid Date';if(Array.isArray(x))return x.map(canonical);if(x && typeof x==='object'){const out=Object.create(null);Object.keys(x).sort().forEach(function(k){out[k]=canonical(x[k]);});return out;}return x;}
+  return scoringDigest_(canonical(value));
+}
+function gradeText_(value) { return value == null ? '' : String(value); }
+function gradeInPeriod_(date, base) { return !date || ((!base.start || date>=base.start) && (!base.end || date<=base.end)); }
+
+/** 学校出力の個別予定を読む。解釈できない繰り返しは黙って欠落させない。 */
+function gradeParseIcs_(text) {
+  if(typeof text!=='string' || text.length>2000000)throw new Error('ICSは2MB以内で指定してください。');
+  const lines=text.replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\n[ \t]/g,'').split('\n'),events=[];
+  if(!lines.includes('BEGIN:VCALENDAR') || !lines.includes('END:VCALENDAR'))throw new Error('iCalendar形式ではありません。');
+  let event=null,nested=0;
+  lines.forEach(function(line){
+    if(line==='BEGIN:VEVENT'){if(event)throw new Error('ICSの予定が不正です。');event={};return;}
+    if(line==='END:VEVENT'){
+      if(!event)throw new Error('ICSの予定が不正です。');
+      if(event.STATUS!=='CANCELLED'){
+        if(!event.SUMMARY || !event.DTSTART)throw new Error('授業名または開始日時のない予定です。');
+        const m=event.DTSTART.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/);
+        if(!m || !gradeDate_(m[1]+'-'+m[2]+'-'+m[3]) || (m[4] && (+m[4]>23 || +m[5]>59 || +m[6]>59)))throw new Error('ICSの日時が不正です。');
+        let date=m[1]+'-'+m[2]+'-'+m[3],time=m[4]?m[4]+':'+m[5]:'';
+        if(m[7]){const d=new Date(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4]+9,+m[5],+m[6]));date=d.toISOString().slice(0,10);time=d.toISOString().slice(11,16);}
+        events.push({id:event.UID || gradeKey_([event.SUMMARY,date,time]),title:event.SUMMARY.replace(/\\[nN]/g,'\n').replace(/\\([,;\\])/g,'$1'),date:date,time:time});
+      }
+      event=null;return;
+    }
+    if(!event)return;
+    if(line.startsWith('BEGIN:')){nested++;return;}
+    if(line.startsWith('END:')&&nested){nested--;return;}
+    if(nested)return;
+    const at=line.indexOf(':');if(at<0)return;
+    const left=line.slice(0,at),key=left.split(';')[0],value=line.slice(at+1);
+    if(['RRULE','RDATE','EXDATE','RECURRENCE-ID'].includes(key))throw new Error('繰り返し予定には未対応です。各授業を個別予定として書き出してください。');
+    if(key==='DTSTART' && /TZID=/.test(left) && !/TZID="?(Asia\/Tokyo|Japan)"?(;|$)/.test(left))throw new Error('ICSのタイムゾーンに対応していません。日本時間またはUTCで書き出してください。');
+    event[key]=value;
+  });
+  if(event)throw new Error('ICSの予定が閉じられていません。');
+  const ids=new Map();events.forEach(function(e){if(ids.has(e.id) && JSON.stringify(ids.get(e.id))!==JSON.stringify(e))throw new Error('ICSに同じIDの異なる予定があります。');ids.set(e.id,e);});
+  return Array.from(ids.values()).sort(function(a,b){return (a.date+a.time).localeCompare(b.date+b.time);});
+}
+function gradeParseIcs(text) { assertWebOperator_(); return gradeParseIcs_(text); }
+
+/** 集計は純粋関数にして、全員出力と未解決データの非欠落を検証する。 */
+function gradeBuild_(data, profile) {
+  const base=profile.base,rules=profile.rules,issues=(data.issues || []).slice(),output=[];
+  const selected=data.classes.filter(function(c){return !base.classIds.length || base.classIds.includes(c.id);});
+  base.classIds.forEach(function(id){if(!data.classes.some(function(c){return c.id===id;}))issues.push({type:'class',message:'対象クラスが見つかりません: '+id});});
+  selected.forEach(function(course){
+    const calendar=profile.calendar.filter(function(e){return base.mapping[course.id] && e.title===base.mapping[course.id];});
+    if(base.mapping[course.id] && !calendar.length)issues.push({type:'calendar',courseId:course.id,message:'対応するICS授業がありません。対応を選び直すか「ICSを使わない」を選んでください。'});
+    const days=new Map(),groups=new Map(),byEmail=new Map(),dateIssues=new Map();
+    course.students.forEach(function(s){if(byEmail.has(s.email))issues.push({type:'roster',courseId:course.id,message:'名簿に同じメールの生徒が重複しています: '+s.email});byEmail.set(s.email,s);});
+    calendar.forEach(function(e){if(!gradeInPeriod_(e.date,base))return;const day=days.get(e.date)||{date:e.date,extra:false,slots:0};day.slots++;days.set(e.date,day);});
+    (rules.lessons||[]).filter(function(x){return x.courseId===course.id && gradeInPeriod_(x.date,base);}).forEach(function(x){const day=days.get(x.date)||{date:x.date,extra:false,slots:1};day.slots=x.count;days.set(x.date,day);});
+    const responses=data.responses.filter(function(r){return r.courseId===course.id;});
+    responses.forEach(function(original){
+      const r=Object.assign({},original),own=rules.answers.find(function(x){return x.id===r.id && x.fingerprint===r.fingerprint;});
+      const stale=rules.answers.find(function(x){return x.id===r.id && x.fingerprint!==r.fingerprint;});
+      if(stale && r.date && stale.to && !gradeInPeriod_(r.date,base) && !gradeInPeriod_(stale.to,base))return;
+      if(stale){issues.push({type:'date',stale:true,key:r.id,courseId:course.id,date:stale.to,message:'以前の個別補正後に回答が変更されました。この回答の補正を再確認してください。',responses:[original]});return;}
+      const rule=own || rules.dates.find(function(x){return x.courseId===course.id && x.from===r.date;});
+      r.date=rule ? rule.to : r.date;r.extra=!!(rule && rule.mode==='extra');
+      if(!gradeInPeriod_(r.date,base))return;
+      if(!byEmail.has(r.email)){issues.push({type:'roster',courseId:course.id,message:'生徒一覧にない回答です。名簿を確認してください: '+r.email,response:r});return;}
+      if(!rule && (!r.date || (base.mapping[course.id] && !calendar.some(function(e){return e.date===r.date;}) && !(rules.lessons||[]).some(function(x){return x.courseId===course.id && x.date===r.date;})))){
+        const key=gradeKey_([course.id,original.date]);let issue=dateIssues.get(key);
+        if(!issue){issue={type:'date',key:key,courseId:course.id,date:original.date,message:original.date?'ICSにない授業日です。扱いを選んでください。':'授業日が不明です。日付を指定するか、予定外として残してください。',responses:[]};dateIssues.set(key,issue);}
+        issue.responses.push(original);
+        // 空欄も確認対象として残す。
+        if(!rule)return;
+      }
+      const date=r.date || '日付不明',bucket=date+(r.extra?'|extra':''),day=days.get(bucket)||{date:date,extra:r.extra,slots:1};
+      days.set(bucket,day);r.date=date;r.bucket=bucket;
+      const key=gradeKey_([course.id,r.email,date,r.extra]),group=groups.get(key)||[];group.push(r);groups.set(key,group);
+    });
+    dateIssues.forEach(function(issue){issues.push(issue);});
+    const cells=new Map();
+    function groupFingerprint(rows){return gradeDigest_([rows.map(function(r){return [r.id,r.fingerprint];}).sort(),calendar.filter(function(e){return e.date===rows[0].date;}).map(function(e){return [e.title,e.date,e.time];}).sort(),(rules.lessons||[]).filter(function(x){return x.courseId===course.id && x.date===rows[0].date;})]);}
+    // 全生徒共通の授業回数を先に確定し、処理順による自動割当の違いを防ぐ。
+    groups.forEach(function(rows,key){const decision=rules.duplicates.find(function(d){return d.key===key && d.fingerprint===groupFingerprint(rows);});if(decision){const day=days.get(rows[0].bucket);rows.forEach(function(r){day.slots=Math.max(day.slots,decision.assignments[r.id]||0);});}});
+    groups.forEach(function(rows,key){
+      const day=days.get(rows[0].bucket),fingerprint=groupFingerprint(rows),decision=rules.duplicates.find(function(d){return d.key===key && d.fingerprint===fingerprint;});
+      let assignments={};
+      if(rows.length>1 || day.slots>1 || rules.duplicates.some(function(d){return d.key===key;})){
+        const used=new Set();let valid=!!decision;
+        rows.forEach(function(r){const n=decision && decision.assignments[r.id];if(!Number.isInteger(n) || n<0 || n>20 || (n && used.has(n)))valid=false;if(n)used.add(n);});
+        if(!used.size)valid=false;
+        if(!valid){issues.push({type:'duplicate',key:key,fingerprint:fingerprint,courseId:course.id,date:rows[0].date,email:rows[0].email,message:'授業への割り当て・採否を選んでください。0は今回の出力から除外です。',responses:rows,slots:day.slots});return;}
+        assignments=decision.assignments;
+      }else assignments[rows[0].id]=1;
+      rows.forEach(function(r){const slot=assignments[r.id];if(!slot)return;day.slots=Math.max(day.slots,slot);cells.set(gradeKey_([r.email,r.bucket,slot]),gradeText_(r.fields[base.valueHeader]));});
+    });
+    const columns=Array.from(days.values()).sort(function(a,b){return Number(a.extra)-Number(b.extra)||a.date.localeCompare(b.date);}).flatMap(function(d){return Array.from({length:d.slots},function(_,i){return {date:d.date,bucket:d.date+(d.extra?'|extra':''),slot:i+1,label:d.date.replace(/-/g,'/')+(d.slots>1?'（'+(i+1)+'回目）':'')+(d.extra?'（予定外）':'')};});});
+    let students=course.students.slice();
+    if(base.sort==='name')students.sort(function(a,b){return a.name.localeCompare(b.name,'ja',{numeric:true})||a.email.localeCompare(b.email);});
+    if(base.sort==='number')students.sort(function(a,b){return Number(!a.number)-Number(!b.number)||a.number.localeCompare(b.number,'ja',{numeric:true})||a.name.localeCompare(b.name,'ja');});
+    const labels={'roster:name':'名前','roster:number':'出席番号','roster:email':'メールアドレス','roster:no':'No'};
+    const rows=[base.leading.map(function(h){return labels[h] || h.slice(6);}).concat(columns.map(function(c){return c.label;}))];
+    students.forEach(function(s){
+      const leading=base.leading.map(function(h){if(h.startsWith('roster:'))return gradeText_(s[h.slice(7)]);
+        const header=h.slice(6),values=Array.from(new Set(responses.filter(function(r){return r.email===s.email;}).map(function(r){return gradeText_(r.fields[header]);}).filter(Boolean)));
+        if(values.length<=1)return values[0] || '';
+        const key=gradeKey_([course.id,s.email,header]),fingerprint=gradeDigest_(values.slice().sort()),decision=rules.fields.find(function(x){return x.key===key && x.fingerprint===fingerprint && values.includes(x.value);});
+        if(decision)return decision.value;
+        issues.push({type:'field',key:key,fingerprint:fingerprint,courseId:course.id,email:s.email,values:values,message:'先頭列「'+header+'」の値が回答ごとに異なります。出力値を選んでください。'});return '';
+      });
+      rows.push(leading.concat(columns.map(function(col){return cells.get(gradeKey_([s.email,col.bucket,col.slot])) || '';})));
+    });
+    output.push({id:course.id,name:course.name,rows:rows});
+  });
+  if(!output.length)issues.push({type:'class',message:'生徒一覧に対象クラスがありません。生徒一覧を取得してください。'});
+  return {classes:output,issues:issues};
+}
+function gradeCsv_(rows) {
+  return '\uFEFF'+rows.map(function(row){return row.map(function(value){
+    let s=gradeText_(value);
+    // 回答由来の文字列を表計算の式として実行させない。数値の負数は保持する。
+    if(/^[\s]*[=+@]/.test(s) || (/^[\s]*-/.test(s) && !/^\s*-\d+(\.\d+)?\s*$/.test(s)))s="'"+s;
+    return /[",\r\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;
+  }).join(',');}).join('\r\n')+'\r\n';
+}
+
+function gradeValidate_(input) {
+  profileKeys_(input,['base','calendar','rules'],'成績出力の形式');
+  const p=JSON.parse(JSON.stringify(input)),b=p.base,r=p.rules;
+  profileKeys_(b,['classIds','start','end','dateHeader','valueHeader','leading','sort','mapping'],'成績出力設定');
+  if(!Array.isArray(b.classIds)||b.classIds.some(function(x){return typeof x!=='string';}) || !['name','number','roster'].includes(b.sort))throw new Error('対象クラス・並び順が不正です。');
+  ['start','end','dateHeader','valueHeader'].forEach(function(k){if(typeof b[k]!=='string')throw new Error('列または日付の形式が不正です。');});
+  if((b.start && gradeDate_(b.start)!==b.start)||(b.end && gradeDate_(b.end)!==b.end)||(b.start && b.end && b.start>b.end))throw new Error('期間の日付が不正です。');
+  if(!Array.isArray(b.leading)||!b.leading.length || b.leading.length>30 || b.leading.some(function(x){return typeof x!=='string'||(!['roster:name','roster:number','roster:email','roster:no'].includes(x)&&!/^field:.+/.test(x));}))throw new Error('先頭列が不正です。');
+  requireProfileObject_(b.mapping,'クラスの対応');
+  Object.keys(b.mapping).forEach(function(k){if(['__proto__','constructor','prototype'].includes(k)||typeof b.mapping[k]!=='string')throw new Error('対応関係の形式が不正です。');});
+  if(!Array.isArray(p.calendar)||p.calendar.length>20000)throw new Error('授業日一覧が不正です。');
+  p.calendar.forEach(function(e){profileKeys_(e,['id','title','date','time'],'授業日');if(typeof e.id!=='string'||!e.id||typeof e.title!=='string'||!e.title||gradeDate_(e.date)!==e.date||typeof e.time!=='string'||(e.time&&!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(e.time)))throw new Error('授業日の形式が不正です。');});
+  profileKeys_(r,['dates','answers','duplicates','fields','lessons'],'補正ルール');
+  if(r.lessons===undefined)r.lessons=[];
+  if(!Array.isArray(r.lessons))throw new Error('授業回数が不正です。');
+  r.lessons.forEach(function(x){profileKeys_(x,['courseId','date','count'],'授業回数');if(typeof x.courseId!=='string'||!x.courseId||gradeDate_(x.date)!==x.date||!Number.isInteger(x.count)||x.count<1||x.count>20)throw new Error('授業回数・日付が不正です。');});
+  ['dates','answers','duplicates','fields'].forEach(function(k){if(!Array.isArray(r[k])||r[k].length>20000)throw new Error('補正ルールが不正です。');});
+  r.answers.forEach(function(x){if(typeof x.id!=='string'||!x.id||typeof x.fingerprint!=='string'||!x.fingerprint)throw new Error('個別回答の識別情報が不正です。');});
+  r.dates.forEach(function(x){if(typeof x.courseId!=='string'||!x.courseId||typeof x.from!=='string'||x.id!==undefined)throw new Error('クラス日付補正の形式が不正です。');});
+  r.dates.concat(r.answers).forEach(function(x){
+    profileKeys_(x,['courseId','from','to','mode','id','fingerprint'],'日付補正');
+    if(!['planned','extra'].includes(x.mode)||typeof x.to!=='string'||(x.to && gradeDate_(x.to)!==x.to)||(!x.to&&x.mode!=='extra'))throw new Error('補正先の日付が不正です。');
+    if(x.id!==undefined){if(typeof x.id!=='string'||typeof x.fingerprint!=='string')throw new Error('回答の形式が不正です。');}
+    else if(typeof x.courseId!=='string'||typeof x.from!=='string')throw new Error('補正元が不正です。');
+  });
+  r.duplicates.forEach(function(x){profileKeys_(x,['key','fingerprint','assignments'],'重複判断');if(typeof x.key!=='string'||typeof x.fingerprint!=='string')throw new Error('重複判断が不正です。');requireProfileObject_(x.assignments,'授業割り当て');Object.keys(x.assignments).forEach(function(k){const n=x.assignments[k];if(['__proto__','constructor','prototype'].includes(k)||!Number.isInteger(n)||n<0||n>20)throw new Error('授業割り当てが不正です。');});});
+  r.fields.forEach(function(x){profileKeys_(x,['key','fingerprint','value'],'先頭列の判断');if(['key','fingerprint','value'].some(function(k){return typeof x[k]!=='string';}))throw new Error('先頭列の判断が不正です。');});
+  ['dates','answers','duplicates','fields','lessons'].forEach(function(k){const ids=new Set();r[k].forEach(function(x){const id=k==='lessons'?gradeKey_([x.courseId,x.date]):k==='dates'?gradeKey_([x.courseId,x.from]):k==='answers'?x.id:x.key;if(ids.has(id))throw new Error('補正ルールの対象が重複しています。');ids.add(id);});});
+  if(JSON.stringify(p).length>1500000)throw new Error('成績出力設定が大きすぎます。期間別のプリセットに分けてください。');
+  return p;
+}
+
+/** 二つの保存領域を交互に使い、読戻し後に参照を切り替える。途中失敗は旧版を保持する。 */
+function gradeReadStore_() {
+  const records=getManagedRecords_(),head=records.find(function(r){return r.id==='grade:head';});
+  if(!head)return {revision:'',value:{draft:gradeDefault_(),presets:[]}};
+  assertManagedOwner_(head);
+  let text='';for(let i=0;i<head.count;i++){
+    const part=records.find(function(r){return r.id==='grade:part:'+head.bank+':'+i;});
+    if(!part || part.generation!==head.generation)throw new Error('成績出力の保存内容が不完全です。JSONから復元してください。');text+=part.text;
+  }
+  if(gradeDigest_(text)!==head.digest)throw new Error('成績出力の保存内容が一致しません。');
+  return {revision:head.generation,bank:head.bank,value:JSON.parse(text)};
+}
+function gradeWriteStore_(value, expected) {
+  const previous=gradeReadStore_();if(previous.revision!==expected)throw new Error('成績出力設定が別の画面で変更されました。再読み込みしてください。');
+  const text=JSON.stringify(value);if(text.length>4000000)throw new Error('保存量が上限を超えました。不要なプリセットをJSONに退避して削除してください。');
+  const bank=previous.bank==='a'?'b':'a',generation=Utilities.getUuid(),parts=[];
+  for(let i=0;i<text.length;i+=24000)parts.push(text.slice(i,i+24000));
+  const cache={records:getManagedRecords_(),sheet:managedSheet_(true)};
+  parts.forEach(function(part,i){
+    const record={schema:1,kind:'grade-part',id:'grade:part:'+bank+':'+i,generation:generation,text:part,ownerSpreadsheetId:getAppSpreadsheet_().getId(),ownerScriptId:ScriptApp.getScriptId(),revision:generation,updatedAt:new Date().toISOString()};
+    const at=cache.records.findIndex(function(r){return r.id===record.id;});if(at<0)cache.records.push(record);else{assertManagedOwner_(cache.records[at]);cache.records[at]=record;}
+  });
+  // 既存の確定参照はそのまま残し、分割内容を一括で書き込む。
+  cache.sheet.getRange(2,1,cache.records.length,3).setValues(cache.records.map(function(r){return [r.kind,r.id,JSON.stringify(r)];}));SpreadsheetApp.flush();
+  const verify=getManagedRecords_();
+  if(parts.some(function(part,i){const r=verify.find(function(x){return x.id==='grade:part:'+bank+':'+i;});return !r || r.text!==part || r.generation!==generation;}))throw new Error('成績出力設定の保存を確認できません。旧設定を保持しています。');
+  saveManagedRecord_({kind:'grade-head',id:'grade:head',bank:bank,generation:generation,count:parts.length,digest:gradeDigest_(text)},cache);
+  return gradeReadStore_();
+}
+function gradeReadData_(base, strict) {
+  const read=scoringReadContext_(),classes=new Map(),issues=[],headers=new Set(),responses=[],roster=read.operation.getSheetByName(STUDENT_SHEET_NAME);
+  if(roster && roster.getLastRow()>1){const values=roster.getDataRange().getDisplayValues(),h=createHeaderMap_(values[0]);
+    ['メールアドレス','名前','コースID'].forEach(function(k){if(h[k]==null)throw new Error('生徒一覧に必要な列がありません: '+k);});
+    values.slice(1).forEach(function(row){const id=gradeText_(row[h['コースID']]).trim(),email=gradeText_(row[h['メールアドレス']]).trim().toLowerCase();if(!id||!email)throw new Error('生徒一覧のクラスまたはメールが空欄です。');const c=classes.get(id)||{id:id,name:row[h['クラス名']]||id,students:[]};c.students.push({email:email,name:row[h['名前']]||'',number:row[h['出席番号（任意）']]||'',no:row[h.No]||''});classes.set(id,c);});
+  }
+  const mappings=readMappingEntries_(true);
+  getScoringTargets_(null,read).forEach(function(target){
+    const mapping=mappings.get(makeMappingLookupKey_(target.spreadsheetId,target.sheetName)),courseId=gradeText_(mapping && mapping.courseId || target.courseId);
+    if(base.classIds.length && courseId && !base.classIds.includes(courseId))return;
+    const snapshot=scoringSnapshot_(read,target),values=snapshot.values;if(!values.length)return;
+    const names=values[0].map(String),h=createHeaderMap_(names),display=snapshot.sheet.getDataRange().getDisplayValues();names.forEach(function(n){if(n!==SCORING_MANAGEMENT_HEADER)headers.add(n);});
+    if(!strict)return;
+    if(!courseId){issues.push({type:'mapping',message:target.label+' のクラス対応を設定の「対応表」で指定してください。'});return;}
+    if(!classes.has(courseId)){issues.push({type:'roster',message:target.label+' のクラスが生徒一覧にありません。'});return;}
+    const required=[read.app.emailHeader,base.dateHeader,base.valueHeader].concat(base.leading.filter(function(k){return k.startsWith('field:');}).map(function(k){return k.slice(6);}));
+    if(required.some(function(k){return !k || names.filter(function(n){return n===k;}).length!==1;})){issues.push({type:'columns',courseId:courseId,message:target.label+' に選択した列がないか、列名が重複しています。'});return;}
+    const timezone=scoringBook_(read,target.spreadsheetId).getSpreadsheetTimeZone();
+    values.slice(1).forEach(function(row,index){if(row.every(function(v){return v==='' || v==null;}))return;
+      const fields={};names.forEach(function(n,col){if(n!==SCORING_MANAGEMENT_HEADER && !['__proto__','constructor','prototype'].includes(n))fields[n]=display[index+1][col];});
+      const email=gradeText_(row[h[read.app.emailHeader]]).trim().toLowerCase(),date=scoringLessonDate_(row[h[base.dateHeader]],timezone),id=scoringResponseKey_(target,index+2);
+      responses.push({id:id,courseId:courseId,email:email,date:date,rawDate:display[index+1][h[base.dateHeader]],submitted:display[index+1][h['タイムスタンプ']]||display[index+1][h.Timestamp]||'',source:target.sheetName+' '+(index+2)+'行',fields:fields,fingerprint:gradeDigest_([id,row.filter(function(_,i){return names[i]!==SCORING_MANAGEMENT_HEADER && names[i]!==read.app.formStatusHeader;})])});
+    });
+  });
+  return {classes:Array.from(classes.values()),headers:Array.from(headers).sort(),responses:responses,issues:issues};
+}
+function gradeGetConsole() {
+  assertWebOperator_();return withAppLock_(function(){const store=gradeReadStore_();return {store:store,data:gradeReadData_(store.value.draft.base,false)};});
+}
+function gradeSave(payload) {
+  assertWebOperator_();return withAppLock_(function(){const current=gradeReadStore_();if(payload.revision!==current.revision)throw new Error('設定が変更されました。読み込み直してください。');const value=current.value;
+    if(payload.action==='delete'){value.presets=value.presets.filter(function(p){return p.id!==payload.id;});}
+    else {const profile=gradeValidate_(payload.profile);value.draft=profile;
+      if(payload.action==='preset'){const name=gradeText_(payload.name).trim();if(!name||name.length>100)throw new Error('プリセット名は1〜100文字で入力してください。');let preset=value.presets.find(function(p){return p.id===payload.id;});if(!preset){preset={id:Utilities.getUuid()};value.presets.push(preset);}Object.assign(preset,{name:name,profile:profile});}
+      else if(payload.action!=='draft')throw new Error('保存操作が不正です。');
+    }
+    return gradeWriteStore_(value,current.revision);
+  });
+}
+function gradePreview(profile) {
+  assertWebOperator_();const p=gradeValidate_(profile),data=gradeReadData_(p.base,true),result=gradeBuild_(data,p);
+  result.revision=gradeDigest_([p,data]);result.responses=data.responses;return result;
+}
+function gradeDownload(profile, expected) {
+  assertWebOperator_();const result=gradePreview(profile);
+  if(result.revision!==expected)throw new Error('プレビュー後に回答・名簿・成績が変更されました。もう一度確認してください。');
+  if(result.issues.length)throw new Error('未解決の確認事項があります。先に確認してください。');
+  const files=result.classes.map(function(c,i){const name=String(c.name).replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_').slice(0,80)||'クラス';return Utilities.newBlob(gradeCsv_(c.rows),'text/csv',(i+1)+'-'+name+'.csv');});
+  const file=files.length===1?files[0]:Utilities.zip(files,'成績出力.zip');
+  return {filename:file.getName(),mime:files.length===1?'text/csv':'application/zip',base64:Utilities.base64Encode(file.getBytes())};
+}
+function gradeConfigurationKind_(kind) { return ['grade-all','grade-layout','grade-rules'].includes(kind); }
+function gradeExportConfiguration_(kind) {
+  const p=gradeReadStore_().value.draft,payload={application:'turret',type:kind,schemaVersion:1,exportedAt:new Date().toISOString()};
+  if(kind!=='grade-rules')payload.base=p.base;
+  if(kind!=='grade-layout'){payload.calendar=p.calendar;payload.rules=p.rules;}
+  const json=JSON.stringify(payload,null,2);if(utf8ByteLength_(json)>1048576)throw new Error('JSONが1MiBを超えました。プリセットを分けてください。');
+  return {filename:configurationFilename_(kind),json:json};
+}
+function gradeParseConfiguration_(kind,json) {
+  if(typeof json!=='string'||utf8ByteLength_(json)>1048576)throw new Error('成績出力JSONは1MiB以内で指定してください。');
+  const p=JSON.parse(json);profileKeys_(p,['application','type','schemaVersion','exportedAt'].concat(kind!=='grade-rules'?['base']:[],kind!=='grade-layout'?['calendar','rules']:[]),'成績出力JSON');
+  if(p.application!=='turret'||p.type!==kind||p.schemaVersion!==1)throw new Error('成績出力JSONの種類または版が不正です。');
+  const profile=gradeDefault_();if(kind!=='grade-rules')profile.base=p.base;if(kind!=='grade-layout'){profile.calendar=p.calendar;profile.rules=p.rules;}
+  return gradeValidate_(profile);
+}
+function gradeMergeRules_(current,incoming,choices) {
+  const rules=JSON.parse(JSON.stringify(current.rules)),calendar=current.calendar.slice(),conflicts=[];
+  function merge(list,extra,idOf,category){extra.forEach(function(row){const key=idOf(row),index=list.findIndex(function(x){return idOf(x)===key;});if(index<0){list.push(row);return;}if(gradeDigest_(list[index])===gradeDigest_(row))return;const id=category+':'+key;conflicts.push({id:id,label:category+' '+key,current:JSON.stringify(list[index]),incoming:JSON.stringify(row)});if(choices && choices[id]==='incoming')list[index]=row;});}
+  incoming.calendar.forEach(function(e){const old=calendar.find(function(x){return x.id===e.id;})||calendar.find(function(x){return x.title===e.title && x.date===e.date && x.time===e.time;});if(!old){calendar.push(e);return;}if(old.title===e.title && old.date===e.date && old.time===e.time)return;const id='授業日:'+old.id;conflicts.push({id:id,label:'授業日 '+old.title,current:JSON.stringify(old),incoming:JSON.stringify(e)});if(choices&&choices[id]==='incoming')calendar[calendar.indexOf(old)]=e;});
+  ['dates','answers','duplicates','fields','lessons'].forEach(function(k){rules[k]=rules[k]||[];merge(rules[k],incoming.rules[k]||[],function(x){return k==='lessons'?gradeKey_([x.courseId,x.date]):k==='dates'?gradeKey_([x.courseId,x.from]):k==='answers'?x.id:x.key;},k);});
+  return {rules:rules,calendar:calendar,conflicts:conflicts};
+}
+function gradeInspectConfiguration_(kind,json) {
+  const incoming=gradeParseConfiguration_(kind,json),store=gradeReadStore_(),merged=kind==='grade-rules'?gradeMergeRules_(store.value.draft,incoming):{conflicts:[]};
+  return {kind:kind,revision:gradeDigest_([kind,json,store.revision]),summary:kind==='grade-all'?'成績出力の新しいプリセットとして追加し、作業下書きに読み込みます。':kind==='grade-layout'?'出力列・並び順・クラス対応を置き換えます。補正ルールは保持します。':'授業日と補正ルールを追加・統合します。競合する対象は選択してください。',warnings:['名簿・回答・採点結果は含みません。クラス・列の対応を確認してから出力してください。'],conflicts:merged.conflicts};
+}
+function gradeApplyConfiguration_(kind,json,revision,choices) {
+  return withAppLock_(function(){const incoming=gradeParseConfiguration_(kind,json),inspection=gradeInspectConfiguration_(kind,json),store=gradeReadStore_();
+    if(inspection.revision!==revision)throw new Error('確認後に成績出力設定が変更されました。再読み込みしてください。');
+    if(kind==='grade-all'){store.value.presets.push({id:Utilities.getUuid(),name:'読み込み '+new Date().toISOString().slice(0,10),profile:incoming});store.value.draft=incoming;}
+    else if(kind==='grade-layout')store.value.draft.base=incoming.base;
+    else {const merged=gradeMergeRules_(store.value.draft,incoming,choices);if(merged.conflicts.some(function(x){return !choices||!['current','incoming'].includes(choices[x.id]);}))throw new Error('競合する補正ルールの扱いを選んでください。');store.value.draft.rules=merged.rules;store.value.draft.calendar=merged.calendar;}
+    gradeValidate_(store.value.draft);gradeWriteStore_(store.value,store.revision);return {message:'成績出力設定を読み込みました。成績出力タブで対応を確認してください。'};
+  });
+}
 
 /** 最後に準備したひな形を優先し、JSONから読み込んだURLはその後の既定値として使う。 */
 function currentTemplateFormUrl_(records) {
@@ -52,13 +330,20 @@ function authorizeFormIntegration() {
 function managedSheet_(create) {
   const ss = getAppSpreadsheet_();
   let sheet = ss.getSheetByName(MANAGED_FORM_SHEET_);
+  const legacy=ss.getSheetByName('フォーム管理');
+  if(sheet && legacy)throw new Error('システム管理とフォーム管理が両方あります。自動統合はできません。内容を確認してください。');
+  if(!sheet && legacy) {
+    if(legacy.getLastColumn()!==3 || JSON.stringify(legacy.getRange(1,1,1,3).getDisplayValues()[0])!==JSON.stringify(MANAGED_FORM_HEADERS_))throw new Error('フォーム管理シートの構成が異なります。');
+    // 読み取りでは旧名も受理。共通ロックを持つ保存・初期化時に改名する。
+    sheet=legacy;if(create)sheet.setName(MANAGED_FORM_SHEET_);
+  }
   if (!sheet && create) {
     sheet = ss.insertSheet(MANAGED_FORM_SHEET_);
     sheet.getRange(1, 1, 1, 3).setValues([MANAGED_FORM_HEADERS_]);
     sheet.setFrozenRows(1);
   }
   if (sheet && (sheet.getLastColumn() !== 3 || JSON.stringify(sheet.getRange(1, 1, 1, 3).getDisplayValues()[0]) !== JSON.stringify(MANAGED_FORM_HEADERS_))) {
-    throw new Error('フォーム管理シートの構成が異なります。既存データは変更していません。');
+    throw new Error('システム管理シートの構成が異なります。既存データは変更していません。');
   }
   return sheet;
 }
@@ -69,9 +354,9 @@ function getManagedRecords_() {
   const ids = new Set();
   return sheet.getRange(2, 1, sheet.getLastRow() - 1, 3).getDisplayValues().map(function(row) {
     let record;
-    try { record = JSON.parse(row[2]); } catch (error) { throw new Error('フォーム管理の履歴を読み取れません。'); }
+    try { record = JSON.parse(row[2]); } catch (error) { throw new Error('システム管理の記録を読み取れません。'); }
     if (!record || record.schema !== 1 || !record.id || record.id !== row[1] || record.kind !== row[0] || ids.has(record.id)) {
-      throw new Error('フォーム管理の履歴形式・IDが不正です。');
+      throw new Error('システム管理の記録形式・IDが不正です。');
     }
     ids.add(record.id);
     return record;
@@ -204,13 +489,13 @@ function getFormConsoleData(options) {
     const ss = getAppSpreadsheet_();
     const records = getManagedRecords_();
     // 開いたままの旧管理画面からの呼び出しには、従来の応答形式を維持する。
-    let visibleRecords=records, returnHistory;
+    let visibleRecords=records.filter(function(r){return !r.kind.startsWith('grade-');}), returnHistory;
     if(options && options.returnPage != null) {
       if(!Number.isSafeInteger(options.returnPage) || options.returnPage<0)throw new Error('履歴のページ番号が不正です。');
       const history=records.filter(function(r){return r.kind==='announcement';}).reverse(), pageSize=50;
       const page=Math.min(options.returnPage,Math.max(0,Math.ceil(history.length/pageSize)-1));
       returnHistory={page:page,pageSize:pageSize,total:history.length};
-      visibleRecords=records.filter(function(r){return r.kind!=='announcement';}).concat(history.slice(page*pageSize,(page+1)*pageSize).reverse());
+      visibleRecords=records.filter(function(r){return r.kind!=='announcement' && !r.kind.startsWith('grade-');}).concat(history.slice(page*pageSize,(page+1)*pageSize).reverse());
     }
     const result = { records: visibleRecords, scheduleTimer: typeof getManagedFormScheduleSummary_==='function'?getManagedFormScheduleSummary_():null, setupProgress: getFormSetupProgress_(config.formSources.length > 0 && config.formSheetNamePrefix.length > 0, records), classes: classes, classWarning: classWarning, configRevision: getConfigRevision_(config),
       spreadsheetId: ss.getId(), spreadsheetUrl: 'https://docs.google.com/spreadsheets/d/' + ss.getId() + '/edit',
@@ -1796,7 +2081,7 @@ function runAdminAction(action, confirmed, expectedRevision) {
     }
     let message = '';
     switch (action) {
-      case 'initialize': initializeSheetsUnlocked_(); message = '必要なシートを準備しました（クラス一覧・生徒一覧・採点テンプレ・対応表・送信シート・エラー・フォーム管理）。'; break;
+      case 'initialize': initializeSheetsUnlocked_(); message = '必要なシートを準備しました（クラス一覧・生徒一覧・採点テンプレ・対応表・送信シート・エラー・システム管理）。'; break;
       case 'classes': classroomdataUnlocked_(); message = 'クラス一覧を更新しました。シートで同期対象に1を入力してください。'; break;
       case 'students': message = studentdataMultiUnlocked_(); break;
       case 'mapping': message = createMappingSheetUnlocked_(); break;
@@ -1877,7 +2162,7 @@ function configurationFilename_(kind, date) {
 }
 
 function requireConfigurationKind_(kind) {
-  if (['settings', 'scoring', 'templates', 'bundle'].indexOf(kind) < 0) throw new Error('設定ファイルの種類を選んでください。');
+  if (!gradeConfigurationKind_(kind) && ['settings', 'scoring', 'templates', 'bundle'].indexOf(kind) < 0) throw new Error('設定ファイルの種類を選んでください。');
 }
 
 /** ファイル名ではなく既存JSONの識別情報を使い、不明な形式を推測で適用しない。 */
@@ -1888,6 +2173,7 @@ function detectConfigurationKind_(json) {
   requireProfileObject_(payload, '設定JSON');
   const unknown = '設定JSONの種類を判定できません。turretから書き出したファイルを選んでください。';
   if (payload.type !== undefined) {
+    if(payload.application==='turret' && gradeConfigurationKind_(payload.type))return payload.type;
     if (payload.type === 'configuration-bundle' && payload.application === 'turret' && payload.meta === undefined) return 'bundle';
     throw new Error(unknown);
   }
@@ -1910,6 +2196,7 @@ function detectConfigurationKind_(json) {
 function exportConfigurationFile(kind, includeConnections) {
   assertWebOperator_();
   requireConfigurationKind_(kind);
+  if(gradeConfigurationKind_(kind))return withAppLock_(function(){return gradeExportConfiguration_(kind);});
   return withAppLock_(function() {
     let payload;
     if (kind === 'settings') payload = JSON.parse(buildSettingsProfile_(getConfig_(), includeConnections).json);
@@ -1992,6 +2279,7 @@ function configurationIncomingTemplates_(parsed, current) {
 function inspectConfigurationFile(kind, json) {
   assertWebOperator_();
   if (kind === 'auto') kind = detectConfigurationKind_(json);
+  if(gradeConfigurationKind_(kind))return withAppLock_(function(){return gradeInspectConfiguration_(kind,json);});
   const parsed = parseConfigurationFile_(kind, json);
   return withAppLock_(function() {
     const lines = [], warnings = parsed.warnings.slice();
@@ -2035,8 +2323,9 @@ function restoreConfigurationTemplates_(ss, snapshot, revision) {
   if (scoringReadTemplateTable_().revision !== revision) throw new Error('採点テンプレートの復元値が一致しません。');
 }
 
-function applyConfigurationFile(kind, json, expectedRevision) {
+function applyConfigurationFile(kind, json, expectedRevision, choices) {
   assertWebOperator_();
+  if(gradeConfigurationKind_(kind))return gradeApplyConfiguration_(kind,json,expectedRevision,choices);
   const parsed = parseConfigurationFile_(kind, json);
   return withAppLock_(function() {
     if (typeof expectedRevision !== 'string' || expectedRevision !== configurationFileRevision_(kind, json)) throw new Error('確認後にファイルまたは設定が変更されました。再読み込みしてから適用してください。');

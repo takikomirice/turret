@@ -45,6 +45,8 @@ export class AdminSheet {
   deleteRows(row,count) { this.rows.splice(row-1,count); return this; }
   deleteColumns(start,count) { this.maxColumns-=count; return this; }
   insertColumnsAfter(start,count) { this.maxColumns+=count; return this; }
+  insertColumnBefore(col) { this.rows.forEach(r=>r.splice(col-1,0,''));this.maxColumns++;return this; }
+  deleteColumn(col) { this.rows.forEach(r=>r.splice(col-1,1));this.maxColumns--;return this; }
   moveColumns(range,to) {const from=range.getColumn()-1,width=this.getLastColumn();for(const rows of [this.rows,this.notes])for(const row of rows){while(row.length<width)row.push('');const [value]=row.splice(from,1);row.splice(to-1-(from<to-1?1:0),0,value);}return this;}
   setFrozenRows() { return this; }
   setColumnWidths() { return this; }
@@ -64,6 +66,7 @@ export function adminEnvironment({config = validConfig(), includeAdmin = true, a
   const ss = { getSheetByName:name=>sheets.get(name)||null, getSheets:()=>[...sheets.values()],
     insertSheet:name=>{const sheet=new AdminSheet(name);sheets.set(name,sheet);return sheet;},
     deleteSheet:sheet=>sheets.delete(sheet.name), setActiveSheet:sheet=>{activeSheet=sheet.name;}, getId:()=> 'test-admin-sheet', getSpreadsheetTimeZone:()=> 'Asia/Tokyo' };
+  const insert=ss.insertSheet;ss.insertSheet=name=>{const s=insert(name);s.setName=next=>{sheets.delete(s.name);s.name=next;sheets.set(next,s);return s;};return s;};
   const c=vm.createContext({console,Logger:{log(){}},Date,PropertiesService:{getScriptProperties:()=>propertyApi(props),getUserProperties:()=>propertyApi(userProps)},
     SpreadsheetApp:{getActiveSpreadsheet:()=>ss,flush(){},getUi:()=>({alert(){throw Error('unexpected native alert');}})},
     LockService:{getScriptLock:()=>({tryLock:()=>{if(locked)return false;locked=true;return true;},releaseLock:()=>{locked=false;}})},

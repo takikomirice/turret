@@ -46,7 +46,7 @@ test('preparing sheets migrates old journals with readback, keeps choices and re
  const e=setup();duplicate(e);const g=review(e).groups[0];
  e.sheets.set('_scoring_saves',new AdminSheet('_scoring_saves',[['key','JSON'],[JSON.stringify([sourceId,e.answer.sheetId,2]),'{"state":"pending"}']]));
  e.sheets.set('_scoring_decisions',new AdminSheet('_scoring_decisions',[['key','JSON'],[g.id,JSON.stringify({fingerprint:g.fingerprint,accepted:[g.responses[1].key]})]]));
- e.c.initializeSheetsUnlocked_();assert.equal(e.sheets.has('フォーム管理'),true);
+ e.c.initializeSheetsUnlocked_();assert.equal(e.sheets.has('システム管理'),true);
  assert.equal(e.sheets.has('_scoring_saves'),false);assert.equal(e.sheets.has('_scoring_decisions'),false);
  assert.equal(review(e).rows[2].saveFailed,true);assert.equal(review(e).rows[3].state,'adopted');
  assert.equal(save(e).ok,true);assert.equal(review(e).rows[3].state,'adopted');

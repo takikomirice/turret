@@ -37,7 +37,8 @@ const SEND_BASE_HEADERS = [
   '送信状態'
 ];
 
-const STUDENT_SHEET_HEADERS = ['No', 'メールアドレス', '名前', 'クラス名', 'コースID', 'studentId'];
+const LEGACY_STUDENT_SHEET_HEADERS = ['No', 'メールアドレス', '名前', 'クラス名', 'コースID', 'studentId'];
+const STUDENT_SHEET_HEADERS = ['No', 'メールアドレス', '出席番号（任意）', '名前', 'クラス名', 'コースID', 'studentId'];
 const MAPPING_SHEET_HEADERS = ['元SS_ID', '元スプシ名', '元シート名', 'クラス名', 'courseId', 'メモ'];
 const SEND_REVIEW_STATUS = '送信確認待ち';
 const SCORING_MANAGEMENT_HEADER = '管理';
@@ -47,7 +48,7 @@ function internalSheetKind_(name) {
   if (['採点テンプレ', '_templates', '_rules', '_scoring_decisions', '_scoring_saves'].includes(name)) return 'scoring';
   return ['クラス一覧', STUDENT_SHEET_NAME, INPUT_SETTINGS_SHEET_NAME, CONFIG_SHEET_NAME,
     SETTINGS_SHEET_NAME, EVAL_SHEET_NAME, SEND_SHEET_NAME, ERROR_SHEET_NAME, MAPPING_SHEET_NAME,
-    'フォーム管理'].includes(name) ? 'operation' : '';
+    'フォーム管理', 'システム管理'].includes(name) ? 'operation' : '';
 }
 function scoringIsInternalSheet_(name) { return !!internalSheetKind_(name); }
 
@@ -884,7 +885,7 @@ function onOpen() {
 
 function initializeSheets() {
   withAppLock_(initializeSheetsUnlocked_);
-  safeAlert_('シートを作成しました（クラス一覧・生徒一覧・採点テンプレ・対応表・送信シート・エラー・フォーム管理）');
+  safeAlert_('シートを作成しました（クラス一覧・生徒一覧・採点テンプレ・対応表・送信シート・エラー・システム管理）');
 }
 
 function initializeSheetsUnlocked_() {
@@ -1889,6 +1890,29 @@ function ensureSendSheet_(config) {
   return ensureConfiguredSheet_(SEND_SHEET_NAME, getConfiguredSendHeaders_(config));
 }
 
+/** 列数も検査し、独自列のある名簿を同期で上書きしない。 */
+function studentRosterLayout_(sheet) {
+  if (!sheet || !sheet.getLastRow()) return 'empty';
+  if (sheet.getLastColumn() === STUDENT_SHEET_HEADERS.length && hasMatchingHeaders_(sheet, STUDENT_SHEET_HEADERS)) return 'current';
+  if (sheet.getLastColumn() === LEGACY_STUDENT_SHEET_HEADERS.length && hasMatchingHeaders_(sheet, LEGACY_STUDENT_SHEET_HEADERS)) return 'legacy';
+  throw new Error('「生徒一覧」の構成が一致しません。既存データを退避してから見出しを確認してください。');
+}
+
+/** 列挿入で既存の数式・書式を保持し、移行途中の失敗は追加した列だけを戻す。 */
+function migrateStudentAttendanceColumn_(sheet) {
+  if (studentRosterLayout_(sheet) !== 'legacy') return false;
+  sheet.insertColumnBefore(3);
+  try {
+    sheet.getRange(1, 3).setValue(STUDENT_SHEET_HEADERS[2]);
+    SpreadsheetApp.flush();
+  } catch (error) {
+    try { sheet.deleteColumn(3); SpreadsheetApp.flush(); }
+    catch (rollbackError) { throw new Error('出席番号列の移行と復旧に失敗しました。生徒一覧を確認してください。' + error + ' / ' + rollbackError); }
+    throw error;
+  }
+  return true;
+}
+
 function ensureStudentSheetForSync_() {
   const ss = getAppSpreadsheet_();
   let sheet = ss.getSheetByName(STUDENT_SHEET_NAME);
@@ -1896,8 +1920,9 @@ function ensureStudentSheetForSync_() {
     sheet = ss.insertSheet(STUDENT_SHEET_NAME);
   }
 
-  if (!hasMatchingHeaders_(sheet, STUDENT_SHEET_HEADERS)) {
-    if (sheet.getLastRow() > 0) throw new Error('「生徒一覧」の構成が一致しません。既存データを退避してから見出しを修正してください。');
+  const layout = studentRosterLayout_(sheet);
+  if (layout === 'legacy') migrateStudentAttendanceColumn_(sheet);
+  if (layout === 'empty') {
     sheet.clear();
     sheet.getRange(1, 1, 1, STUDENT_SHEET_HEADERS.length).setValues([STUDENT_SHEET_HEADERS]);
   }
@@ -2455,7 +2480,17 @@ function studentdataMultiUnlocked_() {
   });
   if (!selected.length) return '同期対象クラスがありません。クラス一覧の同期対象に1を入力してください。既存の生徒一覧は保持しています。';
   const studentSheet = ss.getSheetByName(STUDENT_SHEET_NAME);
-  if (studentSheet && studentSheet.getLastRow() && !hasMatchingHeaders_(studentSheet, STUDENT_SHEET_HEADERS)) throw new Error('生徒一覧の構成が一致しません。既存データと見出しを確認してください。');
+  const layout = studentRosterLayout_(studentSheet), attendance = new Map();
+  if (layout === 'current') {
+    const values = studentSheet.getDataRange().getDisplayValues(), headers = createHeaderMap_(values[0]);
+    values.slice(1).forEach(function(row) {
+      const email = String(row[headers['メールアドレス']] || '').trim(), courseId = String(row[headers['コースID']] || '').trim();
+      if (!email || !courseId) return;
+      const key = makeStudentLookupKey_(courseId, email), number = String(row[headers['出席番号（任意）']] || '').trim();
+      if (attendance.has(key) && attendance.get(key) !== number) throw new Error('同じ生徒・クラスの出席番号が一致しません。生徒一覧の重複行を確認してください。');
+      attendance.set(key, number);
+    });
+  }
   const rows = [];
   const courseIds = [];
   selected.forEach(function(item) {
@@ -2463,10 +2498,20 @@ function studentdataMultiUnlocked_() {
     if (courseIds.indexOf(courseId) >= 0) return;
     courseIds.push(courseId);
     getStudentListMax(courseId).forEach(function(student) {
-      rows.push([rows.length + 1, student.email, student.name, item[0] || '', courseId, student.studentId]);
+      const key = makeStudentLookupKey_(courseId, student.email);
+      rows.push([rows.length + 1, student.email, attendance.has(key) ? attendance.get(key) : '', student.name, item[0] || '', courseId, student.studentId]);
     });
   });
-  replaceRosterRows_(STUDENT_SHEET_NAME, STUDENT_SHEET_HEADERS, rows);
+  // Classroomの全取得に成功するまでは、見出しも既存の名簿も変更しない。
+  const migrated = layout === 'legacy' && migrateStudentAttendanceColumn_(studentSheet);
+  try { replaceRosterRows_(STUDENT_SHEET_NAME, STUDENT_SHEET_HEADERS, rows); }
+  catch (error) {
+    if (migrated) {
+      try { studentSheet.deleteColumn(3); SpreadsheetApp.flush(); }
+      catch (rollbackError) { throw new Error('名簿更新後の列構成を復旧できませんでした。生徒一覧を確認してください。' + error + ' / ' + rollbackError); }
+    }
+    throw error;
+  }
   PropertiesService.getScriptProperties().setProperty('TURRET_ROSTER_SELECTION', JSON.stringify(courseIds.sort()));
   return '生徒一覧を更新しました（' + rows.length + '名）。';
 }
