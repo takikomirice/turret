@@ -658,6 +658,23 @@ function scoringDateHeader_(cfg,headers) {
   if (cfg.lessonDateHeader) return cfg.lessonDateHeader;
   return headers.indexOf('授業の日付を入力してください')>=0 ? '授業の日付を入力してください' : '';
 }
+/** 表示用の日付差。回答シートの取得済み値だけを使い、返却可否には影響させない。 */
+function scoringSubmissionTiming_(lessonDate,value,timezone) {
+  let submittedAt='',submittedDate='';
+  if(Object.prototype.toString.call(value)==='[object Date]') {
+    if(isFinite(value.getTime()))submittedAt=Utilities.formatDate(value,timezone,'yyyy-MM-dd HH:mm:ss');
+  } else {
+    // 文字列の日付は曖昧なDate.parseに渡さず、年月日と時刻を検査する。
+    const match=String(value == null ? '' : value).trim().match(/^(\d{4}[-\/]\d{1,2}[-\/]\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?$/);
+    if(match && scoringLessonDate_(match[1],timezone) && (!match[2] || (Number(match[2])<24 && Number(match[3])<60 && Number(match[4] || 0)<60))) {
+      submittedAt=scoringLessonDate_(match[1],timezone)+(match[2] ? ' '+('0'+match[2]).slice(-2)+':'+match[3]+':'+(match[4] || '00') : '');
+    }
+  }
+  if(submittedAt)submittedDate=submittedAt.slice(0,10);
+  // UTC上の暦日に揃え、時刻や夏時間による端数を生じさせない。
+  const daysLate=lessonDate && submittedDate ? Math.round((Date.parse(submittedDate+'T00:00:00Z')-Date.parse(lessonDate+'T00:00:00Z'))/86400000) : null;
+  return {lessonDate:lessonDate,submittedAt:submittedAt,daysLate:daysLate};
+}
 function scoringBuildReviewIndex_(books,options) {
   options=options || {};
   const read=options.read || scoringReadContext_(books),summary=!!options.summary;
@@ -679,6 +696,7 @@ function scoringBuildReviewIndex_(books,options) {
   targets.forEach(function(target){
     const snapshot=scoringSnapshot_(read,target),sheet=snapshot.sheet,book=scoringBook_(read,target.spreadsheetId);
     const values=snapshot.values,headers=(values[0] || []).map(String),timezone=book.getSpreadsheetTimeZone();
+    snapshot.timezone=timezone;
     snapshot.managementLayout=scoringManagementLayout_(sheet,headers);
     const display=summary ? null : (snapshot.display || (snapshot.display=sheet.getDataRange().getDisplayValues()));
     const dateHeader=scoringDateHeader_(cfg,headers),dateColumn=(scoringLegacyResolveColIndexByHeaderLabel_(dateHeader,scoringLegacyBuildHeaderMeta_(headers).map) || 0)-1,emailColumn=headers.indexOf(app.emailHeader),statusColumn=headers.indexOf(app.formStatusHeader);
@@ -741,10 +759,14 @@ function scoringBuildReviewIndex_(books,options) {
   return {targets:targets,responses:responses,bySource:bySource,groups:groups,enabledTargets:enabledTargets,read:read};
 }
 function scoringReviewForTarget_(index,target,summary) {
-  const rows={};index.responses.forEach(function(item){if(item.target.key===target.key)rows[item.rowNumber]=summary ? {
+  const snapshot=scoringSnapshot_(index.read,target),headers=(snapshot.values[0] || []).map(String);
+  const timeColumn=headers.indexOf('タイムスタンプ'),englishTimeColumn=headers.indexOf('Timestamp');
+  const rows={};index.responses.forEach(function(item){if(item.target.key!==target.key)return;
+    const values=snapshot.values[item.rowNumber-1] || [],timing=scoringSubmissionTiming_(item.date,values[timeColumn] || values[englishTimeColumn],snapshot.timezone);
+    rows[item.rowNumber]=Object.assign({},summary ? {
     key:item.key,rowNumber:item.rowNumber,state:item.state,groupId:item.groupId || '',duplicateCount:item.duplicateCount || 0,
     returned:item.returned,returnState:item.returnState,saveFailed:item.saveFailed,eligible:item.eligible
-  } : item;});
+  } : item,{timing:timing});});
   if(summary)return {enabled:index.enabledTargets.has(target.key),rows:rows,groups:[],detailsDeferred:true};
   return {enabled:index.enabledTargets.has(target.key),rows:rows,groups:Array.from(index.groups.values()).filter(function(group){return group.responses.some(function(r){return r.target.key===target.key;});})};
 }

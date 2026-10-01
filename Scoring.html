@@ -699,7 +699,7 @@
     .navigation-link:hover:not(:disabled),.nav button.navigation-link:hover:not(:disabled){background:var(--teal-hover);border-color:var(--teal-hover);color:var(--on-accent)}
     .navigation-link:focus-visible{outline:3px solid var(--teal);outline-offset:3px}
     .navigation-link:disabled{opacity:.48;cursor:not-allowed}
-    .duplicate-status{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:5px 0;font-size:12px;color:var(--amber)}.integration-dialog{max-width:1100px;width:92vw;max-height:90vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:18px;color:var(--ink);background:var(--input-bg)}.integration-dialog::backdrop{background:var(--backdrop)}.integration-dialog header{display:flex;align-items:center;justify-content:space-between}.integration-dialog p{font-size:13px;line-height:1.5}.comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.comparison-grid section{min-width:0;max-height:48vh;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:8px}.comparison-grid dt{font-size:12px;color:var(--muted);margin-top:12px}.comparison-grid dd{white-space:pre-wrap;overflow-wrap:anywhere;margin:3px 0 8px;font-size:14px}.comparison-grid h3{font-size:15px}#adoptionChoices label{display:block;margin:6px 0}#ruleBuilderFrame{border:0;width:100%;height:65vh}@media(max-width:600px){.comparison-grid{grid-template-columns:1fr}.integration-dialog{width:96vw}}
+    .duplicate-status{display:flex;gap:12px;align-items:center;padding:5px 0;font-size:12px;color:#111;overflow-x:auto}.submission-timing{flex:0 0 14em;white-space:nowrap;font-variant-numeric:tabular-nums}.review-details{display:flex;gap:12px;align-items:center;white-space:nowrap}.duplicate-status .status-warning{color:var(--amber)}.submission-timing:focus-visible{outline:2px solid var(--teal);outline-offset:2px}.integration-dialog{max-width:1100px;width:92vw;max-height:90vh;overflow:auto;border:1px solid var(--line);border-radius:12px;padding:18px;color:var(--ink);background:var(--input-bg)}.integration-dialog::backdrop{background:var(--backdrop)}.integration-dialog header{display:flex;align-items:center;justify-content:space-between}.integration-dialog p{font-size:13px;line-height:1.5}.comparison-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.comparison-grid section{min-width:0;max-height:48vh;overflow:auto;padding:12px;border:1px solid var(--line);border-radius:8px}.comparison-grid dt{font-size:12px;color:var(--muted);margin-top:12px}.comparison-grid dd{white-space:pre-wrap;overflow-wrap:anywhere;margin:3px 0 8px;font-size:14px}.comparison-grid h3{font-size:15px}#adoptionChoices label{display:block;margin:6px 0}#ruleBuilderFrame{border:0;width:100%;height:65vh}@media(max-width:600px){.comparison-grid{grid-template-columns:1fr}.integration-dialog{width:96vw}}
 
 button.help-icon,button.context-help{display:inline-flex;align-items:center;justify-content:center;flex:none;width:18px;height:18px;min-width:18px;padding:0;margin:0 0 0 6px;border:1px solid var(--line);border-radius:50%;background:var(--wash);color:var(--muted);font-size:12px;line-height:1;font-weight:bold;cursor:help;vertical-align:middle}
 button.help-icon:hover,button.context-help:hover{background:var(--control-line);color:var(--ink)}
@@ -4652,18 +4652,37 @@ function initHelpPopovers_() {
         var labels={disabled:'授業日未設定・重複判定なし',single:'同じ授業日の重複なし',pending:'重複あり・採用判断まで返却保留',adopted:'重複あり・この回答を採用',excluded:'重複あり・この回答は返却対象外','invalid-date':'授業日を確認・返却保留','invalid-class':'クラスの対応を確認・返却保留'};
         return (item.saveFailed?'採点の保存が未完了・再保存してください / ':'')+(labels[item.state] || item.state);
       }
+      function renderSubmissionTiming_(item) {
+        var timing=item && item.timing || {},date=document.createElement('span');
+        var days=timing.daysLate,known=typeof days==='number' && isFinite(days);
+        var label=!timing.lessonDate?'日付不明':!known?'提出日不明':days===0?'当日提出':days<0?'授業日前':days>99?'99日超':days+'日遅れ';
+        date.className='submission-timing';
+        date.title='授業日: '+(timing.lessonDate || '不明')+' / 提出日時: '+(timing.submittedAt || '記録なし')+(known?' / '+(days>0?days+'日遅れ':days<0?Math.abs(days)+'日前の提出':'当日提出'):'');
+        date.setAttribute('aria-label',date.title);
+        date.tabIndex=0;
+        if(timing.lessonDate)date.appendChild(document.createTextNode(timing.lessonDate.replace(/-/g,'/')+'（'));
+        var status=document.createElement('span');status.textContent=label;
+        if(known && days>0)status.className='status-warning';
+        date.appendChild(status);
+        if(timing.lessonDate)date.appendChild(document.createTextNode('）'));
+        return date;
+      }
       function renderReviewStatus_() {
         var box=$('duplicateStatus');if(!box)return;
         var row=state.rows[state.currentIndex],item=row && state.review && state.review.rows[row.rowNumber];
         box.replaceChildren();
         if(!row)return;
-        var text=document.createElement('span');text.textContent=reviewLabel_(item);box.appendChild(text);
-        if(item){var status=document.createElement('span');status.textContent='返却状態: '+item.returnState;box.appendChild(status);}
+        box.appendChild(renderSubmissionTiming_(item));
+        var details=document.createElement('span');details.className='review-details';box.appendChild(details);
+        var text=document.createElement('span');text.textContent=reviewLabel_(item && Object.assign({},item,{saveFailed:false}));details.appendChild(text);
+        if(item && ['pending','adopted','excluded'].indexOf(item.state)>=0)text.className='status-warning';
+        if(item){var status=document.createElement('span');status.textContent='返却状態: '+item.returnState;details.appendChild(status);}
+        if(item && item.saveFailed){var failed=document.createElement('span');failed.textContent='採点の保存が未完了・再保存してください';details.appendChild(failed);}
         var target=state.targets && state.targets[state.currentSheet];
-        if(target && target.warning){var warning=document.createElement('span');warning.textContent=target.warning;box.appendChild(warning);}
+        if(target && target.warning){var warning=document.createElement('span');warning.textContent=target.warning;details.appendChild(warning);}
         if(item && item.groupId){
           var button=document.createElement('button'),group=state.review.groups.find(function(g){return g.id===item.groupId;});
-          button.type='button';button.textContent='重複 '+(item.duplicateCount || (group?group.responses.length:0))+'件を比較';button.addEventListener('click',function(){openComparison_(item.groupId,item.key);});box.appendChild(button);
+          button.type='button';button.textContent='重複 '+(item.duplicateCount || (group?group.responses.length:0))+'件を比較';button.addEventListener('click',function(){openComparison_(item.groupId,item.key);});details.appendChild(button);
         }
       }
       function comparisonCard_(response) {

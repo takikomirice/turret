@@ -52,6 +52,23 @@ function readyPage(){
  p.load=()=>{p.h.loadInitData();p.calls.at(-1).success(p.response());};p.load();return p;
 }
 
+test('lesson timing and duplicate status have independent warning colors across row changes',()=>{
+ const p=readyPage();
+ const contents=el=>el.textContent+(el.children || []).map(contents).join('');
+ for(const [daysLate,status,warnDate,warnReview,label] of [[0,'single',false,false,'当日提出'],[2,'single',true,false,'2日遅れ'],[0,'pending',false,true,'当日提出'],[99,'adopted',true,true,'99日遅れ'],[100,'excluded',true,true,'99日超'],[-365,'single',false,false,'授業日前'],[null,'invalid-date',false,false,'日付不明']]) {
+  p.h.loadInitData();const response=p.response();
+  response.review.rows[2]={state:status,returnState:'未返却',timing:{lessonDate:daysLate===null?'':'2026-09-29',submittedAt:'2026-10-01 10:00:00',daysLate}};
+  p.calls.at(-1).success(response);
+  const [date,details]=p.elements.get('duplicateStatus').children;
+  assert.equal(date.className,'submission-timing');assert.match(contents(date),new RegExp(label));
+  assert.equal(date.children.some(el=>el.className==='status-warning'),warnDate);
+  assert.equal(details.children[0].className==='status-warning',warnReview);
+  assert.notEqual(details.children[1].className,'status-warning');
+  assert.match(date.title,/提出日時: 2026-10-01 10:00:00/);
+  if(daysLate===100)assert.match(date.title,/100日遅れ/);
+ }
+});
+
 test('successful loads restore editable scores while respecting locked columns',()=>{
  const p=readyPage();assert.deepEqual(Array.from(p.h.els.scoreInputs,e=>e.disabled),[false,true,false,false,false]);
  p.load();assert.equal(p.h.els.scoreInputs[0].disabled,false);
