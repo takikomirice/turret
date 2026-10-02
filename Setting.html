@@ -508,7 +508,7 @@ function renderSettings(){
   {kind:'bundle',title:'全部まとめて（引っ越し用）',description:'管理設定・採点設定・採点テンプレパックを1ファイルにまとめます。読み込みでは3種類とも置き換えます。'},
   {kind:'settings',title:'管理設定',description:'取り込み項目・返信本文・採点済みの判定列・自動実行の希望時刻を保存します。読み込みでは管理設定を置き換えます。'},
   {kind:'scoring',title:'採点設定',description:'表示列・得点列・講評列・テンプレートの選択を保存します。読み込みでは採点設定を置き換えます。テンプレート本体は含みません。'},
-  {kind:'templates',title:'採点テンプレパック',description:'テンプレートの条件・講評文・各枠の点数を保存します。読み込みでは追加し、同名のテンプレートがある場合は取り込みません。'}
+  {kind:'templates',title:'採点テンプレパック',description:'テンプレートの条件・講評文・出力ごとの表示・各枠の入力制限を保存します。読み込みでは追加し、同名のテンプレートがある場合は取り込みません。'}
  ];
  const selected=choices.find(choice=>choice.kind===state.exportKind)||choices[0];
  const detected=state.profile&&choices.find(choice=>choice.kind===state.profile.kind);

@@ -2579,10 +2579,10 @@ function exportConfigurationFile(kind, includeConnections) {
     let payload;
     if (kind === 'settings') payload = JSON.parse(buildSettingsProfile_(getConfig_(), includeConnections).json);
     else if (kind === 'scoring') payload = scoringLegacyApiExportConfig_();
-    else if (kind === 'templates') payload = scoringExportTemplatePack();
+    else if (kind === 'templates') payload = scoringBuildTemplatePack_();
     else payload = { application: 'turret', type: 'configuration-bundle', schemaVersion: 1, exportedAt: new Date().toISOString(),
       management: JSON.parse(buildSettingsProfile_(getConfig_(), includeConnections).json),
-      scoring: scoringLegacyApiExportConfig_(), templates: scoringExportTemplatePack() };
+      scoring: scoringLegacyApiExportConfig_(), templates: scoringBuildTemplatePack_() };
     const json = JSON.stringify(payload, null, 2);
     if (utf8ByteLength_(json) > configurationFileLimit_(kind)) throw new Error('設定ファイルが大きすぎます。個別の出力、または内容の整理を行ってください。');
     return { filename: configurationFilename_(kind), json: json };
@@ -2605,7 +2605,7 @@ function parseConfigurationScoring_(payload) {
 function parseConfigurationTemplates_(payload) {
   requireProfileObject_(payload, '採点テンプレパック');
   profileKeys_(payload, ['meta', 'templates'], '採点テンプレパック');
-  if (!payload.meta || payload.meta.type !== 'turret-grading-template-pack' || payload.meta.version !== 1) throw new Error('採点テンプレ形式のパックを指定してください。旧形式は取り込めません。');
+  scoringAssertTemplatePackV2_(payload);
   const templates = scoringNormalizeTemplates_(payload.templates);
   const validation = scoringValidateTemplateTable_({ templates: templates });
   if (!validation.ok) throw new Error(validation.issues.filter(function(i) { return i.severity === 'error'; }).map(function(i) { return i.message; }).slice(0, 5).join('\n'));
@@ -2686,19 +2686,7 @@ function inspectConfigurationFile(kind, json) {
 
 /** 復元も一括書込みし、先に既存テンプレートを消去しない。 */
 function restoreConfigurationTemplates_(ss, snapshot, revision) {
-  const sheet = ss.getSheetByName('採点テンプレ');
-  if (!snapshot.exists) { if (sheet) ss.deleteSheet(sheet); }
-  else {
-    const target = sheet || ss.insertSheet('採点テンプレ');
-    const height = Math.max(snapshot.values.length, target.getLastRow(), 1), width = Math.max(snapshot.values[0] ? snapshot.values[0].length : 0, target.getLastColumn(), 16);
-    // 既存シートから退避した数式だけは数式として復元する。JSON由来の文字列とは区別する。
-    const rows = Array.from({ length: height }, function(_, r) { return Array.from({ length: width }, function(_, c) {
-      if (snapshot.formulas[r] && snapshot.formulas[r][c]) return snapshot.formulas[r][c];
-      return snapshot.values[r] && snapshot.values[r][c] != null ? scoringSheetLiteral_(snapshot.values[r][c]) : '';
-    }); });
-    target.getRange(1, 1, height, width).setValues(rows);
-  }
-  if (scoringReadTemplateTable_().revision !== revision) throw new Error('採点テンプレートの復元値が一致しません。');
+  scoringRestoreTemplateSnapshot_(ss,snapshot,revision);
 }
 
 function applyConfigurationFile(kind, json, expectedRevision, choices) {
@@ -2722,9 +2710,7 @@ function applyConfigurationFile(kind, json, expectedRevision, choices) {
       currentTemplates = scoringReadTemplateTable_(); templates = configurationIncomingTemplates_(parsed, currentTemplates);
       const validation = scoringValidateTemplateTable_({ templates: templates });
       if (!validation.ok) throw new Error('採点テンプレートに不正な条件があります。');
-      snapshot = snapshotSheetContents_(ss, '採点テンプレ');
-      const templateSheet = ss.getSheetByName('採点テンプレ');
-      snapshot.formulas = templateSheet ? templateSheet.getDataRange().getFormulas() : [];
+      snapshot = scoringTemplateSnapshot_(ss);
     }
     const keys = [];
     if (management) keys.push('APP_CONFIG', 'APP_CONFIG_BACKUP', 'APP_CONFIG_STORAGE', 'APP_CONFIG_PARSE_ERROR', 'APP_CONFIG_SAVE_ERROR', AUTOMATION_STATE_KEY_);

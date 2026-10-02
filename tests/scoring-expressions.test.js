@@ -96,5 +96,5 @@ test('multiple outputs use the first matching rule per target and retain slot or
   ],['target','whenExpr','message','enabled'],client.buildEvalVars(client.buildRuleVars_(['3','','','',''])),[
     {target:'講評',enabled:true},{target:'改善点',enabled:true},{target:'',enabled:false}
   ]);
-  assert.deepEqual(JSON.parse(JSON.stringify(result)),{outputs:['良好','次の課題へ',''],matchedRowNumberForSlot1:3,error:null});
+  assert.deepEqual(JSON.parse(JSON.stringify(result)),{outputs:['良好','次の課題へ',''],matchedRowNumberForSlot1:3,matchedRowsByTarget:{改善点:2,講評:3},error:null});
 });

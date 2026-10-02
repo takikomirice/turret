@@ -31,7 +31,7 @@ export class AdminSheet {
       getColumn:()=>col, getNumColumns:()=>width,
       getNote:()=>this.notes[row-1]?.[col-1] || '',
       setNote:value=>{this.notes[row-1]??=[];this.notes[row-1][col-1]=value;return range;},
-      getNotes: () => Array.from({length:height},(_,y)=>Array.from({length:width},(_,x)=>this.notes[row+y-1]?.[col+x-1] || '')), setNotes: () => range,
+      getNotes: () => Array.from({length:height},(_,y)=>Array.from({length:width},(_,x)=>this.notes[row+y-1]?.[col+x-1] || '')), setNotes: values => { values.forEach((r,y)=>r.forEach((value,x)=>{this.notes[row+y-1]??=[];this.notes[row+y-1][col+x-1]=value;}));return range; },
       setValue: value => range.setValues([[value]]),
       setValues: values => { this.beforeWrite?.(values); values.forEach((r,y)=>r.forEach((value,x)=>{this.rows[row+y-1] ??=[]; this.rows[row+y-1][col+x-1]=value;})); return range; },
       clearContent: () => range.setValues(Array.from({length:height},()=>Array(width).fill(''))),

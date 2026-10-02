@@ -15,7 +15,7 @@ test('old scoring JSON migrates columns without changing turret connection and r
 
 test('rule initialization and pack import use one common lock and preserve existing templates',()=>{
  const e=scoringEnvironment();e.c.scoringEnsureRuleSheets();assert.equal(e.sheets.has('採点テンプレ'),true);assert.equal(e.isLocked(),false);
- const pack={meta:{type:'turret-grading-template-pack',version:1},templates:[{name:'テスト',enabled:true,domains:[[1,2,3],[],[],[],[]],rules:[{conditions:['>=3','','','',''],outputs:['よくできました','',''],enabled:true,visible:true}]}]};
+ const pack={meta:{type:'turret-grading-template-pack',version:2},templates:[{name:'テスト',enabled:true,scorePolicy:[{mode:'list',values:[1,2,3]},...Array.from({length:4},()=>({mode:'any'}))],rules:[{conditions:['>=3','','','',''],outputs:['よくできました','',''],enabled:true,outputVisible:[true,false,true]}]}]};
  e.c.scoringImportTemplatePack(pack);const exported=e.c.scoringExportTemplatePack();assert.equal(exported.templates[0].rules[0].outputs[0],'よくできました');
  assert.throws(()=>e.c.scoringImportTemplatePack(pack),/同名/);assert.equal(e.sheets.get('採点テンプレ').rows.length,2);assert.equal(e.isLocked(),false);
  assert.throws(()=>e.c.scoringImportTemplatePack({meta:{type:'scoring-tool-template-pack'},templates:[]}),/旧形式/);

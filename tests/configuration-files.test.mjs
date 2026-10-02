@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {scoringEnvironment, AdminSheet} from './helpers/scoring-environment.mjs';
 import {plain} from './helpers/admin-environment.mjs';
 
-const template = name => ({name, domains:[[1,2,3],[],[],[],[]], rules:[{conditions:['>=2','','','',''],outputs:['よくできました','',''],enabled:true,visible:true}]});
+const template = name => ({name, scorePolicy:[{mode:'list',values:[1,2,3]},...Array.from({length:4},()=>({mode:'any'}))], rules:[{conditions:['>=2','','','',''],outputs:['よくできました','',''],enabled:true,outputVisible:[true,false,true]}]});
 function configured() {
   const e=scoringEnvironment();
   e.c.scoringSaveTemplateTable({revision:e.c.scoringGetTemplateTable().revision,templates:[template('化学')]});
@@ -211,7 +211,7 @@ test('failed template import restores trusted sheet formulas as formulas and pre
     range.setValues=values=>{set(values);if(once){once=false;throw Error('injected template write failure');}return range;};
     return range;
   };
-  const rows=plain(sheet.rows),json=JSON.stringify({meta:{type:'turret-grading-template-pack',version:1},templates:[template('物理')]});
+  const rows=plain(sheet.rows),json=JSON.stringify({meta:{type:'turret-grading-template-pack',version:2},templates:[template('物理')]});
   assert.throws(()=>apply(e,'templates',json),/injected template write failure/);
   assert.deepEqual(sheet.rows.slice(0,2),rows);assert.equal(e.props.has('APP_CONFIG_SAVE_ERROR'),false);
   assert.equal(e.c.scoringReadTemplateTable_().templates[0].rules[0].outputs[0],'数式の講評');
