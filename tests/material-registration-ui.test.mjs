@@ -18,13 +18,13 @@ test('topic select has a blank default and uses first-course candidates without 
  assert.match(html,/&lt;復習&gt;/);
 });
 test('topic changes make a saved material dirty and are sent only with material settings',async()=>{
- const c=environment(true);vm.runInContext(`materialSettingsDraft(state.forms.records[0]).topicName='復習';`,c);
+ const c=environment(true);vm.runInContext(`materialSettingsDraft(state.forms.records[0]).topicName='復習';materialSettingsDraft(state.forms.records[0]).topicChange=true;`,c);
  assert.equal(vm.runInContext('materialSettingsReady(state.forms.records[0])',c),false);
  await vm.runInContext("formCommand('save-material-settings','a')",c);
  assert.equal(vm.runInContext('calls.find(c=>c[0]==="runManagedFormSettings")[2].topicName',c),'復習');
 });
 test('missing topics are confirmed with affected classes and cancellation does not write',async()=>{
- const c=environment(true);vm.runInContext(`state.batchMaterialDraft={materialTitlePattern:'{class_label} 新しい資料',description:'本文',topicName:'復習'};let confirms=[];confirmAction=async(...args)=>{confirms.push(args);return false;};const oldRpc=rpc;rpc=async(method,...args)=>{const result=await oldRpc(method,...args);if(method==='previewManagedFormSettings')result.targets[0].missingTopic={courseId:'100',className:'1A',name:'復習'};return result;};`,c);
+ const c=environment(true);vm.runInContext(`state.batchMaterialDraft={materialTitlePattern:'{class_label} 新しい資料',description:'本文',topicName:'復習',topicChange:true};let confirms=[];confirmAction=async(...args)=>{confirms.push(args);return false;};const oldRpc=rpc;rpc=async(method,...args)=>{const result=await oldRpc(method,...args);if(method==='previewManagedFormSettings')result.targets[0].missingTopic={courseId:'100',className:'1A',name:'復習'};return result;};`,c);
  await vm.runInContext("formCommand('apply-batch-material-settings')",c);
  assert.match(vm.runInContext('confirms[0][1]',c),/復習[\s\S]*1A|1A[\s\S]*復習/);
  assert.match(vm.runInContext('confirms[0][1]',c),/作成/);
@@ -55,7 +55,7 @@ test('bulk registration rejects invalid or reversed dates before any writes',asy
 });
 
 test('confirmed missing-topic plan alone authorizes its topic creation',async()=>{
- const c=environment();vm.runInContext(`state.batchMaterialDraft={materialTitlePattern:'{class_label} 資料',description:'本文',topicName:'復習'};const oldRpc=rpc;rpc=async(method,...args)=>{const result=await oldRpc(method,...args);if(method==='previewManagedFormSettings')result.targets[0].missingTopic={courseId:'100',className:'1A',name:'復習'};return result;};`,c);
+ const c=environment();vm.runInContext(`state.batchMaterialDraft={materialTitlePattern:'{class_label} 資料',description:'本文',topicName:'復習',topicChange:true};const oldRpc=rpc;rpc=async(method,...args)=>{const result=await oldRpc(method,...args);if(method==='previewManagedFormSettings')result.targets[0].missingTopic={courseId:'100',className:'1A',name:'復習'};return result;};`,c);
  await vm.runInContext("formCommand('apply-batch-material-settings')",c);
  assert.equal(vm.runInContext('calls.find(c=>c[0]==="runManagedFormSettings")[6]',c),true);
 });
@@ -107,8 +107,85 @@ test('bulk extends an old deadline before scheduling a later valid publication',
  assert.equal(vm.runInContext('calls.filter(c=>c[0]==="runManagedFormAction")[0][2]',c),'set-close');
 });
 test('registering an individually changed topic updates the durable common-topic baseline',async()=>{
- const c=environment(true);vm.runInContext(`const r=state.forms.records[0];r.input.topicName='新';r.materialSettingsBaseline={materialTitlePattern:r.input.materialTitlePattern,description:r.input.description,topicName:'旧'};state.batchMaterialDraft={...r.materialSettingsBaseline,topicName:'新'};`,c);
+ const c=environment(true);vm.runInContext(`const r=state.forms.records[0];r.input.topicName='新';r.materialSettingsBaseline={materialTitlePattern:r.input.materialTitlePattern,description:r.input.description,topicName:'旧'};state.batchMaterialDraft={...r.materialSettingsBaseline,topicName:'新',topicChange:true};`,c);
  await vm.runInContext("formCommand('apply-batch-material-settings')",c);
  assert.equal(vm.runInContext('state.forms.records[0].materialSettingsBaseline.topicName',c),'新');
  assert.equal(vm.runInContext('individualMaterialSettings(state.forms.records[0])',c),false);
+});
+
+test('unchanged topic is omitted from individual and bulk title-only saves',async()=>{
+ for(const action of ['save-material-settings','apply-batch-material-settings','register-all']){
+  const c=environment(true);
+  vm.runInContext(`materialSettingsDraft(state.forms.records[0]).materialTitlePattern='{class_label} 編集';batchMaterialSettingsDraft().materialTitlePattern='{class_label} 編集';`,c);
+  await vm.runInContext(`formCommand('${action}','a')`,c);
+  assert.equal(vm.runInContext(`Object.hasOwn(calls.find(c=>c[0]==='runManagedFormSettings')[2],'topicName')`,c),false);
+  assert.equal(vm.runInContext(`Object.hasOwn(calls.find(c=>c[0]==='runManagedFormSettings')[2],'topicChange')`,c),false);
+ }
+});
+test('topic changes require the explicit checkbox and a checked blank means clear',async()=>{
+ const c=environment(true);const html=vm.runInContext('renderMaterialSettings(state.forms.records[0])',c);
+ assert.match(html,/type="checkbox"[^>]+data-material-field="topicChange"/);
+ assert.match(html,/トピックを変更する/);
+ vm.runInContext(`materialSettingsDraft(state.forms.records[0]).topicChange=true;`,c);
+ assert.equal(vm.runInContext('materialSettingsReady(state.forms.records[0])',c),false);
+ await vm.runInContext("formCommand('save-material-settings','a')",c);
+ assert.equal(vm.runInContext('calls.find(c=>c[0]==="runManagedFormSettings")[2].topicChange',c),true);
+ assert.equal(vm.runInContext('calls.find(c=>c[0]==="runManagedFormSettings")[2].topicName',c),'');
+ assert.equal(vm.runInContext('materialSettingsDraft(state.forms.records[0]).topicChange===true',c),false);
+});
+test('cancel then uncheck preserves topic and reload resets explicit topic intent',async()=>{
+ const c=environment(true);
+ vm.runInContext(`const d=materialSettingsDraft(state.forms.records[0]);d.topicChange=true;d.topicName='';confirmAction=async()=>false;`,c);
+ await vm.runInContext("formCommand('save-material-settings','a')",c);
+ assert.equal(vm.runInContext('calls.filter(c=>c[0]==="runManagedFormSettings").length',c),0);
+ vm.runInContext(`d.topicChange=false;d.description='本文のみ';confirmAction=async()=>true;`,c);
+ await vm.runInContext("formCommand('save-material-settings','a')",c);
+ assert.equal(vm.runInContext('Object.hasOwn(calls.find(c=>c[0]==="runManagedFormSettings")[2],"topicName")',c),false);
+ vm.runInContext(`materialSettingsDraft(state.forms.records[0]).topicChange=true;`,c);
+ await vm.runInContext("formCommand('reload-material-settings','a')",c);
+ assert.equal(vm.runInContext('materialSettingsDraft(state.forms.records[0]).topicChange===true',c),false);
+});
+test('successful bulk topic change resets intent before the next title-only save',async()=>{
+ const c=environment(true);
+ vm.runInContext(`Object.assign(batchMaterialSettingsDraft(),{topicChange:true,topicName:''});`,c);
+ await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ assert.equal(vm.runInContext('calls.find(c=>c[0]==="runManagedFormSettings")[2].topicChange',c),true);
+ assert.equal(vm.runInContext('batchMaterialSettingsDraft().topicChange===true',c),false);
+ vm.runInContext(`calls=[];batchMaterialSettingsDraft().description='本文だけ';`,c);
+ await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ assert.equal(vm.runInContext('Object.hasOwn(calls.find(c=>c[0]==="runManagedFormSettings")[2],"topicName")',c),false);
+});
+test('a partial topic batch retries failed records without replaying successful clears',async()=>{
+ const c=environment(true);
+ vm.runInContext(`const other=copy(state.forms.records[0]);other.id='b';other.revision='b1';state.forms.records.push(other);Object.assign(batchMaterialSettingsDraft(),{topicChange:true,topicName:''});const backendRpc=rpc;let failOnce=true;rpc=async(method,...args)=>{if(method==='runManagedFormSettings'&&args[0]==='b'&&failOnce){failOnce=false;calls.push([method,...args]);throw Error('temporary failure');}return backendRpc(method,...args);};`,c);
+ await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ vm.runInContext('calls=[]',c);
+ await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ assert.deepEqual(Array.from(vm.runInContext('calls.filter(c=>c[0]==="runManagedFormSettings").map(c=>c[1])',c)),['b']);
+});
+test('legacy topic recovery explains preservation and cancellation does not resume',async()=>{
+ const c=environment(true);
+ vm.runInContext(`state.forms.records[0].settingsUpdate={plan:{topic:{name:''}}};let confirmations=[];confirmAction=async(title,summary)=>{confirmations.push(summary);return false;};`,c);
+ await vm.runInContext("formCommand('resume-settings','a')",c);
+ assert.equal(vm.runInContext('calls.filter(c=>c[0]==="resumeManagedFormSettings").length',c),0);
+ assert.match(vm.runInContext('confirmations[0]',c),/トピック.*変更せず/);
+ vm.runInContext('confirmAction=async()=>true;',c);
+ await vm.runInContext("formCommand('resume-settings','a')",c);
+ assert.equal(vm.runInContext('calls.filter(c=>c[0]==="resumeManagedFormSettings").length',c),1);
+});
+test('bulk retry reports a pending recovery rather than claiming all records saved',async()=>{
+ const c=environment(true);
+ vm.runInContext(`const other=copy(state.forms.records[0]);other.id='b';other.revision='b1';state.forms.records.push(other);Object.assign(batchMaterialSettingsDraft(),{topicChange:true,topicName:''});const backendRpc=rpc;rpc=async(method,...args)=>{if(method==='runManagedFormSettings'&&args[0]==='b'){state.forms.records.find(r=>r.id==='b').settingsUpdate={plan:{topic:{name:''},topicChange:true}};throw Error('uncertain write');}return backendRpc(method,...args);};`,c);
+ await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ const result=await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ assert.equal(result,false);assert.match(vm.runInContext('messages.at(-1)',c),/設定の更新を再開/);
+});
+test('pending recovery blocks a mixed retry even when another failed record remains editable',async()=>{
+ const c=environment(true);
+ vm.runInContext(`for(const id of ['b','c']){const r=copy(state.forms.records[0]);r.id=id;r.revision=id+'1';state.forms.records.push(r);}Object.assign(batchMaterialSettingsDraft(),{topicChange:true,topicName:''});const backendRpc=rpc;let firstAttempt=true;rpc=async(method,...args)=>{if(method==='runManagedFormSettings'&&firstAttempt){if(args[0]==='b')state.forms.records.find(r=>r.id==='b').settingsUpdate={plan:{topic:{name:''},topicChange:true}};if(args[0]!=='a')throw Error('failure');}return backendRpc(method,...args);};`,c);
+ await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ vm.runInContext('firstAttempt=false;calls=[];',c);
+ const result=await vm.runInContext("formCommand('apply-batch-material-settings')",c);
+ assert.equal(result,false);assert.match(vm.runInContext('messages.at(-1)',c),/設定の更新を再開/);
+ assert.equal(vm.runInContext('calls.filter(c=>c[0]==="runManagedFormSettings").length',c),0);
 });
