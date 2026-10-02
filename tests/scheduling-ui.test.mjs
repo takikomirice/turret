@@ -9,6 +9,87 @@ test('datetime inputs always represent Japan time, independently of browser time
  assert.equal(vm.runInContext("scheduleIsoToInput('2026-10-01T01:30:00Z')",c),'2026-10-01T10:30');
  for(const bad of ['', '2026-02-30T10:00','2026-10-01T24:30'])assert.throws(()=>c.scheduleInputToIso(bad),/日時/);
 });
+test('date displays include all Japanese weekdays at Japan day, month and year boundaries',()=>{
+ const c=model();
+ for(const [iso,expected] of [
+  ['2026-10-03T15:00:00Z','2026-10-04（日） 00:00（日本時間）'],
+  ['2026-10-04T15:00:00Z','2026-10-05（月） 00:00（日本時間）'],
+  ['2026-10-05T15:00:00Z','2026-10-06（火） 00:00（日本時間）'],
+  ['2026-10-06T15:00:00Z','2026-10-07（水） 00:00（日本時間）'],
+  ['2026-10-07T15:00:00Z','2026-10-08（木） 00:00（日本時間）'],
+  ['2026-10-08T15:00:00Z','2026-10-09（金） 00:00（日本時間）'],
+  ['2026-10-09T15:00:00Z','2026-10-10（土） 00:00（日本時間）'],
+  ['2026-12-31T14:59:00Z','2026-12-31（木） 23:59（日本時間）'],
+  ['2026-12-31T15:00:00Z','2027-01-01（金） 00:00（日本時間）'],
+  ['2028-02-28T15:00:00Z','2028-02-29（火） 00:00（日本時間）'],
+  ['2028-02-29T15:00:00Z','2028-03-01（水） 00:00（日本時間）'],
+  ['2026-09-30T08:00:00-07:00','2026-10-01（木） 00:00（日本時間）']
+ ])assert.equal(c.scheduleDisplay(iso),expected);
+});
+test('native datetime inputs retain their value with accessible weekday previews',()=>{
+ const c=model();
+ for(const key of ['batch:publish','batch:close','publish:r1','close:r1']){
+  const html=c.scheduleInput(key,'日時','2026-10-01T01:30:00Z');
+  assert.match(html,/type="datetime-local"/);assert.match(html,/value="2026-10-01T10:30"/);
+  assert.ok(html.includes('aria-describedby="schedule-preview-'+key+'"'));
+  assert.ok(html.includes('id="schedule-preview-'+key+'"'));
+  assert.match(html,/aria-live="polite"/);assert.match(html,/aria-atomic="true"/);
+  assert.match(html,/2026-10-01（木） 10:30（日本時間）/);
+ }
+ vm.runInContext("state.scheduleDrafts={'publish:r1':'2027-01-01T00:00'}",c);
+ assert.match(c.scheduleInput('publish:r1','日時','2026-10-01T01:30:00Z'),/2027-01-01（金） 00:00（日本時間）/);
+ vm.runInContext("delete state.scheduleDrafts['publish:r1']",c);
+ assert.match(c.scheduleInput('publish:r1','日時','2027-01-02T00:00:00Z'),/2027-01-02（土） 09:00（日本時間）/);
+});
+test('blank and invalid dates never show a misleading weekday or throw during rendering',()=>{
+ const c=model();assert.equal(c.scheduleDisplay(''),'未設定');
+ let display;assert.doesNotThrow(()=>{display=c.scheduleDisplay('invalid');});assert.match(display,/日時/);assert.doesNotMatch(display,/[（(][日月火水木金土][）)]/);
+ for(const value of ['', '2026-02-30T10:00','2026-10-01T24:30','invalid']){
+  c.value=value;vm.runInContext("state.scheduleDrafts={'publish:r1':value}",c);
+  const html=c.scheduleInput('publish:r1','日時');
+  assert.doesNotMatch(html,/[（(][日月火水木金土][）)]/);
+  assert.match(html,value?/日時が不正/:/未設定/);
+ }
+ assert.doesNotThrow(()=>c.scheduleInput('publish:r1','日時','invalid'));
+});
+test('nonexistent saved calendar dates are rejected instead of rolling into a different weekday',()=>{
+ const c=model();
+ for(const value of ['2026-02-30T10:00:00Z','2026-04-31T10:00:00+09:00']){
+  assert.equal(c.scheduleDisplay(value),'日時が不正です。');
+  assert.equal(c.scheduleIsoToInput(value),'');
+  assert.doesNotMatch(c.scheduleInput('publish:r1','日時',value),/[（(][日月火水木金土][）)]/);
+ }
+});
+test('editing datetime input updates its weekday preview without replacing the focused field',async()=>{
+ const c=model(),events={},preview={textContent:'2026-10-01（木） 10:30（日本時間）'};
+ const input={id:'schedule-publish:r1',dataset:{scheduleKey:'publish:r1',scheduleSaved:'2026-10-01T10:30'},value:'2026-10-02T10:30',closest:()=>true};
+ c.document={activeElement:input,getElementById:id=>id==='schedule-preview-publish:r1'?preview:{addEventListener(){}},querySelectorAll:selector=>selector==='[data-schedule-key]'?[input]:[],addEventListener:(name,fn)=>{(events[name]||=[]).push(fn);}};
+ c.window={addEventListener(){}};
+ vm.runInContext("initHelp=()=>{};task=()=>{};readCurrent=()=>readScheduleDrafts();updateMaterialSettingsControls=()=>{};render=()=>{throw Error('日時入力中に画面を再描画しない');};boot();",c);
+ for(const listener of events.input)await listener({target:input});
+ assert.equal(preview.textContent,'2026-10-02（金） 10:30（日本時間）');
+ assert.equal(c.document.activeElement,input);assert.equal(input.value,'2026-10-02T10:30');
+ assert.equal(vm.runInContext("state.scheduleDrafts['publish:r1']",c),'2026-10-02T10:30');
+ input.value='2026-10-03T10:30';for(const listener of events.change)await listener({target:input});
+ assert.equal(preview.textContent,'2026-10-03（土） 10:30（日本時間）');
+ input.value='';for(const listener of events.input)await listener({target:input});assert.equal(preview.textContent,'未設定');
+ input.value='2026-02-30T10:00';for(const listener of events.input)await listener({target:input});assert.match(preview.textContent,/日時が不正/);
+});
+test('accepted schedule results refresh and clear weekday previews beside the existing input',()=>{
+ const c=model(),preview={textContent:'以前の日時'},input={dataset:{scheduleKey:'publish:r1'},value:'2026-10-01T10:00'};
+ c.document={getElementById:id=>id==='schedule-publish:r1'?input:id==='schedule-preview-publish:r1'?preview:null};
+ c.acceptScheduleResult('r1','reschedule',{scheduledTime:'2026-12-31T15:00:00Z'});
+ assert.equal(input.value,'2027-01-01T00:00');assert.equal(preview.textContent,'2027-01-01（金） 00:00（日本時間）');
+ c.acceptScheduleResult('r1','cancel-schedule',{});assert.equal(input.value,'');assert.equal(preview.textContent,'未設定');
+});
+test('publishing date summaries and delete confirmations include Japan weekdays',()=>{
+ const c=model();
+ vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'r1',kind:'form',stage:'scheduled',label:'クラス',scheduledTime:'2026-12-31T15:00:00Z',closesAt:'2027-01-02T00:00:00Z'}]}",c);
+ const html=vm.runInContext("renderFormRecords('publish')",c);
+ assert.match(html,/資料公開予定：2027-01-01（金） 00:00（日本時間）/);assert.match(html,/受付終了：2027-01-02（土） 09:00（日本時間）/);
+ const summary=c.managedActionSummary({className:'クラス',title:'資料',scheduledTime:'2026-12-31T15:00:00Z',closesAt:'2027-01-02T00:00:00Z',postedAt:'2026-10-01T01:30:00Z'},'delete');
+ assert.match(summary,/資料公開：2027-01-01（金） 00:00（日本時間）/);assert.match(summary,/受付終了：2027-01-02（土） 09:00（日本時間）/);assert.match(summary,/投稿日時：2026-10-01（木） 10:30（日本時間）/);
+});
 test('scheduled forms offer changing/cancelling and deadline controls with explicit local status',()=>{
  const c=model();vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'r1',kind:'form',stage:'scheduled',label:'クラス',materialId:'m1',scheduledTime:'2026-10-01T01:00:00Z',closesAt:'2026-10-02T03:00:00Z',closeState:'error',closeError:'接続失敗'}]};",c);
  const html=vm.runInContext("renderForms('publish')",c);

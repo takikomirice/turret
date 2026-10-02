@@ -282,6 +282,9 @@
       word-break:break-word;
       overflow-wrap:anywhere;
     }
+    .rule-output--matched{
+      background:var(--wash);color:var(--teal);font-weight:800;text-decoration:underline;text-underline-offset:3px;
+    }
     .rule-line--matched{
       background-color:var(--wash);
       border-left:3px solid var(--teal);
@@ -2425,147 +2428,68 @@ function initHelpPopovers_() {
       }
 
       // ルール一覧を表示
-      function renderRulesSummary(templateId) {
-        if (!els.rulesSummary) return;
-        var tid = String(templateId || '').trim();
-        if (!tid) {
-          // 空文字の場合は確実にクリア（innerHTML を空にしてから textContent を設定）
-          els.rulesSummary.innerHTML = '';
-          els.rulesSummary.textContent = '（ルール未設定）';
-          return;
-        }
-
-        var res=state.currentRulesResult;
-        if (state.currentTemplateId!==tid || !res) {
-          els.rulesSummary.textContent='ルールを読み込み中…';return;
-        }
-            if (!res || !res.ok) {
-              var errorMsg = '（ルール取得失敗 / 未設定）';
-              if (res && res.error) {
-                errorMsg += ' ' + String(res.error).substring(0, 40);
-              }
-              els.rulesSummary.innerHTML = '';
-              els.rulesSummary.textContent = errorMsg;
-              return;
-            }
-
-            var rules = res.rules || [];
-            var headers = res.headers || [];
-
-            // skipped の合計を計算
-            var skippedTotal = 0;
-            if (res.skipped && typeof res.skipped === 'object') {
-              skippedTotal = (res.skipped.disabled || 0) +
-                (res.skipped.invalidPriority || 0) +
-                (res.skipped.invalidRow || 0);
-            }
-
-            // ヘッダ名を取得
-            var whenKey = findHeaderKey_(headers, ['whenexpr', 'when', 'expr', 'condition', 'if']);
-            // 条件式の表示名（任意）：whenLabel 列があれば優先して表示する
-            // - "whenLabel" / "when_label" / "when label" は normalizeHeaderKey_ により同一扱い（whenlabel）
-            var whenLabelKey = findHeaderKey_(headers, ['whenlabel']);
-            var messageKey = findRuleMessageKey_(headers);
-            var priorityKey = findHeaderKey_(headers, ['priority', 'prio', 'order', 'rank']);
-            var visibleKey = findHeaderKey_(headers, ['visible', 'show', 'display']);
-
-            // サーバ側で既にフィルタ済み・ソート済みだが、互換性のため表示はそのまま使用
-            if (rules.length === 0) {
-              var emptyMsg = '（ルール未設定）';
-              if (skippedTotal > 0) {
-                emptyMsg += ' ⚠ skipped=' + skippedTotal;
-              }
-              els.rulesSummary.textContent = emptyMsg;
-              return;
-            }
-
-            // DOM生成で表示（XSS対策：textContentのみ使用）
-            els.rulesSummary.innerHTML = '';
-            var shown = 0;
-            for (var j = 0; j < rules.length; j++) {
-              var r = rules[j];
-              // visible=1 のみ表示（0/空欄は非表示）
-              if (visibleKey) {
-                var vv = r[visibleKey];
-                var show = (vv === 1 || vv === '1' || String(vv || '').trim() === '1');
-                if (!show) continue;
-              }
-              var whenExpr = whenKey ? String(r[whenKey] || '').trim() : '';
-              var whenLabel = whenLabelKey ? String(r[whenLabelKey] || '').trim() : '';
-              var whenDisplay = whenLabel || whenExpr;
-              var message = messageKey ? String(r[messageKey] || '').trim() : '';
-              var msgTruncated = truncateMessage_(message, 60);
-              var rowNumber = r._rowNumber || null;
-
-              var lineEl = document.createElement('div');
-              lineEl.className = 'rule-line';
-              if (rowNumber != null) {
-                lineEl.setAttribute('data-row-number', String(rowNumber));
-              }
-
-              var numSpan = document.createElement('span');
-              numSpan.className = 'rule-num';
-              numSpan.textContent = (shown + 1) + '. ';
-              lineEl.appendChild(numSpan);
-
-              var whenSpan = document.createElement('span');
-              whenSpan.className = 'rule-when';
-              whenSpan.textContent = whenDisplay;
-              lineEl.appendChild(whenSpan);
-
-              var separator = document.createTextNode(' ： ');
-              lineEl.appendChild(separator);
-
-              var msgSpan = document.createElement('span');
-              msgSpan.className = 'rule-msg';
-              msgSpan.textContent = msgTruncated;
-              lineEl.appendChild(msgSpan);
-
-              els.rulesSummary.appendChild(lineEl);
-              shown++;
-            }
-            if (shown === 0) {
-              els.rulesSummary.textContent = '（表示対象のルールがありません）';
-              return;
-            }
-
-            // skipped がある場合は警告を追加
-            if (skippedTotal > 0) {
-              var warnEl = document.createElement('div');
-              warnEl.className = 'rule-warn';
-              warnEl.style.cssText = 'margin-top:8px; padding:4px 8px; background:var(--warning-bg); border:1px solid var(--warning-line); border-radius:4px; font-size:12px; color:var(--amber);';
-              warnEl.textContent = '⚠ 無効ルール ' + skippedTotal + ' 件がスキップされました';
-              els.rulesSummary.appendChild(warnEl);
-            }
-
-            // ハイライトを更新
-            updateRulesSummaryHighlight_(tid);
-
+      // 出力別の判定データは維持し、一覧だけを元のシート行にまとめる。
+      function buildRulesSummaryRows_(rules, headers) {
+        var rows=[],byRow=new Map();
+        var whenKey=findHeaderKey_(headers,['whenexpr','when','expr','condition','if']);
+        var labelKey=findHeaderKey_(headers,['whenlabel']);
+        var messageKey=findRuleMessageKey_(headers);
+        var visibleKey=findHeaderKey_(headers,['visible','show','display']);
+        var targetKey=findHeaderKey_(headers,['target','dest','group','outputtarget']);
+        (rules || []).forEach(function(rule,index){
+          if(visibleKey && !isEnabled_(rule[visibleKey]))return;
+          var message=messageKey?String(rule[messageKey]==null?'':rule[messageKey]):'';
+          if(message==='')return;
+          var rowNumber=rule._rowNumber || null;
+          var key=rule._tableConditions && rowNumber!=null?'row:'+rowNumber:'item:'+index;
+          var row=byRow.get(key);
+          if(!row){
+            var when=labelKey?String(rule[labelKey] || ''):'';
+            if(rule._tableConditions)when=rule._tableConditions.map(function(c,i){return c.op==='any'?'':'①②③④⑤'[i]+':'+(c.op==='='?'':c.op)+String(c.value);}).filter(Boolean).join('・') || '条件なし';
+            else if(!when)when=whenKey?String(rule[whenKey] || ''):'';
+            row={rowNumber:rowNumber,when:when || '条件なし',outputs:[]};byRow.set(key,row);rows.push(row);
+          }
+          row.outputs.push({target:targetKey?normalizeTargetName_(rule[targetKey]):'講評・改善点',text:message});
+        });
+        return rows;
       }
 
-      // ルール一覧のハイライトを更新
-      function updateRulesSummaryHighlight_(currentTemplateId) {
+      function renderRulesSummary(templateId) {
         if (!els.rulesSummary) return;
-        var templateId = String(currentTemplateId || '').trim();
-        var matchedRowNumber = null;
+        var tid=String(templateId || '').trim();
+        els.rulesSummary.innerHTML='';
+        if(!tid){els.rulesSummary.textContent='（ルール未設定）';return;}
+        var res=state.currentRulesResult;
+        if(state.currentTemplateId!==tid || !res){els.rulesSummary.textContent='ルールを読み込み中…';return;}
+        if(!res.ok){els.rulesSummary.textContent='（ルール取得失敗 / 未設定）'+(res.error?' '+String(res.error).substring(0,80):'');return;}
+        var rows=buildRulesSummaryRows_(res.rules || [],res.headers || []);
+        if(!rows.length){els.rulesSummary.textContent=(res.rules || []).length?'（表示対象のルールがありません）':'（ルール未設定）';return;}
+        rows.forEach(function(row,index){
+          var line=document.createElement('div');line.className='rule-line';
+          if(row.rowNumber!=null)line.setAttribute('data-row-number',String(row.rowNumber));
+          var number=document.createElement('span');number.className='rule-num';number.textContent=(index+1)+'. ';line.appendChild(number);
+          var when=document.createElement('span');when.className='rule-when';when.textContent=row.when;line.appendChild(when);
+          line.appendChild(document.createTextNode('：'));
+          row.outputs.forEach(function(output,i){
+            if(i)line.appendChild(document.createTextNode(' / '));
+            var text=document.createElement('span');text.className='rule-msg rule-output';text.textContent=truncateMessage_(output.text,60);text.title=output.target+'：'+output.text;
+            text.setAttribute('data-output-target',output.target);text.setAttribute('data-row-number',row.rowNumber==null?'':String(row.rowNumber));line.appendChild(text);
+          });
+          els.rulesSummary.appendChild(line);
+        });
+        updateRulesSummaryHighlight_(tid);
+      }
 
-        // 現在表示中のテンプレと一致する場合のみハイライト
-        if (state.lastMatchedRule && state.lastMatchedRule.templateId === templateId) {
-          matchedRowNumber = state.lastMatchedRule.matchedRowNumber;
-        }
-
-        // すべてのルール行から matched クラスを除去
-        var lines = els.rulesSummary.querySelectorAll('.rule-line');
-        for (var i = 0; i < lines.length; i++) {
-          lines[i].classList.remove('rule-line--matched');
-        }
-
-        // マッチした行にクラスを付与
-        if (matchedRowNumber != null) {
-          var targetLine = els.rulesSummary.querySelector('[data-row-number="' + String(matchedRowNumber) + '"]');
-          if (targetLine) {
-            targetLine.classList.add('rule-line--matched');
-          }
+      // 表示されている文言だけを、出力ごとの実際の採用行で強調する。
+      function updateRulesSummaryHighlight_(currentTemplateId) {
+        if(!els.rulesSummary)return;
+        var match=state.lastMatchedRule,tid=String(currentTemplateId || '').trim();
+        var matched=match && match.templateId===tid?(match.matchedRowsByTarget || {}):{};
+        var outputs=els.rulesSummary.querySelectorAll('.rule-output');
+        for(var i=0;i<outputs.length;i++){
+          var el=outputs[i],target=el.getAttribute('data-output-target'),row=el.getAttribute('data-row-number');
+          el.classList.remove('rule-output--matched');
+          if(row && Object.prototype.hasOwnProperty.call(matched,target) && String(matched[target])===row)el.classList.add('rule-output--matched');
         }
       }
 
@@ -2947,7 +2871,8 @@ function initHelpPopovers_() {
         if (typeof v === 'number') return v;
         if (typeof v === 'string') {
           var s = v.trim();
-          if (/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(s) && isFinite(Number(s))) return Number(s);
+          // JSONやシートから再表示された小さい数値の指数表記も保持する。
+          if (/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(s) && isFinite(Number(s))) return Number(s);
         }
         return NaN;
       }
@@ -3581,14 +3506,16 @@ function initHelpPopovers_() {
         var slots = Array.isArray(slotsResolved) ? slotsResolved : [];
         var out = ['', '', ''];
         var tableRule=(rules || []).find(function(r){return !!r._tableConditions;});
-        if(tableRule)for(var k=0;k<5;k++){
-          var score=evalVars['score'+(k+1)],domain=tableRule._tableDomains[k];
+        var tableResult=state.currentRulesResult;
+        var policy=tableRule?tableRule._scorePolicy:tableResult && tableResult.scorePolicy;
+        if(tableRule || (tableResult && tableResult.tableFormat))for(var k=0;k<5;k++){
+          var score=evalVars['score'+(k+1)],restriction=policy && policy[k];
           var raw=evalVars._rawScores && evalVars._rawScores[k];
           if(raw!=null && String(raw).trim()!=='' && (score==null || !isFinite(Number(score))))return {outputs:out,error:'枠'+(k+1)+'には数値を入力してください。'};
-          if(score!=null && score!=='' && domain.indexOf(Number(score))<0)return {outputs:out,error:'枠'+(k+1)+'はテンプレートで設定した点数から入力してください。'};
+          if(score!=null && score!=='' && restriction && restriction.mode==='list' && restriction.values.indexOf(Number(score))<0)return {outputs:out,error:'枠'+(k+1)+'はテンプレートで設定した点数から入力してください。'};
         }
         if (!Array.isArray(rules) || !rules.length || !Array.isArray(headers)) {
-          return { outputs: out, matchedRowNumberForSlot1: null, error: null };
+          return { outputs: out, matchedRowNumberForSlot1: null, matchedRowsByTarget: {}, error: null };
         }
 
         var whenKey = findHeaderKey_(headers, ['whenexpr', 'when', 'expr', 'condition', 'if']);
@@ -3650,8 +3577,8 @@ function initHelpPopovers_() {
         }
 
         var slot1Target = slots[0] && slots[0].target ? normalizeTargetName_(slots[0].target) : '講評・改善点';
-        var matchedRowNumberForSlot1 = rowByTarget.hasOwnProperty(slot1Target) ? rowByTarget[slot1Target] : null;
-        return { outputs: out, matchedRowNumberForSlot1: matchedRowNumberForSlot1, error: null };
+        var matchedRowNumberForSlot1 = Object.prototype.hasOwnProperty.call(rowByTarget,slot1Target) ? rowByTarget[slot1Target] : null;
+        return { outputs: out, matchedRowNumberForSlot1: matchedRowNumberForSlot1, matchedRowsByTarget: rowByTarget, error: null };
       }
 
       // 講評は手元で評価する。未保存の変更は、元の対象と行に紐付ける。
@@ -3728,12 +3655,7 @@ function initHelpPopovers_() {
           var result2 = evaluateRulesLocallyMulti_(rules, headers, evalVars, slots);
           if(result2.error){setStatus(result2.error+' 講評は保持しています。','error');return;}
 
-          // ハイライト（slot1のマッチ行のみ）
-          if (result2 && result2.matchedRowNumberForSlot1 != null) {
-            state.lastMatchedRule = { templateId: templateId, matchedRowNumber: result2.matchedRowNumberForSlot1 };
-          } else {
-            state.lastMatchedRule = { templateId: '', matchedRowNumber: null };
-          }
+          state.lastMatchedRule={templateId:templateId,matchedRowNumber:result2.matchedRowNumberForSlot1,matchedRowsByTarget:result2.matchedRowsByTarget || {}};
           var currentTemplateId2 = (state.config && state.config.ruleTemplateId) ? String(state.config.ruleTemplateId).trim() : '';
           if (currentTemplateId2 === templateId) {
             updateRulesSummaryHighlight_(currentTemplateId2);
@@ -3784,6 +3706,8 @@ function initHelpPopovers_() {
         if (els.ruleOutInputs && els.ruleOutInputs[idx]) {
           els.ruleOutInputs[idx].value = output;
         }
+        state.lastMatchedRule={templateId:templateId,matchedRowNumber:result.matchedRowNumberForSlot1,matchedRowsByTarget:result.matchedRowsByTarget || {}};
+        updateRulesSummaryHighlight_(templateId);
         state.autoRuleOutputs = state.autoRuleOutputs || ['', '', ''];
         state.autoRuleOutputs[idx] = output;
         if (idx === 0) {
@@ -3793,6 +3717,9 @@ function initHelpPopovers_() {
       }
 
       function renderCurrentRow() {
+        // 回答切替後に、前の生徒の採用ルールを表示し続けない。
+        state.lastMatchedRule={templateId:'',matchedRowNumber:null,matchedRowsByTarget:{}};
+        updateRulesSummaryHighlight_(state.config && state.config.ruleTemplateId);
         renderReviewStatus_();
         // 行切替時に古い講評リクエストの応答を無効化
         state.commentReqId = (state.commentReqId || 0) + 1;
@@ -4657,6 +4584,7 @@ function initHelpPopovers_() {
 
       if (typeof window !== 'undefined' && window.__SCORING_TOOL_ENABLE_TEST_HOOKS__) {
         window.__scoringToolTestHooks = {
+          buildRulesSummaryRows_: buildRulesSummaryRows_,
           buildRuleVars_: buildRuleVars_,
           buildEvalVars: buildEvalVars,
           computeMerge_: computeMerge_,
@@ -4825,14 +4753,18 @@ button.help-icon:focus-visible,button.context-help:focus-visible{outline:2px sol
 .context-tooltip{position:fixed;z-index:10000;width:max-content;max-width:min(360px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto;padding:12px;background:var(--white);color:var(--ink);border:1px solid var(--line);border-radius:8px;box-shadow:0 4px 12px var(--shadow);font-size:13px;line-height:1.5;white-space:pre-line;overflow-wrap:anywhere}
 .context-tooltip.rich-help{white-space:normal}.context-tooltip[hidden]{display:none!important}.context-tooltip h4{margin:0 0 6px;font-size:13px}.context-tooltip p{margin:6px 0;line-height:1.5}
 </style></head><body>
+<style>
+.policies{display:flex;flex-wrap:wrap;gap:12px;padding-top:10px}.policy{display:grid;gap:5px;min-width:145px}.policy input{width:160px}.policy-error{font-size:12px;color:var(--red);max-width:180px}.grid-toolbar{margin-top:12px}.grid-toolbar button{font-weight:500}#ruleGrid{border-collapse:collapse;table-layout:fixed;min-width:1350px}#ruleGrid td,#ruleGrid th{border:1px solid var(--line)}#ruleGrid th{height:38px;padding:5px;text-align:left}#ruleGrid th:first-child{width:72px}#ruleGrid th:nth-child(n+2):nth-child(-n+6){width:86px}#ruleGrid th:nth-child(n+7):nth-child(-n+9){width:185px}#ruleGrid th:nth-child(n+10):nth-child(-n+13){width:56px;text-align:center}#ruleGrid th:last-child{width:146px}#ruleGrid td.grid-cell{padding:0;position:relative;vertical-align:stretch;background:var(--input-bg)}#ruleGrid .grid-cell textarea{display:block;width:100%;min-height:64px;height:100%;margin:0;padding:8px;border:0;border-radius:0;resize:none;background:transparent;outline:none;box-shadow:none;caret-color:transparent;font-weight:400;line-height:1.5;overflow:auto}#ruleGrid .grid-cell.is-selected{background:var(--wash)}#ruleGrid .grid-cell.is-active{box-shadow:inset 0 0 0 2px var(--focus)}#ruleGrid .grid-cell.is-editing{box-shadow:inset 0 0 0 2px var(--teal);background:var(--input-bg)}#ruleGrid .grid-cell.is-editing textarea{caret-color:auto}#ruleGrid .grid-cell textarea:focus-visible{outline:2px solid var(--focus);outline-offset:-2px}#ruleGrid .flag{text-align:center;vertical-align:middle;padding:8px 0}#ruleGrid .number{white-space:pre-line;vertical-align:middle}#ruleGrid .actions{vertical-align:middle}#ruleGrid .actions button{font-size:12px}#ruleGrid tr.disabled-rule .grid-cell{opacity:.6}
+</style>
 <fieldset id="work">
 <div class="toolbar"><select id="templateSelect" aria-label="編集するテンプレート"></select><button id="newTemplate">新規</button><button id="duplicateTemplate">複製</button><button id="help" aria-label="書き方とAI向け説明">書き方・AIへの依頼文</button><button type="button" class="context-help" aria-label="テンプレートの編集の説明" data-help-title="テンプレートの編集" data-help-body="新規作成または複製して編集し、「シートに保存」で反映します。選択を変えても編集中の内容は保持します。再読込すると未保存の内容を破棄します。">?</button></div>
 <div class="toolbar"><button id="save" class="primary">シートに保存</button><button id="reload">シートから再読込</button><a id="sheetLink" class="link" target="_blank" rel="noopener">スプシを開く</a></div>
 <div id="selected">
 <div class="toolbar"><label>名前 <input id="templateName" class="name" maxlength="100"></label><button id="deleteTemplate">削除</button></div>
-<details class="panel"><summary>各枠の点数<button type="button" class="context-help" aria-label="各枠の点数の説明" data-help-title="各枠の点数" data-help-body="入力できる点数を 1,2,3 のようにカンマで区切ります。未使用の枠は空欄にします。条件の空欄は「条件なし」を意味します。">?</button></summary><div id="domains" class="domains"></div></details>
-<div class="scroll"><table><thead><tr><th>順番<button type="button" class="context-help" aria-label="条件の優先順の説明" data-help-title="条件の優先順" data-help-body="上の行から評価し、出力1〜3それぞれで最初に一致する文言を使います。行の「上」「下」で優先順位を変えられます。">?</button></th><th>枠1<button type="button" class="context-help" aria-label="枠の条件の説明" data-help-title="枠の条件" data-help-body="数値、&gt;1、&gt;=2、&lt;3、&lt;=2 を指定できます。空欄は条件なし。同じ行の条件はすべて満たす必要があります。点数未入力と0は区別します。">?</button></th><th>枠2</th><th>枠3</th><th>枠4</th><th>枠5</th><th>出力1<button type="button" class="context-help" aria-label="出力の文言の説明" data-help-title="出力の文言" data-help-body="条件に一致したときの文言です。空欄なら次の行を調べます。{枠1}〜{枠5} と {合計} で点数を差し込めます。">?</button></th><th>出力2</th><th>出力3</th><th>使用<button type="button" class="context-help" aria-label="ルールを使用の説明" data-help-title="ルールを使用" data-help-body="チェックした行を採点に使います。外すとその行を評価しません。">?</button></th><th>表示<button type="button" class="context-help" aria-label="採点画面に表示の説明" data-help-title="採点画面に表示" data-help-body="チェックした行の条件を採点画面に表示します。外しても「使用」がオンなら評価には使います。">?</button></th><th>行の操作</th></tr></thead><tbody id="rules"></tbody></table></div>
-<div class="toolbar"><button id="addRule">行を追加</button><button id="copyTable">表をコピー</button><button id="showPaste">表を貼り付け</button><button id="validate">ルールを検査</button></div>
+<details class="panel"><summary>点数の入力制限<button type="button" class="context-help" aria-label="入力制限の説明" data-help-title="点数の入力制限" data-help-body="初期値は制限なしで、0・負数・小数を含む数値を入力できます。「一覧から」を選ぶと 1,2,3 のように指定した点数だけを使います。未使用の枠は採点画面の列設定で指定します。制限はこの画面で設定し、テンプレJSONにも含まれます。">?</button></summary><div id="scorePolicies" class="policies"></div></details>
+<div class="toolbar grid-toolbar"><button id="undo" disabled>元に戻す</button><button id="redo" disabled>やり直し</button><button id="clearCells">選択範囲を消去</button><button type="button" class="context-help" aria-label="表の操作の説明" data-help-title="表の操作" data-help-body="矢印・Tabで移動、文字入力で置き換えます。Enter・F2・ダブルクリックで編集し、編集中は改行も入力できます。Escは編集取消、Tabは確定して移動。Shift＋矢印で範囲選択し、コピー・貼り付け・Deleteで消去できます。元に戻すはCtrl／⌘＋Z、やり直しはCtrl／⌘＋Shift＋Zです。">?</button><span id="gridPosition" class="muted" aria-live="polite"></span></div>
+<div class="scroll"><table id="ruleGrid" role="grid" aria-label="採点ルールの条件と出力" aria-multiselectable="true"><thead><tr><th>順番<button type="button" class="context-help" aria-label="条件の優先順の説明" data-help-title="条件の優先順" data-help-body="上の行から評価し、出力1〜3それぞれで最初に一致する空欄でない文言を使います。行の「上」「下」で優先順位を変えられます。">?</button></th><th>枠1<button type="button" class="context-help" aria-label="枠の条件の説明" data-help-title="枠の条件" data-help-body="数値、&gt;1、&gt;=2、&lt;3、&lt;=2 を指定できます。空欄は条件なし。同じ行の条件はすべて満たす必要があります。点数未入力と0は区別します。">?</button></th><th>枠2</th><th>枠3</th><th>枠4</th><th>枠5</th><th>出力1<button type="button" class="context-help" aria-label="出力の文言の説明" data-help-title="出力の文言" data-help-body="条件に一致したときの文言です。空欄なら次の行を調べます。一致する文言がなければ空欄にします。{枠1}〜{枠5} と {合計} で点数を差し込めます。">?</button></th><th>出力2</th><th>出力3</th><th>表示1<button type="button" class="context-help" aria-label="出力別表示の説明" data-help-title="条件一覧への表示" data-help-body="出力1〜3それぞれの条件を採点画面に表示するか指定します。チェックを外しても文言の生成・保存は続けます。">?</button></th><th>表示2</th><th>表示3</th><th>使用<button type="button" class="context-help" aria-label="ルールを使用の説明" data-help-title="ルールを使用" data-help-body="チェックした行を採点に使います。外すとその行を評価しません。">?</button></th><th>行の操作</th></tr></thead><tbody id="rules"></tbody></table></div>
+<div class="toolbar"><button id="addRule">行を追加</button><button id="copyTable">表をコピー</button><button id="showPaste">CSVを取り込む</button><button id="validate">ルールを検査</button></div>
 <details id="pastePanel" class="panel"><summary>CSVの貼り付け・読み込み<button type="button" class="context-help" aria-label="CSVの取り込みの説明" data-help-title="CSVの取り込み" data-help-body="1行目は列名のガイドです。見出しは取り込みません。その下に8列のデータを貼り付けてください。見出し付きCSVへの置き換えや、スプシからのコピーにも対応します。 確認して末尾に追加した後、シートに保存してください。">?</button></summary>
 
 <div class="toolbar"><label>CSVファイル <input id="csvFile" type="file" accept=".csv,text/csv"></label><label>文字コード <select id="csvEncoding"><option value="utf-8">UTF-8</option><option value="shift_jis">Shift_JIS（Excelなど）</option></select></label></div>
@@ -4843,7 +4775,7 @@ button.help-icon:focus-visible,button.context-help:focus-visible{outline:2px sol
 </div>
 </fieldset>
 <div id="status" role="status" aria-live="polite"></div><ul id="issues"></ul>
-<dialog id="helpDialog"><div class="toolbar"><strong>書き方・AIへの依頼文</strong><button id="closeHelp">閉じる</button><button id="copyHelp">説明をコピー</button></div><textarea id="aiText" readonly aria-label="AI向けの記述ルール"></textarea><p class="muted">説明をコピーし、「依頼内容」「枠と出力の指定」の「　　　」を埋めてAIに渡してください。</p><details><summary>シートの右側の設定列</summary><p>作成済みのテンプレートはすべて採点画面の候補に表示され、選択した1件を使います。「使用する」「採点画面に表示」はルールごとの設定で、1 がはい、0 がいいえ、空欄ははい。「枠1の点数」〜「枠5の点数」は 1,2,3 のように書き、そのテンプレートの最初の行だけに記入します。点数一覧が空欄の枠は未使用です。条件の空欄とは意味が異なります。</p><p>同じ出力の条件が重なった場合は上の行を使います。意図的な重複や条件漏れは警告として保存できます。不正な書き方は修正してから保存してください。点数未入力は0とは区別します。</p></details><details><summary>編集中の全内容を退避</summary><button id="copyDraft">退避用JSONを表示</button><textarea id="draftText" readonly aria-label="編集中の全内容"></textarea></details></dialog>
+<dialog id="helpDialog"><div class="toolbar"><strong>書き方・AIへの依頼文</strong><button id="closeHelp">閉じる</button><button id="copyHelp">説明をコピー</button></div><textarea id="aiText" readonly aria-label="AI向けの記述ルール"></textarea><p class="muted">説明をコピーし、「依頼内容」「枠と出力の指定」の「　　　」を埋めてAIに渡してください。</p><details><summary>シートの13列</summary><p>テンプレート名、枠1〜5、出力1〜3、出力1を表示、出力2を表示、出力3を表示、使用する、の13列です。表示と使用は 1 がはい、0 がいいえ、空欄ははい。表示を外しても文言の生成・保存は続けます。入力制限はシートの列には置かず、この画面で設定し、テンプレJSONに含めて持ち出せます。</p><p>全条件が空欄の行は常に一致します。出力別に上から最初の空欄でない文言を使い、一致しない出力は空欄にします。制限なしの枠がある場合、検査は条件の重なりなどに限られ、すべての点数の網羅性は保証しません。</p></details><details><summary>編集中の全内容を退避</summary><button id="copyDraft">退避用JSONを表示</button><textarea id="draftText" readonly aria-label="編集中の全内容"></textarea></details></dialog>
 <script>
 (function(){
   'use strict';
@@ -4884,32 +4816,93 @@ function initHelpPopovers_() {
   initHelpPopovers_();
   var data={templates:[],revision:''},selected=-1,dirty=false,generation=0;
   var tableHeader=['枠1','枠2','枠3','枠4','枠5','出力1','出力2','出力3'],pasteDraft=null,fileGeneration=0;
+  var selection={row:0,col:0,anchorRow:0,anchorCol:0},editing=null,composing=false,cellElements=[],histories=new WeakMap(),policyDrafts=new WeakMap();
   function $(id){return document.getElementById(id);}
   function current(){return data.templates[selected];}
+  function clone(value){return JSON.parse(JSON.stringify(value));}
   function message(text,error){$('status').textContent=text;$('status').className=error?'error':'';}
   function changed(){dirty=true;generation++;$('issues').replaceChildren();$('previewResult').textContent='';message('未保存の変更があります。');}
   function api(method,payload,done){$('work').disabled=true;google.script.run.withSuccessHandler(function(result){$('work').disabled=false;done(result);}).withFailureHandler(function(e){$('work').disabled=false;message(e && e.message || String(e),true);})[method](payload);}
-  function newRule(){return {conditions:['','','','',''],outputs:['','',''],enabled:true,visible:true};}
+  function newRule(){return {conditions:['','','','',''],outputs:['','',''],outputVisible:[true,true,true],enabled:true};}
   function uniqueName(base){var n=base,i=2;while(data.templates.some(function(t){return t.name===n;}))n=base+' '+i++;return n;}
-  function input(tag,value,label,handler){var e=document.createElement(tag);e.value=value;e.setAttribute('aria-label',label);e.addEventListener('input',function(){handler(e.value);changed();});return e;}
   function action(label,handler){var e=document.createElement('button');e.textContent=label;e.type='button';e.onclick=handler;return e;}
+  function getCell(row,col){var r=current().rules[row];return col<5?r.conditions[col]:r.outputs[col-5];}
+  function setCell(row,col,value){var r=current().rules[row];if(col<5)r.conditions[col]=value;else r.outputs[col-5]=value;}
+  function history(){var t=current(),h=histories.get(t);if(!h){h={undo:[],redo:[]};histories.set(t,h);}return h;}
+  function snapshot(){return {rules:clone(current().rules),selection:clone(selection)};}
+  function updateHistory(){var h=current()?history():{undo:[],redo:[]},pending=editing&&cellElements[editing.row][editing.col].value!==editing.original;$('undo').disabled=!h.undo.length&&!pending;$('redo').disabled=!h.redo.length||!!pending;$('clearCells').disabled=!current() || !current().rules.length;}
+  function remember(before){var h=history();h.undo.push(before);if(h.undo.length>100)h.undo.shift();h.redo=[];changed();updateHistory();}
+  function transaction(change){commitEdit();var before=snapshot();change();if(JSON.stringify(before.rules)!==JSON.stringify(current().rules))remember(before);renderRules(true);}
+  function restoreHistory(from,to){commitEdit();if(!current())return;var h=history();if(!h[from].length)return;h[to].push(snapshot());var old=h[from].pop();current().rules=old.rules;selection=old.selection;changed();renderRules(true);}
+  function undo(){restoreHistory('undo','redo');}
+  function redo(){restoreHistory('redo','undo');}
+  function bounds(){return {top:Math.min(selection.row,selection.anchorRow),bottom:Math.max(selection.row,selection.anchorRow),left:Math.min(selection.col,selection.anchorCol),right:Math.max(selection.col,selection.anchorCol)};}
+  function paintSelection(focus){var b=bounds();cellElements.forEach(function(row,r){row.forEach(function(el,c){var active=r===selection.row&&c===selection.col,inRange=r>=b.top&&r<=b.bottom&&c>=b.left&&c<=b.right,isEditing=editing&&editing.row===r&&editing.col===c;
+    el.parentNode.className='grid-cell'+(inRange?' is-selected':'')+(active?' is-active':'')+(isEditing?' is-editing':'');el.parentNode.setAttribute('aria-selected',String(inRange));el.tabIndex=active?0:-1;
+  });});var el=cellElements[selection.row]&&cellElements[selection.row][selection.col];if(focus&&el){el.focus();if(!editing)el.select();}
+    $('gridPosition').textContent=current()&&current().rules.length?(selection.row+1)+'行 '+tableHeader[selection.col]+(b.top!==b.bottom||b.left!==b.right?'（'+(b.bottom-b.top+1)+'行×'+(b.right-b.left+1)+'列を選択）':''):'';
+  }
+  function selectCell(row,col,extend,focus){if(!current()||!current().rules.length)return;commitEdit();row=Math.max(0,Math.min(row,current().rules.length-1));col=Math.max(0,Math.min(col,7));selection.row=row;selection.col=col;if(!extend){selection.anchorRow=row;selection.anchorCol=col;}paintSelection(focus!==false);}
+  function startEdit(replace){if(editing||!current()||!current().rules.length)return;var el=cellElements[selection.row][selection.col];editing={row:selection.row,col:selection.col,original:getCell(selection.row,selection.col),before:snapshot()};selection.anchorRow=selection.row;selection.anchorCol=selection.col;paintSelection(false);if(replace)el.select();else el.setSelectionRange(el.value.length,el.value.length);}
+  function commitEdit(){if(!editing)return;var edit=editing,el=cellElements[edit.row]&&cellElements[edit.row][edit.col];editing=null;composing=false;if(el&&el.value!==edit.original){setCell(edit.row,edit.col,el.value);remember(edit.before);}paintSelection(false);updateHistory();}
+  function cancelEdit(){if(!editing)return;var edit=editing,el=cellElements[edit.row][edit.col];el.value=edit.original;editing=null;composing=false;paintSelection(true);updateHistory();}
+  function moveCell(key,extend){var row=selection.row,col=selection.col;if(key==='ArrowLeft')col--;if(key==='ArrowRight')col++;if(key==='ArrowUp')row--;if(key==='ArrowDown')row++;selectCell(row,col,extend);}
+  function tabCell(back){var row=selection.row,col=selection.col+(back?-1:1);if(col>7){col=0;row++;}if(col<0){col=7;row--;}if(row<0||row>=current().rules.length)return false;selectCell(row,col);return true;}
+  function clearCells(){if(!current()||!current().rules.length)return;var b=bounds();transaction(function(){for(var r=b.top;r<=b.bottom;r++)for(var c=b.left;c<=b.right;c++)setCell(r,c,'');});}
+  function gridKey(event){if(event.isComposing||event.keyCode===229||composing)return;var key=event.key,command=event.ctrlKey||event.metaKey;
+    if(editing){if(key==='Escape'){event.preventDefault();cancelEdit();}else if(key==='Tab'){commitEdit();if(tabCell(event.shiftKey))event.preventDefault();}return;}
+    if(command){if(key.toLowerCase()==='z'){event.preventDefault();event.shiftKey?redo():undo();}else if(key.toLowerCase()==='y'){event.preventDefault();redo();}return;}
+    if(/^Arrow(Left|Right|Up|Down)$/.test(key)){event.preventDefault();moveCell(key,event.shiftKey);}
+    else if(key==='Tab'){if(tabCell(event.shiftKey))event.preventDefault();}
+    else if(key==='F2'||key==='Enter'){event.preventDefault();startEdit(false);}
+    else if(key==='Delete'||key==='Backspace'){event.preventDefault();clearCells();}
+    else if(key==='Escape'){event.preventDefault();selection.anchorRow=selection.row;selection.anchorCol=selection.col;paintSelection(true);}
+    else if(key.length===1&&!event.altKey)startEdit(true);
+  }
+  // タブ区切りの範囲貼り付け。先に全セルを検証し、失敗時は一切変更しない。
+  function readRectangle(text){text=String(text).replace(/^\uFEFF/,'');if(text.length>5*1024*1024)throw Error('貼り付けは5MB以内にしてください。');var rows=[],row=[],value='',quoted=false,closed=false;
+    function finish(){row.push(value);rows.push(row);row=[];value='';closed=false;}
+    for(var i=0;i<text.length;i++){var c=text[i];if(quoted){if(c==='"'){if(text[i+1]==='"'){value+='"';i++;}else{quoted=false;closed=true;}}else value+=c;continue;}
+      if(c==='"'&&!value&&!closed){quoted=true;continue;}
+      if(c==='\t'){row.push(value);value='';closed=false;continue;}
+      if(c==='\r'||c==='\n'){finish();if(c==='\r'&&text[i+1]==='\n')i++;continue;}
+      if(closed)throw Error('引用符の後に余分な文字があります。');value+=c;
+    }
+    if(quoted)throw Error('貼り付けの引用符が閉じていません。');if(value||row.length||closed||!rows.length)finish();var width=rows[0].length;
+    if(width>8)throw Error('貼り付けは最大8列です。');if(rows.some(function(r){return r.length!==width;}))throw Error('貼り付けの列数が揃っていません。矩形でコピーしてください。');return rows;
+  }
+  function validCell(value,col){if(col>=5){if(value.length>10000)throw Error('出力は10000文字以内で入力してください。');return;}var text=value.trim().replace(/^=</,'<=').replace(/^=>/,'>=');if(!text)return;var m=text.match(/^(>=|<=|>|<|=)?\s*(-?(?:\d+(?:\.\d*)?|\.\d+))$/);if(!m||!Number.isFinite(Number(m[2])))throw Error('条件は数値、>1、>=2、<3、<=2 の形式で入力してください。');}
+  function pasteCells(text){if(!current()||!current().rules.length)return;var rows=readRectangle(text),b=bounds(),row=b.top,col=b.left;if(col+rows[0].length>8)throw Error('貼り付けが8列の右端を超えます。');if(row+rows.length>500)throw Error('ルールは500行以内で入力してください。');rows.forEach(function(values,r){values.forEach(function(value,c){try{validCell(value,col+c);}catch(e){throw Error((row+r+1)+'行 '+tableHeader[col+c]+': '+e.message);}});});
+    transaction(function(){while(current().rules.length<row+rows.length)current().rules.push(newRule());rows.forEach(function(values,r){values.forEach(function(value,c){setCell(row+r,col+c,value);});});selection={row:row,col:col,anchorRow:row+rows.length-1,anchorCol:col+rows[0].length-1};});message(rows.length+'行×'+rows[0].length+'列を貼り付けました（未保存）。');
+  }
+  function copyCells(){if(!current()||!current().rules.length)return '';var b=bounds(),rows=[];for(var r=b.top;r<=b.bottom;r++){var values=[];for(var c=b.left;c<=b.right;c++){var value=String(getCell(r,c));values.push(/[\t\r\n"]/.test(value)||(value===''&&b.left===b.right)?'"'+value.replace(/"/g,'""')+'"':value);}rows.push(values.join('\t'));}return rows.join('\n');}
+  function parsePolicy(text){var parts=String(text).trim().split(/[,、\s]+/);if(!String(text).trim()||parts.length>20)throw Error('点数を1〜20種類指定してください。');var values=parts.map(function(v){if(!/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(v)||!Number.isFinite(Number(v)))throw Error('点数は有限の数値で指定してください。');return Number(v);});if(new Set(values).size!==values.length)throw Error('同じ点数が重複しています。');return values;}
+  function checkPolicies(){data.templates.forEach(function(t){var drafts=policyDrafts.get(t);t.scorePolicy.forEach(function(policy,k){if(policy.mode==='list'){try{parsePolicy(drafts?drafts[k]:policy.values.join(','));}catch(e){throw Error(t.name+' 枠'+(k+1)+': '+e.message);}}});});}
+  function prepareAction(){commitEdit();try{checkPolicies();return true;}catch(e){message(e.message,true);return false;}}
   function render(){
     $('templateSelect').replaceChildren();data.templates.forEach(function(t,i){var o=document.createElement('option');o.value=String(i);o.textContent=t.name;$('templateSelect').appendChild(o);});$('templateSelect').value=String(selected);
-    var t=current();$('selected').hidden=!t;$('duplicateTemplate').disabled=!t;
-    invalidatePaste();if(!t)return;
-    $('templateName').value=t.name;$('domains').replaceChildren();$('previewScores').replaceChildren();
-    for(var i=0;i<5;i++)(function(k){var label=document.createElement('label');label.textContent='枠'+(k+1);var v=Array.isArray(t.domains[k])?t.domains[k].join(','):t.domains[k];var el=input('input',v,'枠'+(k+1)+'の点数',function(value){t.domains[k]=value;});el.placeholder='1,2,3（未使用は空欄）';label.appendChild(el);$('domains').appendChild(label);
+    var t=current();$('selected').hidden=!t;$('duplicateTemplate').disabled=!t;invalidatePaste();editing=null;composing=false;selection={row:0,col:0,anchorRow:0,anchorCol:0};updateHistory();if(!t)return;
+    $('templateName').value=t.name;$('scorePolicies').replaceChildren();$('previewScores').replaceChildren();var drafts=policyDrafts.get(t);if(!drafts){drafts=t.scorePolicy.map(function(p){return p.mode==='list'?p.values.join(','):'';});policyDrafts.set(t,drafts);}
+    for(var i=0;i<5;i++)(function(k){var box=document.createElement('div');box.className='policy';var label=document.createElement('label');label.textContent='枠'+(k+1);var mode=document.createElement('select');mode.setAttribute('aria-label','枠'+(k+1)+'の入力制限');[['any','制限なし'],['list','一覧から']].forEach(function(pair){var o=document.createElement('option');o.value=pair[0];o.textContent=pair[1];mode.appendChild(o);});mode.value=t.scorePolicy[k].mode;label.appendChild(mode);box.appendChild(label);
+      var values=document.createElement('input');values.type='text';values.value=drafts[k];values.placeholder='例: 1,2,3';values.setAttribute('aria-label','枠'+(k+1)+'で使える点数');values.hidden=mode.value!=='list';var error=document.createElement('span');error.className='policy-error';error.id='policyError'+k;values.setAttribute('aria-describedby',error.id);box.appendChild(values);box.appendChild(error);
+      function apply(){drafts[k]=values.value;values.hidden=mode.value!=='list';error.textContent='';values.setAttribute('aria-invalid','false');if(mode.value==='any')t.scorePolicy[k]={mode:'any'};else{try{t.scorePolicy[k]={mode:'list',values:parsePolicy(values.value)};}catch(e){t.scorePolicy[k]={mode:'list',values:[]};error.textContent=e.message;values.setAttribute('aria-invalid','true');}}changed();}
+      mode.onchange=apply;values.oninput=apply;$('scorePolicies').appendChild(box);
       var p=document.createElement('label');p.textContent='枠'+(k+1);var s=document.createElement('input');s.id='previewScore'+k;s.type='number';s.step='any';s.setAttribute('aria-label','試す点数 枠'+(k+1));p.appendChild(s);$('previewScores').appendChild(p);
-    })(i);
-    renderRules();
+    })(i);renderRules();
   }
-  function renderRules(){var t=current();$('rules').replaceChildren();t.rules.forEach(function(r,index){var tr=document.createElement('tr');function cell(){var td=document.createElement('td');tr.appendChild(td);return td;}var n=cell();n.className='number';n.textContent=String(index+1)+(r.sheetRow?'\n('+r.sheetRow+'行)':'');
-    r.conditions.forEach(function(v,i){var el=input('input',v,'ルール'+(index+1)+' 枠'+(i+1),function(value){r.conditions[i]=value;});el.type='text';el.placeholder='指定なし';cell().appendChild(el);});
-    r.outputs.forEach(function(v,i){var el=input('textarea',v,'ルール'+(index+1)+' 出力'+(i+1),function(value){r.outputs[i]=value;});el.placeholder='出力なし';cell().appendChild(el);});
-    ['enabled','visible'].forEach(function(key){var el=document.createElement('input');el.type='checkbox';el.checked=r[key];el.setAttribute('aria-label','ルール'+(index+1)+(key==='enabled'?'を使用':'を表示'));el.onchange=function(){r[key]=el.checked;changed();};cell().appendChild(el);});
-    var actions=cell();actions.className='actions';[['上',-1],['下',1]].forEach(function(pair){var b=action(pair[0],function(){var to=index+pair[1];if(to<0 || to>=t.rules.length)return;t.rules.splice(index,1);t.rules.splice(to,0,r);changed();renderRules();});b.disabled=index+pair[1]<0 || index+pair[1]>=t.rules.length;actions.appendChild(b);});actions.appendChild(action('削除',function(){t.rules.splice(index,1);changed();renderRules();}));$('rules').appendChild(tr);
-  });}
-  function receive(result){var name=current() && current().name;data=result;selected=Math.max(0,data.templates.findIndex(function(t){return t.name===name;}));if(!data.templates.length)selected=-1;dirty=false;generation++;$('sheetLink').href=result.url;render();$('issues').replaceChildren();}
+  function renderRules(focus){var t=current();editing=null;composing=false;cellElements=[];$('rules').replaceChildren();if(!t)return;selection.row=Math.max(0,Math.min(selection.row,t.rules.length-1));selection.anchorRow=Math.max(0,Math.min(selection.anchorRow,t.rules.length-1));t.rules.forEach(function(r,index){var tr=document.createElement('tr');tr.className=r.enabled?'':'disabled-rule';tr.setAttribute('role','row');function cell(){var td=document.createElement('td');tr.appendChild(td);return td;}var n=cell();n.className='number';n.textContent=String(index+1)+(r.sheetRow?'\n('+r.sheetRow+'行)':'');cellElements[index]=[];
+    r.conditions.concat(r.outputs).forEach(function(v,col){var td=cell(),el=document.createElement('textarea');td.setAttribute('role','gridcell');td.setAttribute('aria-colindex',String(col+2));el.value=v;el.rows=2;el.spellcheck=false;el.setAttribute('aria-label','ルール'+(index+1)+' '+tableHeader[col]);el.setAttribute('aria-keyshortcuts','Enter F2 Escape');el.dataset.row=String(index);el.dataset.col=String(col);el.placeholder=col<5?'条件なし':'出力なし';el.onkeydown=gridKey;
+      el.onpointerdown=function(e){if(editing&&editing.row===index&&editing.col===col)return;e.preventDefault();selectCell(index,col,e.shiftKey);};el.onfocus=function(){if(selection.row!==index||selection.col!==col)selectCell(index,col,false,false);};el.ondblclick=function(){selectCell(index,col);startEdit(false);};
+      el.onbeforeinput=function(e){if(!editing){startEdit(true);if(e&&e.inputType==='insertCompositionText')composing=true;}};el.oninput=function(){if(!editing)startEdit(false);updateHistory();};el.oncompositionstart=function(){if(!editing)startEdit(true);composing=true;};el.oncompositionend=function(){composing=false;};el.onblur=function(){commitEdit();};
+      el.oncopy=function(e){if(editing||!e.clipboardData)return;e.clipboardData.setData('text/plain',copyCells());e.preventDefault();};el.onpaste=function(e){if(editing||!e.clipboardData)return;e.preventDefault();try{pasteCells(e.clipboardData.getData('text/plain'));}catch(error){message(error.message,true);}};
+      td.appendChild(el);cellElements[index][col]=el;
+    });
+    function flag(label,value,update){var td=cell(),el=document.createElement('input');td.className='flag';el.type='checkbox';el.checked=value;el.setAttribute('aria-label','ルール'+(index+1)+' '+label);el.onchange=function(){commitEdit();var before=snapshot();update(el.checked);remember(before);tr.className=r.enabled?'':'disabled-rule';};td.appendChild(el);}
+    r.outputVisible.forEach(function(value,col){flag('出力'+(col+1)+'の条件を表示',value,function(checked){r.outputVisible[col]=checked;});});flag('を使用',r.enabled,function(checked){r.enabled=checked;});
+    var actions=cell();actions.className='actions';[['上',-1],['下',1]].forEach(function(pair){var b=action(pair[0],function(){var to=index+pair[1];if(to<0||to>=t.rules.length)return;transaction(function(){t.rules.splice(index,1);t.rules.splice(to,0,r);var row=selection.row;if(row===index)row=to;else if(row===to)row=index;selection.row=selection.anchorRow=row;selection.anchorCol=selection.col;});});b.setAttribute('aria-label','ルール'+(index+1)+'を'+pair[0]+'へ');b.disabled=index+pair[1]<0||index+pair[1]>=t.rules.length;actions.appendChild(b);});
+    actions.appendChild(action('複製',function(){if(t.rules.length>=500){message('ルールは500行以内です。',true);return;}transaction(function(){var copy=clone(r);delete copy.sheetRow;t.rules.splice(index+1,0,copy);selection.row=selection.anchorRow=index+1;selection.anchorCol=selection.col;});}));actions.appendChild(action('削除',function(){transaction(function(){t.rules.splice(index,1);if(!t.rules.length)t.rules.push(newRule());var row=selection.row>index?selection.row-1:selection.row;selection.row=selection.anchorRow=Math.min(row,t.rules.length-1);selection.anchorCol=selection.col;});}));$('rules').appendChild(tr);
+  });$('ruleGrid').setAttribute('aria-rowcount',String(t.rules.length+1));paintSelection(focus);updateHistory();}
+  function receive(result){var name=current()&&current().name;data=result;selected=Math.max(0,data.templates.findIndex(function(t){return t.name===name;}));if(!data.templates.length)selected=-1;dirty=false;generation++;histories=new WeakMap();policyDrafts=new WeakMap();$('sheetLink').href=result.url;render();$('issues').replaceChildren();}
   function load(){api('scoringGetTemplateTable',null,function(r){receive(r);message(r.templates.length?'シートの内容を読み込みました。':'「新規」からテンプレートを作れます。');});}
   function tableText(t){return [tableHeader].concat(t.rules.map(function(r){return r.conditions.concat(r.outputs);})).map(function(row){return row.map(function(v){v=String(v);return /[,\t\r\n"]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');}
   // 先頭のガイドを除いてから形式を判定するため、ガイドの下へのスプシ貼り付けも可能。
@@ -4919,7 +4912,7 @@ function initHelpPopovers_() {
       function finish(){row.push(cell);if(row.some(function(v){return v!=='';})){
         if(row.length!==8)throw Error(start+'行目は'+row.length+'列です。枠1〜5と出力1〜3の8列で入力してください。');
         if(row.every(function(v,i){return v.trim()===tableHeader[i];})){if(seenData)throw Error(start+'行目に見出しがあります。見出しは先頭だけに置いてください。');headerCount++;}
-        else {seenData=true;rows.push({conditions:row.slice(0,5),outputs:row.slice(5),enabled:true,visible:true});}
+        else {seenData=true;rows.push({conditions:row.slice(0,5),outputs:row.slice(5),outputVisible:[true,true,true],enabled:true});}
       }row=[];cell='';closed=false;}
       for(var i=0;i<text.length;i++){var c=text[i];if(quoted){if(c==='"'){if(text[i+1]==='"'){cell+='"';i++;}else{quoted=false;closed=true;}}else {cell+=c;if(c==='\r' || (c==='\n' && text[i-1]!=='\r'))line++;}continue;}
         if(c==='"'){if(cell || closed)throw Error(line+'行目の引用符が不正です。セル全体を引用符で囲み、文中の引用符は二重にしてください。');quoted=true;continue;}
@@ -4953,30 +4946,32 @@ function initHelpPopovers_() {
     '【枠と出力の指定】\n枠1で評価する内容：「　　　」\n枠2で評価する内容：「　　　」\n枠3で評価する内容：「　　　」\n枠4で評価する内容：「　　　」\n枠5で評価する内容：「　　　」\n出力1に入れる内容：「　　　」\n出力2に入れる内容：「　　　」\n出力3に入れる内容：「　　　」\n未使用の枠・出力：「　　　」\n点数の組合せに応じた個別条件・例外：「　　　」',
     '【表の記述ルール】\nカンマ区切り8列のCSVだけを出力してください。説明文やコードブロックは不要です。最初の行は必ず次の見出しにしてください。\n'+tableHeader.join(',')+'\n空欄の列も省略せず、各行を必ず8列にしてください。カンマ・改行・引用符を含むセルは半角の二重引用符で囲み、文中の二重引用符は二重にしてください。',
     '条件セルは空欄（条件なし）、数値（その値と一致）、>1、>=2、<3、<=2 のいずれかです。=< と => は <= と >= に読み替えます。同じ行の条件はすべて満たす必要があります。',
-    '複数行は上から評価し、出力1〜3それぞれで最初に一致した空欄でない出力を採用します。出力空欄はその出力を指定せず、次の行に進みます。0は空欄ではありません。全条件が空欄の行は常に一致します。',
+    '複数行は上から評価し、出力1〜3それぞれで最初に一致した空欄でない出力を採用します。出力空欄はその出力を指定せず、次の行に進みます。0は空欄ではありません。全条件が空欄の行は常に一致します。一致しない出力は空欄にします。共通の予備文言が必要な場合は、最後に全条件が空欄の行を置いてください。',
     '点数が未入力の場合、数値条件には一致しません。条件なしの枠は未入力でも構いません。枠同士の加算やORは書けません。必要なら複数行に分けてください。',
-    '出力は普通の文章です。{枠1}〜{枠5} と {合計} で点数を差し込めます。合計は入力済みの枠の和です。出力セル内のタブは使わないでください。',
-    '利用する点数: '+(t?t.domains.map(function(d,i){return '枠'+(i+1)+' = '+(Array.isArray(d)?d.join(','):d || '未使用');}).join(' / '):'枠ごとに指定してください。'),
-    '上記の依頼内容・採点基準に従い、必要な出力について条件漏れがない表を作ってください。重複させる場合は優先順位に注意してください。'].join('\n\n');}
+    '出力は普通の文章です。{枠1}〜{枠5} と {合計} で点数を差し込めます。合計は入力済みの枠の和です。出力セル内のタブは使わないでください。入力制限に違反した点数や数値でない入力がある場合は、現在の講評を保持してエラーを知らせます。条件不一致で空欄になる場合とは異なります。',
+    '点数の入力制限: '+(t?t.scorePolicy.map(function(p,i){return '枠'+(i+1)+' = '+(p.mode==='any'?'制限なし（0・負数・小数を含む任意の有限数値）':p.values.join(','));}).join(' / '):'枠ごとに指定してください。'),
+    '入力制限はこの画面で設定済みです。CSVには含めず8列を維持してください。未使用の枠は採点画面の列設定で指定します。制限なしの枠は有限一覧として網羅性を保証できません。',
+    '上記の依頼内容・採点基準に従い、必要な出力の条件範囲を明確にしてください。制限なしの枠は境界値・負数・小数・未入力も考慮してください。重複させる場合は優先順位に注意してください。'].join('\n\n');}
   function copy(text,done){if(navigator.clipboard && navigator.clipboard.writeText)navigator.clipboard.writeText(text).then(function(){message(done);},function(){message('コピーできませんでした。表示された内容を選択してコピーしてください。',true);});else message('表示された内容を選択してコピーしてください。',true);}
-  $('newTemplate').onclick=function(){data.templates.push({name:uniqueName('新しいテンプレート'),domains:[[1,2,3],[1,2,3],[],[],[]],rules:[newRule()]});selected=data.templates.length-1;changed();render();};
-  $('duplicateTemplate').onclick=function(){var t=JSON.parse(JSON.stringify(current()));t.name=uniqueName(t.name+' のコピー');t.rules.forEach(function(r){delete r.sheetRow;});data.templates.push(t);selected=data.templates.length-1;changed();render();};
-  $('deleteTemplate').onclick=function(){if(!window.confirm('このテンプレートを削除します。シートへの反映は保存時です。'))return;data.templates.splice(selected,1);selected=data.templates.length?0:-1;changed();render();};
-  $('templateSelect').onchange=function(){selected=Number(this.value);generation++;$('issues').replaceChildren();$('previewResult').textContent='';render();};
+  $('newTemplate').onclick=function(){commitEdit();data.templates.push({name:uniqueName('新しいテンプレート'),scorePolicy:Array.from({length:5},function(){return {mode:'any'};}),rules:[newRule()]});selected=data.templates.length-1;changed();render();};
+  $('duplicateTemplate').onclick=function(){commitEdit();var source=current(),t=clone(source);t.name=uniqueName(t.name+' のコピー');t.rules.forEach(function(r){delete r.sheetRow;});policyDrafts.set(t,clone(policyDrafts.get(source)));data.templates.push(t);selected=data.templates.length-1;changed();render();};
+  $('deleteTemplate').onclick=function(){commitEdit();if(!window.confirm('このテンプレートを削除します。シートへの反映は保存時です。'))return;data.templates.splice(selected,1);selected=data.templates.length?0:-1;changed();render();};
+  $('templateSelect').onchange=function(){commitEdit();selected=Number(this.value);generation++;$('issues').replaceChildren();$('previewResult').textContent='';render();};
   $('templateName').oninput=function(){current().name=this.value;$('templateSelect').options[selected].textContent=this.value;changed();};
-  $('addRule').onclick=function(){current().rules.push(newRule());changed();renderRules();};
-  $('reload').onclick=function(){if(dirty && !window.confirm('未保存の編集を破棄して、シートから読み直しますか？'))return;load();};
-  $('save').onclick=function(){message('保存しています…');api('scoringSaveTemplateTable',data,function(r){receive(r);message('シートに保存しました。');parent.postMessage({type:'template-table-saved'},'*');});};
-  $('validate').onclick=function(){message('検査しています…');api('scoringValidateTemplateTable',{templates:data.templates},function(r){$('issues').replaceChildren();r.issues.forEach(function(issue){var li=document.createElement('li');li.className=issue.severity;li.textContent=issue.message+(issue.sheetRow?'（シート'+issue.sheetRow+'行）':'')+(issue.example?' 例: '+issue.example.map(function(v,i){return '枠'+(i+1)+'='+ (v==null?'未使用':v);}).join('、'):'');$('issues').appendChild(li);});message((r.complete?'検査完了':'一部のみ検査')+'：'+r.issues.length+'件'+(r.issues.length?'。エラーは保存前に修正してください。警告は保存できます。':'。問題は見つかりませんでした。'),!r.ok);});};
-  $('preview').onclick=function(){var scores=[0,1,2,3,4].map(function(i){return $('previewScore'+i).value;});api('scoringPreviewTemplate',{template:current(),scores:scores},function(r){$('previewResult').textContent=r.outputs.map(function(v,i){return '出力'+(i+1)+': '+(v===''?'（空欄）':v);}).join('\n');message('試算しました。');});};
+  $('addRule').onclick=function(){if(current().rules.length>=500){message('ルールは500行以内です。',true);return;}transaction(function(){current().rules.push(newRule());selection.row=selection.anchorRow=current().rules.length-1;selection.anchorCol=selection.col;});};
+  $('undo').onclick=undo;$('redo').onclick=redo;$('clearCells').onclick=clearCells;
+  $('reload').onclick=function(){commitEdit();if(dirty && !window.confirm('未保存の編集を破棄して、シートから読み直しますか？'))return;load();};
+  $('save').onclick=function(){if(!prepareAction())return;message('保存しています…');api('scoringSaveTemplateTable',data,function(r){receive(r);message('シートに保存しました。');parent.postMessage({type:'template-table-saved'},'*');});};
+  $('validate').onclick=function(){if(!prepareAction())return;message('検査しています…');api('scoringValidateTemplateTable',{templates:data.templates},function(r){$('issues').replaceChildren();r.issues.forEach(function(issue){var li=document.createElement('li');li.className=issue.severity;li.textContent=issue.message+(issue.sheetRow?'（シート'+issue.sheetRow+'行）':'')+(issue.example?' 例: '+issue.example.map(function(v,i){return '枠'+(i+1)+'='+ (v==null?'未入力':v);}).join('、'):'');$('issues').appendChild(li);});message((r.complete?'検査完了':'一部のみ検査')+'：'+r.issues.length+'件'+(r.issues.length?'。エラーは保存前に修正してください。警告は保存できます。':'。問題は見つかりませんでした。'),!r.ok);});};
+  $('preview').onclick=function(){if(!prepareAction())return;var scores=[0,1,2,3,4].map(function(i){return $('previewScore'+i).value;});api('scoringPreviewTemplate',{template:current(),scores:scores},function(r){$('previewResult').textContent=r.outputs.map(function(v,i){return '出力'+(i+1)+': '+(v===''?'（空欄）':v);}).join('\n');message('試算しました。');});};
   $('showPaste').onclick=function(){$('pastePanel').open=true;$('pasteText').focus();};
   $('pasteText').value=tableHeader.join(',')+'\n';$('pasteText').oninput=invalidatePaste;$('previewPaste').onclick=previewPaste;$('csvFile').onchange=readCsvFile;$('csvEncoding').onchange=readCsvFile;
-  $('appendPaste').onclick=function(){try{if(!pasteDraft || pasteDraft.text!==$('pasteText').value || pasteDraft.template!==current())throw Error('取り込み内容を確認してから追加してください。');var rows=pasteDraft.rows,existing=current().rules.filter(function(r){return r.conditions.concat(r.outputs).some(function(v){return v!=='';});});if(existing.length+rows.length>500)throw Error('ルールは500行以内で入力してください。');current().rules=existing.concat(rows);changed();renderRules();message(rows.length+'行を追加しました（未保存）。');$('pasteText').value=tableHeader.join(',')+'\n';invalidatePaste();}catch(e){message(e.message,true);}};
-  $('copyTable').onclick=function(){var text=tableText(current());invalidatePaste();$('pasteText').value=text;$('pastePanel').open=true;copy(text,'見出し付きCSVをコピーしました。');};
-  $('help').onclick=function(){$('aiText').value=aiText(current());$('helpDialog').showModal();};$('closeHelp').onclick=function(){$('helpDialog').close();};$('copyHelp').onclick=function(){copy($('aiText').value,'AI向けの説明をコピーしました。');};
-  $('copyDraft').onclick=function(){$('draftText').value=JSON.stringify(data,null,2);$('draftText').select();};
-  window.addEventListener('beforeunload',function(e){if(dirty){e.preventDefault();e.returnValue='';}});
-  if(window.__TEMPLATE_EDITOR_TEST__)window.templateEditor={parseTable:parseTable,tableText:tableText,aiText:aiText,getData:function(){return data;},isDirty:function(){return dirty;}};
+  $('appendPaste').onclick=function(){try{commitEdit();if(!pasteDraft || pasteDraft.text!==$('pasteText').value || pasteDraft.template!==current())throw Error('取り込み内容を確認してから追加してください。');var rows=pasteDraft.rows,existing=current().rules.filter(function(r){return r.conditions.concat(r.outputs).some(function(v){return v!=='';});});if(existing.length+rows.length>500)throw Error('ルールは500行以内で入力してください。');rows.forEach(function(r){r.conditions.concat(r.outputs).forEach(validCell);});transaction(function(){current().rules=existing.concat(rows);selection.row=selection.anchorRow=existing.length;selection.col=selection.anchorCol=0;});message(rows.length+'行を追加しました（未保存）。');$('pasteText').value=tableHeader.join(',')+'\n';invalidatePaste();}catch(e){message(e.message,true);}};
+  $('copyTable').onclick=function(){commitEdit();var text=tableText(current());invalidatePaste();$('pasteText').value=text;$('pastePanel').open=true;copy(text,'見出し付きCSVをコピーしました。');};
+  $('help').onclick=function(){if(!prepareAction())return;$('aiText').value=aiText(current());$('helpDialog').showModal();};$('closeHelp').onclick=function(){$('helpDialog').close();};$('copyHelp').onclick=function(){copy($('aiText').value,'AI向けの説明をコピーしました。');};
+  $('copyDraft').onclick=function(){if(!prepareAction())return;$('draftText').value=JSON.stringify(data,null,2);$('draftText').select();};
+  window.addEventListener('beforeunload',function(e){if(dirty||(editing&&cellElements[editing.row][editing.col].value!==editing.original)){e.preventDefault();e.returnValue='';}});
+  if(window.__TEMPLATE_EDITOR_TEST__)window.templateEditor={parseTable:parseTable,tableText:tableText,aiText:aiText,readRectangle:readRectangle,parsePolicy:parsePolicy,selectCell:selectCell,pasteCells:pasteCells,copyCells:copyCells,undo:undo,redo:redo,getSelection:function(){return clone(selection);},getData:function(){return data;},isDirty:function(){return dirty;}};
   load();
 })();
 </script></body></html>

@@ -883,17 +883,94 @@ function registerManagedSource_(r) {
 
 function managedLiteral_(value) { return /^[=+\-@]/.test(String(value)) ? "'"+value : value; }
 
+/** Classroom と同じ規則でトピック名を比較する。空欄はトピックなし。 */
+function managedTopicName_(value) {
+  if(typeof value!=='string')throw new Error('トピックの入力を確認してください。');
+  const name=value.trim().replace(/\s+/g,' ');
+  if(name.length>100)throw new Error('トピック名は100文字以内で指定してください。');
+  return name;
+}
+
+/** 全ページを取得し、不完全な一覧や同名の重複を作成判断に使わない。 */
+function managedMaterialTopics_(courseId, context) {
+  const key=String(courseId);
+  if(context&&context.topics&&Object.prototype.hasOwnProperty.call(context.topics,key))return context.topics[key];
+  ScriptApp.requireScopes(ScriptApp.AuthMode.FULL,['https://www.googleapis.com/auth/classroom.topics']);
+  const topics=[],ids=new Set(),names=new Set(),tokens=new Set();let token;
+  do {
+    const options={pageSize:100};if(token)options.pageToken=token;
+    const page=Classroom.Courses.Topics.list(key,options);
+    if(!page||typeof page!=='object'||page.topic!=null&&!Array.isArray(page.topic))throw new Error('トピック一覧を確認できません。再読み込みしてください。');
+    (page.topic||[]).forEach(function(topic){
+      if(!topic||typeof topic.topicId!=='string'||!topic.topicId||typeof topic.name!=='string'||topic.courseId!=null&&String(topic.courseId)!==key)throw new Error('トピック一覧の形式を確認できません。');
+      const name=managedTopicName_(topic.name);
+      if(!name||ids.has(topic.topicId)||names.has(name))throw new Error('トピック名またはIDが重複しています。Classroomで一意にしてから再確認してください。');
+      ids.add(topic.topicId);names.add(name);topics.push({topicId:topic.topicId,name:name});
+    });
+    token=page.nextPageToken;
+    if(token&&(typeof token!=='string'||tokens.has(token)))throw new Error('トピック一覧の続きが不正です。再読み込みしてください。');
+    if(token)tokens.add(token);
+  }while(token);
+  if(context){if(!context.topics)context.topics=Object.create(null);context.topics[key]=topics;}
+  return topics;
+}
+
+function getManagedMaterialTopics() {
+  return withAppLock_(function(){
+    const sheet=getAppSpreadsheet_().getSheetByName('クラス一覧');
+    if(!sheet||sheet.getLastRow()<2)throw new Error('先に対象クラスを選択してください。');
+    // 一覧の読み込みではシートやフィルターを作成しない。
+    const first=sheet.getRange(2,1,sheet.getLastRow()-1,3).getDisplayValues().find(function(row){return String(row[1]||'').trim()&&String(row[2]||'').trim()==='1';});
+    if(!first)throw new Error('先に対象クラスを選択してください。');
+    const courseId=String(first[1]).trim();
+    return {courseId:courseId,courseName:String(first[0]||'').trim(),topics:managedMaterialTopics_(courseId,{})};
+  });
+}
+
+function managedTopicJournalKey_(courseId,name) {
+  return 'TURRET_MATERIAL_TOPIC_'+adminDigest_([ScriptApp.getScriptId(),String(courseId),name]);
+}
+
+function managedSettingsFingerprint_(r,changes,snapshot,savingMaterial,registerCommon) {
+  return adminDigest_(managedCanonicalSnapshot_([r,changes,snapshot].concat(savingMaterial?[true]:[]).concat(registerCommon?[true]:[])));
+}
+
+/** 作成前に共有の記録を残し、通信結果が不明なときは再作成せず一覧で照合する。 */
+function resolveManagedSettingsTopic_(r) {
+  const plan=r.settingsUpdate.plan,topic=plan.topic;
+  if(!topic)return;
+  if(!topic.name){plan.materialPatch.topicId='';return;}
+  const props=PropertiesService.getScriptProperties(),key=managedTopicJournalKey_(r.courseId,topic.name);
+  const saved=props.getProperty(key),journal=saved?JSON.parse(saved):null;
+  const current=managedMaterialTopics_(r.courseId,{}).find(function(t){return t.name===topic.name;});
+  if(current) {
+    // 既に選んだIDの置換・削除は別のトピックへの変更なので自動追従しない。
+    if(topic.topicId&&topic.topicId!==current.topicId)throw new Error('トピックが更新されています。Classroomのトピックを確認してください。');
+    topic.topicId=current.topicId;plan.materialPatch.topicId=current.topicId;
+    if(journal&&journal.state==='creating')props.setProperty(key,JSON.stringify({state:'created',courseId:String(r.courseId),name:topic.name,topicId:current.topicId}));
+    saveManagedRecord_(r);return;
+  }
+  if(topic.topicId)throw new Error('選択したトピックが見つかりません。Classroomのトピックを確認してください。');
+  if(!topic.missing||topic.createMissingApproved!==true)throw new Error('トピック作成の確認が必要です。');
+  if(journal)throw new Error('トピックの作成結果が未確認です。Classroomで同名トピックを確認し、設定の更新を再開してください。自動では再作成しません。');
+  props.setProperty(key,JSON.stringify({state:'creating',courseId:String(r.courseId),name:topic.name}));
+  const created=Classroom.Courses.Topics.create({name:topic.name},String(r.courseId));
+  if(!created||typeof created.topicId!=='string'||!created.topicId||managedTopicName_(created.name)!==topic.name||created.courseId!=null&&String(created.courseId)!==String(r.courseId))throw new Error('作成したトピックを確認できません。設定の更新を再開して結果を照合してください。');
+  props.setProperty(key,JSON.stringify({state:'created',courseId:String(r.courseId),name:topic.name,topicId:created.topicId}));
+  topic.topicId=created.topicId;plan.materialPatch.topicId=created.topicId;saveManagedRecord_(r);
+}
+
 /** 既存回答の識別に使うタブ名・列名は固定し、指定された設定だけを変更する。 */
 function managedSettingsPlan_(r, changes) {
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('変更する設定がありません。');
-  const keys=Object.keys(changes), allowed=['titlePattern','materialTitlePattern','description','domains','emails','labels'];
+  const keys=Object.keys(changes), allowed=['titlePattern','materialTitlePattern','description','topicName','domains','emails','labels'];
   if (!keys.length || keys.some(function(k){return !allowed.includes(k);})) throw new Error('変更できない設定が含まれています。');
   const input=JSON.parse(JSON.stringify(r.input)), result={input:input,label:r.label||r.className,title:r.title,materialTitle:r.materialTitle,changes:[]};
   function change(label,before,after){if(before!==after)result.changes.push(label+'：'+(before||'（空欄）')+' → '+(after||'（空欄）'));}
   keys.filter(function(k){return k!=='labels';}).forEach(function(k){
     if(typeof changes[k]!=='string' || changes[k].length>(k==='description'?5000:k==='domains'||k==='emails'?5000:150))throw new Error('入力を確認してください：'+k);
     if(['titlePattern','materialTitlePattern'].includes(k) && !/\{class(?:_label)?\}/.test(changes[k]))throw new Error('タイトルに {class_label} を含めてください。');
-    if(!['domains','emails'].includes(k)){change({titlePattern:'フォーム名',materialTitlePattern:'資料タイトル',description:'資料の本文'}[k],input[k],changes[k].trim());input[k]=changes[k].trim();}
+    if(!['domains','emails'].includes(k)){const value=k==='topicName'?managedTopicName_(changes[k]):changes[k].trim();change({titlePattern:'フォーム名',materialTitlePattern:'資料タイトル',description:'資料の本文',topicName:'トピック'}[k],k==='topicName'?(input[k]||''):input[k],value);input[k]=value;}
   });
   if(Object.prototype.hasOwnProperty.call(changes,'labels')){
     if(!changes.labels || typeof changes.labels!=='object' || Array.isArray(changes.labels) || Object.values(changes.labels).some(function(v){return typeof v!=='string'||!v.trim()||v.length>100;}))throw new Error('クラスの表記を確認してください。');
@@ -914,6 +991,7 @@ function managedSettingsPlan_(r, changes) {
   result.formTitleChanged=result.title!==r.title;
   result.policyChanged=JSON.stringify(input.policy)!==JSON.stringify(r.input.policy);
   result.materialPatch={};
+  if(keys.includes('topicName'))result.topic={courseId:String(r.courseId),name:input.topicName,topicId:'',missing:false};
   if(result.materialTitle!==r.materialTitle)result.materialPatch.title=result.materialTitle;
   if(input.description!==r.input.description)result.materialPatch.description=input.description;
   return result;
@@ -933,6 +1011,11 @@ function managedSettingsAccess_(r, policy, context) {
 
 function managedSettingsSnapshot_(r, plan, context) {
   const snapshot={};
+  if(plan.topic){
+    const found=plan.topic.name?managedMaterialTopics_(r.courseId,context).find(function(t){return t.name===plan.topic.name;}):null;
+    plan.topic.topicId=found?found.topicId:'';plan.topic.missing=!!plan.topic.name&&!found;
+    plan.materialPatch.topicId=plan.topic.topicId;snapshot.topic=Object.assign({},plan.topic);
+  }
   if(plan.formTitleChanged){snapshot.formTitle=FormApp.openById(r.formId).getTitle();snapshot.fileName=DriveApp.getFileById(r.formId).getName();}
   if(plan.policyChanged){
     const form=FormApp.openById(r.formId);
@@ -961,16 +1044,18 @@ function previewManagedFormSettings(raw) {
       const registerCommon=raw.registerCommonMaterial===true;
       if(registerCommon&&!savingMaterial)throw new Error('共通文面は投稿設定の保存と同時に登録してください。');
       if(savingMaterial)assertManagedMaterialSettingsPatch_(raw.changes);
-      return {id:r.id,label:r.label||r.className,changes:plan.changes,changed:savingMaterial||plan.changes.length>0,fingerprint:adminDigest_(managedCanonicalSnapshot_([r,raw.changes,snapshot].concat(savingMaterial?[true]:[]).concat(registerCommon?[true]:[])))};
+      return {id:r.id,label:r.label||r.className,changes:plan.changes,changed:savingMaterial||plan.changes.length>0||!!plan.topic,
+        missingTopic:plan.topic&&plan.topic.missing?{courseId:String(r.courseId),className:r.className||r.label||'',name:plan.topic.name}:null,
+        fingerprint:managedSettingsFingerprint_(r,raw.changes,snapshot,savingMaterial,registerCommon)};
     })};
   });
 }
 
 function assertManagedMaterialSettingsPatch_(changes) {
-  if(Object.keys(changes).some(function(k){return !['materialTitlePattern','description'].includes(k);}))throw new Error('投稿設定では投稿タイトル・投稿文だけを保存してください。');
+  if(Object.keys(changes).some(function(k){return !['materialTitlePattern','description','topicName'].includes(k);}))throw new Error('投稿設定では投稿タイトル・投稿文・トピックだけを保存してください。');
 }
 
-function runManagedFormSettings(id, changes, fingerprint, saveMaterialSettings, registerCommonMaterial) {
+function runManagedFormSettings(id, changes, fingerprint, saveMaterialSettings, registerCommonMaterial, createMissingTopics) {
   return withAppLock_(function(){
     const r=loadManagedRecord_(id);assertManagedSettingsEditable_(r);
     const plan=managedSettingsPlan_(r,changes),snapshot=managedSettingsSnapshot_(r,plan,{});
@@ -978,11 +1063,22 @@ function runManagedFormSettings(id, changes, fingerprint, saveMaterialSettings, 
     const registerCommon=registerCommonMaterial===true;
     if(registerCommon&&!savingMaterial)throw new Error('共通文面は投稿設定の保存と同時に登録してください。');
     if(savingMaterial)assertManagedMaterialSettingsPatch_(changes);
-    if(adminDigest_(managedCanonicalSnapshot_([r,changes,snapshot].concat(savingMaterial?[true]:[]).concat(registerCommon?[true]:[])))!==fingerprint)throw new Error('確認後に設定・フォーム・資料が更新されました。再確認してください。');
-    if(!plan.changes.length&&!savingMaterial)return r;
+    let matching=managedSettingsFingerprint_(r,changes,snapshot,savingMaterial,registerCommon)===fingerprint;
+    // 同じ一括確認に含まれる別フォームが先に作った場合は、元の未作成計画だけを再照合する。
+    if(!matching&&createMissingTopics===true&&plan.topic&&plan.topic.topicId){
+      const saved=PropertiesService.getScriptProperties().getProperty(managedTopicJournalKey_(r.courseId,plan.topic.name)),journal=saved?JSON.parse(saved):null;
+      if(journal&&journal.state==='created'&&journal.topicId===plan.topic.topicId){
+        const original=Object.assign({},snapshot,{topic:Object.assign({},snapshot.topic,{topicId:'',missing:true})});
+        matching=managedSettingsFingerprint_(r,changes,original,savingMaterial,registerCommon)===fingerprint;
+      }
+    }
+    if(!matching)throw new Error('確認後に設定・フォーム・資料・トピックが更新されました。再確認してください。');
+    if(plan.topic&&plan.topic.missing&&createMissingTopics!==true)throw new Error('不足するトピックを作成する確認が必要です。');
+    if(plan.topic)plan.topic.createMissingApproved=plan.topic.missing&&createMissingTopics===true;
+    if(!plan.changes.length&&!savingMaterial&&!plan.topic)return r;
     if(savingMaterial)plan.materialSettingsSaved=true;
     // 共通文面も更新計画に保持し、途中からの再開と画面の再表示で基準を失わない。
-    if(registerCommon)plan.materialSettingsBaseline={materialTitlePattern:plan.input.materialTitlePattern,description:plan.input.description||''};
+    if(registerCommon)plan.materialSettingsBaseline={materialTitlePattern:plan.input.materialTitlePattern,description:plan.input.description||'',topicName:plan.input.topicName||''};
     if(snapshot.material)ScriptApp.requireScopes(ScriptApp.AuthMode.FULL,['https://www.googleapis.com/auth/classroom.courseworkmaterials']);
     r.settingsUpdate={plan:plan,snapshot:snapshot,accepting:snapshot.accepting};saveManagedRecord_(r);
     return resumeManagedFormSettingsUnlocked_(r);
@@ -997,6 +1093,7 @@ function resumeManagedFormSettings(id, revision) {
 function resumeManagedFormSettingsUnlocked_(r) {
   if(!r.settingsUpdate)return r;
   const update=r.settingsUpdate,plan=update.plan,before=update.snapshot;
+  resolveManagedSettingsTopic_(r);
   function unchanged(current,old,desired){if(current!==old&&current!==desired)throw new Error('更新途中に手動変更されています。元の値または確認した値へ戻してから設定の更新を再開してください。');}
   const form=(plan.formTitleChanged||plan.policyChanged)?FormApp.openById(r.formId):null;
   if(plan.formTitleChanged){
@@ -1018,9 +1115,13 @@ function resumeManagedFormSettingsUnlocked_(r) {
     const service=Classroom.Courses.CourseWorkMaterials,post=service.get(r.courseId,r.materialId);
     if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
     Object.keys(plan.materialPatch).forEach(function(k){unchanged(post[k]||'',before.material[k],plan.materialPatch[k]);});
-    service.patch(plan.materialPatch,r.courseId,r.materialId,{updateMask:Object.keys(plan.materialPatch).join(',')});
+    const body=Object.assign({},plan.materialPatch);
+    // 空のトピックはフィールドを本文から除き、更新マスクだけで解除する。
+    if(body.topicId==='')delete body.topicId;
+    service.patch(body,r.courseId,r.materialId,{updateMask:Object.keys(plan.materialPatch).join(',')});
   }
   r.input=plan.input;r.label=plan.label;r.title=plan.title;r.materialTitle=plan.materialTitle;
+  if(plan.topic)r.topicId=plan.materialPatch.topicId;
   if(plan.materialSettingsSaved===true)r.materialSettingsSaved=true;
   if(plan.materialSettingsBaseline)r.materialSettingsBaseline=plan.materialSettingsBaseline;
   saveManagedRecord_(r);
@@ -1732,6 +1833,7 @@ function runManagedFormAction(id, action, fingerprint, verifiedEmailConfirmed, o
       post=service.patch(body,r.courseId,r.materialId,{updateMask:action==='publish'?'state,scheduledTime':'scheduledTime'});
     }else {
       const body={title:r.materialTitle,description:r.input.description,state:action==='schedule'?'DRAFT':'PUBLISHED',materials:[{link:{url:form.getPublishedUrl()}}]};
+      if(r.topicId)body.topicId=r.topicId;
       if(p.scheduledTime)body.scheduledTime=p.scheduledTime;
       post=service.create(body,r.courseId);
     }
@@ -1755,7 +1857,7 @@ function reconcileManagedPost(id, expectedRevision) {
           const sameLink=(p.materials||[]).some(function(m){return m.link&&m.link.url===r.formUrl||m.form&&m.form.formUrl===r.formUrl;});
           const intended=r.materialChange&&r.materialChange.scheduledTime;
           const stateMatches=intended?(p.state==='PUBLISHED'||p.state==='DRAFT'&&Date.parse(p.scheduledTime)===Date.parse(intended)):p.state==='PUBLISHED';
-          if(sameLink&&p.title===r.materialTitle&&(p.description||'')===r.input.description&&stateMatches&&Date.parse(p.creationTime)>=Date.parse(r.publishingStartedAt)-5000)matches.push(p);
+          if(sameLink&&p.title===r.materialTitle&&(p.description||'')===r.input.description&&(p.topicId||'')===(r.topicId||'')&&stateMatches&&Date.parse(p.creationTime)>=Date.parse(r.publishingStartedAt)-5000)matches.push(p);
         });token=page.nextPageToken;
       }while(token);
       if(matches.length!==1)throw new Error('投稿結果を一意に照合できません。Classroomで確認してください。自動では再投稿しません。');
@@ -2477,10 +2579,10 @@ function exportConfigurationFile(kind, includeConnections) {
     let payload;
     if (kind === 'settings') payload = JSON.parse(buildSettingsProfile_(getConfig_(), includeConnections).json);
     else if (kind === 'scoring') payload = scoringLegacyApiExportConfig_();
-    else if (kind === 'templates') payload = scoringExportTemplatePack();
+    else if (kind === 'templates') payload = scoringBuildTemplatePack_();
     else payload = { application: 'turret', type: 'configuration-bundle', schemaVersion: 1, exportedAt: new Date().toISOString(),
       management: JSON.parse(buildSettingsProfile_(getConfig_(), includeConnections).json),
-      scoring: scoringLegacyApiExportConfig_(), templates: scoringExportTemplatePack() };
+      scoring: scoringLegacyApiExportConfig_(), templates: scoringBuildTemplatePack_() };
     const json = JSON.stringify(payload, null, 2);
     if (utf8ByteLength_(json) > configurationFileLimit_(kind)) throw new Error('設定ファイルが大きすぎます。個別の出力、または内容の整理を行ってください。');
     return { filename: configurationFilename_(kind), json: json };
@@ -2503,7 +2605,7 @@ function parseConfigurationScoring_(payload) {
 function parseConfigurationTemplates_(payload) {
   requireProfileObject_(payload, '採点テンプレパック');
   profileKeys_(payload, ['meta', 'templates'], '採点テンプレパック');
-  if (!payload.meta || payload.meta.type !== 'turret-grading-template-pack' || payload.meta.version !== 1) throw new Error('採点テンプレ形式のパックを指定してください。旧形式は取り込めません。');
+  scoringAssertTemplatePackV2_(payload);
   const templates = scoringNormalizeTemplates_(payload.templates);
   const validation = scoringValidateTemplateTable_({ templates: templates });
   if (!validation.ok) throw new Error(validation.issues.filter(function(i) { return i.severity === 'error'; }).map(function(i) { return i.message; }).slice(0, 5).join('\n'));
@@ -2584,19 +2686,7 @@ function inspectConfigurationFile(kind, json) {
 
 /** 復元も一括書込みし、先に既存テンプレートを消去しない。 */
 function restoreConfigurationTemplates_(ss, snapshot, revision) {
-  const sheet = ss.getSheetByName('採点テンプレ');
-  if (!snapshot.exists) { if (sheet) ss.deleteSheet(sheet); }
-  else {
-    const target = sheet || ss.insertSheet('採点テンプレ');
-    const height = Math.max(snapshot.values.length, target.getLastRow(), 1), width = Math.max(snapshot.values[0] ? snapshot.values[0].length : 0, target.getLastColumn(), 16);
-    // 既存シートから退避した数式だけは数式として復元する。JSON由来の文字列とは区別する。
-    const rows = Array.from({ length: height }, function(_, r) { return Array.from({ length: width }, function(_, c) {
-      if (snapshot.formulas[r] && snapshot.formulas[r][c]) return snapshot.formulas[r][c];
-      return snapshot.values[r] && snapshot.values[r][c] != null ? scoringSheetLiteral_(snapshot.values[r][c]) : '';
-    }); });
-    target.getRange(1, 1, height, width).setValues(rows);
-  }
-  if (scoringReadTemplateTable_().revision !== revision) throw new Error('採点テンプレートの復元値が一致しません。');
+  scoringRestoreTemplateSnapshot_(ss,snapshot,revision);
 }
 
 function applyConfigurationFile(kind, json, expectedRevision, choices) {
@@ -2620,9 +2710,7 @@ function applyConfigurationFile(kind, json, expectedRevision, choices) {
       currentTemplates = scoringReadTemplateTable_(); templates = configurationIncomingTemplates_(parsed, currentTemplates);
       const validation = scoringValidateTemplateTable_({ templates: templates });
       if (!validation.ok) throw new Error('採点テンプレートに不正な条件があります。');
-      snapshot = snapshotSheetContents_(ss, '採点テンプレ');
-      const templateSheet = ss.getSheetByName('採点テンプレ');
-      snapshot.formulas = templateSheet ? templateSheet.getDataRange().getFormulas() : [];
+      snapshot = scoringTemplateSnapshot_(ss);
     }
     const keys = [];
     if (management) keys.push('APP_CONFIG', 'APP_CONFIG_BACKUP', 'APP_CONFIG_STORAGE', 'APP_CONFIG_PARSE_ERROR', 'APP_CONFIG_SAVE_ERROR', AUTOMATION_STATE_KEY_);

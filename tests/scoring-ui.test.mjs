@@ -5,13 +5,13 @@ import vm from 'node:vm';
 
 function page(){
  const html=fs.readFileSync('Scoring.html','utf8'),visible=html.split('<template id="ruleBuilderTemplate">')[0],elements=new Map(),events={},calls=[],storage=new Map();
- const element=()=>({value:'',textContent:'',innerHTML:'',style:{},dataset:{},children:[],classList:{add(){},remove(){},contains(){return false;}},addEventListener(name,handler){const previous=this['on'+name];this['on'+name]=function(...args){if(previous)previous.apply(this,args);handler.apply(this,args);};},setAttribute(){},getAttribute(){return '';},appendChild(e){this.children.push(e);return e;},replaceChildren(){this.children=[];},get options(){return this.children;},querySelectorAll(){return [];},querySelector(){return null;},focus(){},select(){},click(){this.clicked=true;},remove(){},showModal(){this.open=true;},close(){this.open=false;}});
+ const element=()=>({value:'',textContent:'',innerHTML:'',style:{},dataset:{},children:[],classList:{values:new Set(),add(v){this.values.add(v);},remove(v){this.values.delete(v);},contains(v){return this.values.has(v);}},addEventListener(name,handler){const previous=this['on'+name];this['on'+name]=function(...args){if(previous)previous.apply(this,args);handler.apply(this,args);};},attributes:{},setAttribute(k,v){this.attributes[k]=String(v);},getAttribute(k){return this.attributes[k]||'';},appendChild(e){this.children.push(e);return e;},replaceChildren(){this.children=[];},get options(){return this.children;},querySelectorAll(){return [];},querySelector(){return null;},focus(){},select(){},click(){this.clicked=true;},remove(){},showModal(){this.open=true;},close(){this.open=false;}});
  for(const match of visible.matchAll(/\bid="([^"]+)"/g))elements.set(match[1],element());
  const groups={'.score-input':Array.from({length:5},element)};
  const document={body:element(),readyState:'loading',getElementById:id=>elements.get(id)||null,createElement:element,createDocumentFragment:element,createTextNode:text=>({textContent:text}),querySelectorAll:s=>groups[s]||[],addEventListener:(name,fn)=>{events[name]=fn;}};
  const window={__SCORING_TOOL_ENABLE_TEST_HOOKS__:true,addEventListener(name,fn){events["window:"+name]=fn;}};
  const c=vm.createContext({document,window,console,localStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},setTimeout:()=>1,clearTimeout(){},google:{script:{get run(){const run={withSuccessHandler(fn){this.success=fn;return this;},withFailureHandler(fn){this.failure=fn;return this;}};return new Proxy(run,{get:(o,k)=>k in o?o[k]:(...args)=>calls.push({method:k,payload:args[0],args,success:o.success,failure:o.failure})});}}}});
- const script=html.match(/<script>([\s\S]*?)<\/script>/)[1].replace('window.__scoringToolTestHooks = {','window.__scoringToolTestHooks = {state,els,loadRuleTemplates_,resolveRuleOutputSlots_,loadInitData,saveConfig,markDirty,reviewLabel_,comparisonCard_,handleScoresChanged,finishPendingFeedback_,saveCurrentRow,loadPendingEditFromLocalStorage,loadCurrentTemplateRules,renderRulesSummary,openComparison_,adoptComparison_,');
+ const script=html.match(/<script>([\s\S]*?)<\/script>/)[1].replace('window.__scoringToolTestHooks = {','window.__scoringToolTestHooks = {state,els,loadRuleTemplates_,resolveRuleOutputSlots_,loadInitData,saveConfig,markDirty,reviewLabel_,comparisonCard_,handleScoresChanged,finishPendingFeedback_,saveCurrentRow,loadPendingEditFromLocalStorage,loadCurrentTemplateRules,renderRulesSummary,updateRulesSummaryHighlight_,renderCurrentRow,openComparison_,adoptComparison_,');
  vm.runInContext(script.replace('function tokenizeWhenExpr(expr) {','function tokenizeWhenExpr(expr) { window.parseCount=(window.parseCount||0)+1;'),c);return {events,calls,elements,window,storage,document,c,h:window.__scoringToolTestHooks};
 }
 
@@ -205,7 +205,7 @@ test('rule evaluation skips conditions for filled or unused output targets',()=>
 
 test('table outputs keep fixed positions and reject invalid scores without replacing manual feedback',()=>{
  const p=readyPage();p.h.state.config.ruleTemplateId='表';
- const r={target:'出力3',whenExpr:'score1>=0',message:'値{枠1}',enabled:1,_tableConditions:[{op:'>=',value:0},{op:'any'},{op:'any'},{op:'any'},{op:'any'}],_tableDomains:[[0,.5,1],[],[],[],[]]};
+ const r={target:'出力3',whenExpr:'score1>=0',message:'値{枠1}',enabled:1,_tableConditions:[{op:'>=',value:0},{op:'any'},{op:'any'},{op:'any'},{op:'any'}],_scorePolicy:[{mode:'list',values:[0,.5,1]},...Array.from({length:4},()=>({mode:'any'}))]};
  const headers=['target','whenExpr','message','enabled'];p.h.state.currentRules=[r];p.h.state.currentRulesHeaders=headers;
  const slots=p.h.resolveRuleOutputSlots_({ruleOutputSlots:[{col:'E',enabled:true},{col:'F',enabled:true},{col:'G',enabled:true}]},[r],headers);
  assert.deepEqual(Array.from(slots,s=>s.target),['出力1','出力2','出力3']);assert.equal(slots[2].col,'G');
@@ -218,4 +218,48 @@ test('deleting the selected template clears cached conditions and preserves manu
  const p=rulesPage();p.h.els.ruleOutInputs[0].value='手直し';p.h.loadRuleTemplates_('test');p.calls.at(-1).success({ok:true,headers:['templateId','name','enabled'],templates:[]});
  assert.equal(p.h.state.config.ruleTemplateId,'');assert.equal(p.h.state.currentRules,null);
  p.h.handleScoresChanged();p.h.finishPendingFeedback_();assert.equal(p.h.els.ruleOutInputs[0].value,'手直し');
+});
+
+const anyPolicy=()=>Array.from({length:5},()=>({mode:'any'}));
+function compactRule(row,output,message,visible=1,condition=1){return {target:'出力'+output,whenExpr:'score1=='+condition,whenLabel:'枠1 '+condition+'・枠2 '+condition,message,enabled:1,visible,_rowNumber:row,_tableConditions:[{op:'=',value:condition},{op:'=',value:condition},{op:'any'},{op:'any'},{op:'any'}],_scorePolicy:anyPolicy()};}
+test('summary groups outputs by original row and individually filters display flags',()=>{
+ const p=readyPage(),rules=[];for(let i=1;i<=4;i++){rules.push(compactRule(i+1,1,'ABCD'[i-1]+'1',1,i),compactRule(i+1,2,'ABCD'[i-1]+'2',1,i));}
+ const rows=p.h.buildRulesSummaryRows_(rules,['target','whenExpr','whenLabel','message','visible']);
+ assert.equal(rows.length,4);assert.equal(rows[0].when,'①:1・②:1');assert.deepEqual(Array.from(rows[0].outputs,x=>x.text),['A1','A2']);
+ rules[0].visible=0;const filtered=p.h.buildRulesSummaryRows_(rules,['target','whenExpr','message','visible']);assert.equal(filtered.length,4);assert.deepEqual(Array.from(filtered[0].outputs,x=>x.text),['A2']);
+ rules[1].visible=0;assert.equal(p.h.buildRulesSummaryRows_(rules,['target','whenExpr','message','visible']).length,3);
+});
+test('summary preserves comparison operators and never merges separate original rows',()=>{
+ const p=readyPage(),a=compactRule(2,1,'zero'),b=compactRule(3,2,'other');a._tableConditions[0]={op:'>=',value:0};a._tableConditions[1]={op:'any'};
+ const result=p.h.buildRulesSummaryRows_([a,b],['target','message','visible']);assert.equal(result.length,2);assert.equal(result[0].when,'①:>=0');
+ a._tableConditions=Array.from({length:5},()=>({op:'any'}));assert.equal(p.h.buildRulesSummaryRows_([a],['target','message','visible'])[0].when,'条件なし');
+});
+test('table evaluation uses optional policy and reports matches independently of visibility',()=>{
+ const p=readyPage(),a=compactRule(2,1,'A',0),b=compactRule(3,2,'B');b._tableConditions=Array.from({length:5},()=>({op:'any'}));
+ const slots=[{target:'出力1'},{target:'出力2'},{target:'出力3'}],headers=['target','whenExpr','message','enabled'];
+ const evaluate=scores=>p.h.evaluateRulesLocallyMulti_([a,b],headers,p.h.buildEvalVars(p.h.buildRuleVars_(scores)),slots);
+ let result=evaluate(['1','1','','','']);assert.deepEqual(Array.from(result.outputs),['A','B','']);assert.equal(result.matchedRowsByTarget['出力1'],2);assert.equal(result.matchedRowsByTarget['出力2'],3);
+ result=evaluate(['-1.5','','','','']);assert.equal(result.error,null);assert.deepEqual(Array.from(result.outputs),['','B','']);
+ a._scorePolicy[0]={mode:'list',values:[0,1]};assert.match(evaluate(['2','','','','']).error,/設定した点数/);assert.equal(evaluate(['0','','','','']).error,null);assert.equal(evaluate(['','','','','']).error,null);
+});
+test('empty table rules still enforce score policy from the table response',()=>{
+ const p=readyPage();p.h.state.currentRulesResult={tableFormat:true,scorePolicy:[{mode:'list',values:[0]},...anyPolicy().slice(1)]};
+ const result=p.h.evaluateRulesLocallyMulti_([],[],p.h.buildRuleVars_(['2','','','','']),[]);assert.match(result.error,/設定した点数/);
+});
+test('summary highlights only the visible output adopted from its own source row',()=>{
+ const p=readyPage(),a=compactRule(2,1,'A',0),b=compactRule(3,2,'B'),c=compactRule(4,2,'C');
+ Object.assign(p.h.state,{currentTemplateId:'表',currentRulesResult:{ok:true,rules:[a,b,c],headers:['target','whenExpr','message','visible']},lastMatchedRule:{templateId:'表',matchedRowsByTarget:{出力1:2,出力2:3}}});
+ p.h.renderRulesSummary('表');const container=p.h.els.rulesSummary;
+ const spans=container.children.flatMap(line=>line.children).filter(el=>el.className==='rule-msg rule-output');container.querySelectorAll=()=>spans;
+ p.h.updateRulesSummaryHighlight_('表');assert.equal(spans.length,2);assert.equal(spans[0].textContent,'B');assert.equal(spans[0].classList.contains('rule-output--matched'),true);assert.equal(spans[1].classList.contains('rule-output--matched'),false);
+ p.h.updateRulesSummaryHighlight_('別');assert.equal(spans[0].classList.contains('rule-output--matched'),false);
+});
+
+test('rendering another answer clears output highlights from the previous student',()=>{
+ const p=readyPage();p.h.state.lastMatchedRule={templateId:'表',matchedRowNumber:2,matchedRowsByTarget:{出力1:2,出力2:3}};p.h.renderCurrentRow();assert.equal(p.h.state.lastMatchedRule.templateId,'');assert.deepEqual(Object.keys(p.h.state.lastMatchedRule.matchedRowsByTarget),[]);
+});
+test('finite exponent-form scores round-trip stored decimal values without bypassing restrictions',()=>{
+ const p=readyPage(),r=compactRule(2,1,'値{枠1}');r._tableConditions=Array.from({length:5},()=>({op:'any'}));r._scorePolicy[0]={mode:'list',values:[1e-7]};
+ const evaluate=value=>p.h.evaluateRulesLocallyMulti_([r],['target','whenExpr','message'],p.h.buildRuleVars_([value,'','','','']),[{target:'出力1'}]);
+ assert.equal(evaluate('1e-7').error,null);assert.equal(evaluate('1e-7').outputs[0],'値1e-7');assert.match(evaluate('2e-7').error,/設定した点数/);assert.match(evaluate('1e999').error,/数値/);
 });

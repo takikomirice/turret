@@ -253,16 +253,18 @@ function scoringWriteSaveRecords_(journal,entries,state) {
 
 function scoringGetTargetSpreadsheetEditUrl(params) { assertWebOperator_(); return resolveScoringTarget_(params && (params.target || params.sheetName)).target.url; }
 function scoringGetRulesEditUrl() { assertWebOperator_(); return scoringGetTemplateTable().url; }
-function scoringGetRuleTemplates() { assertWebOperator_(); return scoringTableTemplateList_(); }
-function scoringGetRules(params) { assertWebOperator_(); return scoringTableRules_(params); }
+function scoringGetRuleTemplates() { assertWebOperator_(); return withAppLock_(scoringTableTemplateList_); }
+function scoringGetRules(params) { assertWebOperator_(); return withAppLock_(function(){return scoringTableRules_(params);}); }
 function scoringExportConfig() { assertWebOperator_(); return scoringLegacyApiExportConfig_(); }
-function scoringExportTemplatePack() { assertWebOperator_(); return {meta:{type:'turret-grading-template-pack',version:1},templates:scoringGetTemplateTable().templates}; }
+function scoringExportTemplatePack() { assertWebOperator_(); return withAppLock_(scoringBuildTemplatePack_); }
+// 管理画面の一括出力は既にロック済みなので、内部の共通生成処理を使う。
+function scoringBuildTemplatePack_() { return {meta:{type:'turret-grading-template-pack',version:2},templates:scoringReadTemplateTable_().templates}; }
 function scoringSetSlotLabels(labels) { assertWebOperator_(); return withAppLock_(function(){return scoringLegacyApiSetSlotLabels_(labels);}); }
 function scoringEnsureRuleSheets() { assertWebOperator_(); return withAppLock_(function(){scoringEnsureTemplateTable_();return {ok:true};}); }
 function scoringImportTemplatePack(payload) {
   assertWebOperator_();
   return withAppLock_(function(){
-    if(!payload || !payload.meta || payload.meta.type!=='turret-grading-template-pack' || payload.meta.version!==1)throw new Error('採点テンプレ形式のパックを指定してください。旧形式は取り込めません。');
+    scoringAssertTemplatePackV2_(payload);
     const current=scoringReadTemplateTable_(),incoming=scoringNormalizeTemplates_(payload.templates);
     const names=new Set(current.templates.map(function(t){return t.name;}));
     incoming.forEach(function(t){if(names.has(t.name))throw new Error('同名のテンプレートがあります: '+t.name);});
@@ -281,10 +283,27 @@ function scoringImportConfig(payload) {
 }
 function scoringRestoreLatestConfigBackup() { assertWebOperator_(); return withAppLock_(scoringLegacyApiRestoreLatestConfigBackup_); }
 
-// 採点テンプレはこの表を唯一の保存先とし、画面と直編集で同じ形式を使う。
+// ルールは13列の表、入力制限は運用ブックとテンプレート名ごとの内部設定に保存する。
 function scoringTemplateHeaders_() {
-  return ['テンプレート名','枠1','枠2','枠3','枠4','枠5','出力1','出力2','出力3','使用する','採点画面に表示',
-    '枠1の点数','枠2の点数','枠3の点数','枠4の点数','枠5の点数'];
+  return ['テンプレート名','枠1','枠2','枠3','枠4','枠5','出力1','出力2','出力3','出力1を表示','出力2を表示','出力3を表示','使用する'];
+}
+function scoringTemplateHeaderNotes_() {
+  return ['同じ名前の行が1つのテンプレートです。名前変更・複製は編集画面で行うと入力制限も引き継ぎます。']
+    .concat([1,2,3,4,5].map(function(i){return '枠'+i+'の条件。空欄は条件なし。数値の一致、>、>=、<、<= が使えます。各枠をすべて満たす行が一致します。点数未入力は0と区別し、数値条件には一致しません。入力制限は編集画面で設定します。';}))
+    .concat([1,2,3].map(function(i){return '出力'+i+'の文言。上から最初に一致する空欄でない文言を採用します。空欄ならその出力だけ次の行へ進み、0は文言として出力します。該当なしは空欄です。{枠1}〜{枠5}、{合計}が使えます。';}))
+    .concat([1,2,3].map(function(i){return '出力'+i+'を採点画面の条件一覧に表示するか。空欄・1・はいは表示、0・いいえは非表示。非表示でも出力の生成と保存は行います。';}))
+    .concat(['この行を使うか。空欄・1・はいは使用、0・いいえは不使用。不使用の行は採点に使いません。']);
+}
+function scoringTemplateOldFormatError_() {
+  return new Error('採点テンプレは旧形式、またはヘッダ構成が異なります。元のシートと設定JSONをバックアップした後、採点テンプレシートを別名で保管し、新しい13列の表を作り直してください。旧パックはバージョン2の形式で作り直してください。自動変換は行いません。');
+}
+function scoringAssertTemplatePackV2_(payload) {
+  if(!payload || !payload.meta || payload.meta.type!=='turret-grading-template-pack' || payload.meta.version!==2)throw new Error('採点テンプレパックはバージョン2を指定してください。旧形式は取り込めません。元のJSONをバックアップし、入力制限と出力別表示を含むバージョン2で作り直してください。');
+  if(!Array.isArray(payload.templates))throw new Error('採点テンプレートを配列で指定してください。');
+  payload.templates.forEach(function(t){
+    if(!t || !Array.isArray(t.scorePolicy))throw new Error('バージョン2の各テンプレートには枠1〜5の入力制限を含めてください。');
+    if(!Array.isArray(t.rules) || t.rules.some(function(r){return !r || !Array.isArray(r.outputVisible);}))throw new Error('バージョン2の各ルールには出力1〜3の表示設定を含めてください。');
+  });
 }
 function scoringParseCondition_(value) {
   const text=String(value==null?'':value).trim().replace(/^=</,'<=').replace(/^=>/,'>=');
@@ -311,96 +330,238 @@ function scoringTemplateFlag_(value,label) {
   if(value===false || /^(0|false|いいえ)$/i.test(String(value).trim()))return false;
   throw new Error(label+' は 1（はい）または 0（いいえ）で入力してください。');
 }
+function scoringNormalizeScorePolicy_(policy,name) {
+  if(policy===undefined)return Array.from({length:5},function(){return {mode:'any'};});
+  if(!Array.isArray(policy) || policy.length!==5)throw new Error(name+': 枠1〜5の入力制限を5件で指定してください。');
+  return policy.map(function(p,i){
+    const label=name+': 枠'+(i+1)+'の入力制限';
+    if(!p || typeof p!=='object' || Array.isArray(p) || !['any','list'].includes(p.mode))throw new Error(label+'は任意の数値または数値一覧で指定してください。');
+    if(p.mode==='any')return {mode:'any'};
+    if(!Array.isArray(p.values) || !p.values.length || p.values.length>20)throw new Error(label+'の点数は1〜20種類で指定してください。');
+    const values=p.values.map(function(v){if(typeof v!=='number' || !Number.isFinite(v))throw new Error(label+'には有限の数値を指定してください。');return v;});
+    if(new Set(values).size!==values.length)throw new Error(label+'の点数が重複しています。');
+    return {mode:'list',values:values.sort(function(a,b){return a-b;})};
+  });
+}
 function scoringNormalizeTemplates_(templates) {
   if(!Array.isArray(templates) || templates.length>100)throw new Error('テンプレートは100件以内で指定してください。');
   const names=new Set();let totalRules=0;
   return templates.map(function(t){
     if(!t || !String(t.name || '').trim())throw new Error('テンプレート名が空欄です。');
+    if(Object.prototype.hasOwnProperty.call(t,'domains'))throw scoringTemplateOldFormatError_();
     const name=String(t.name).trim();
     if(name.length>100 || names.has(name))throw new Error('テンプレート名が重複、または長すぎます: '+name);
     names.add(name);
-    if(!Array.isArray(t.domains) || t.domains.length!==5)throw new Error(name+': 枠1〜5の点数を設定してください。');
-    const domains=t.domains.map(function(domain,i){
-      if(typeof domain==='string')domain=domain.trim()?domain.split(/[,、\s]+/):[];
-      if(!Array.isArray(domain) || domain.length>20)throw new Error(name+': 枠'+(i+1)+'の点数は20種類以内で指定してください。');
-      const values=domain.map(function(v){if(!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(String(v).trim()) || !Number.isFinite(Number(v)))throw new Error(name+': 点数には数値を指定してください。');return Number(v);});
-      if(new Set(values).size!==values.length)throw new Error(name+': 枠'+(i+1)+'の点数が重複しています。');
-      return values.sort(function(a,b){return a-b;});
-    });
+    const scorePolicy=scoringNormalizeScorePolicy_(t.scorePolicy,name);
     if(!Array.isArray(t.rules) || t.rules.length>500)throw new Error(name+': ルールは500行以内で指定してください。');
     totalRules+=t.rules.length;if(totalRules>2000)throw new Error('表全体のルールは2000行以内で指定してください。');
     const rules=t.rules.map(function(r,i){
       if(!r || !Array.isArray(r.conditions) || r.conditions.length!==5 || !Array.isArray(r.outputs) || r.outputs.length!==3)throw new Error(name+': ルール'+(i+1)+'は枠5列・出力3列で指定してください。');
-      const conditions=r.conditions.map(function(v){return String(v==null?'':v).trim();});
+      if(Object.prototype.hasOwnProperty.call(r,'visible'))throw scoringTemplateOldFormatError_();
+      const conditions=r.conditions.map(function(v){const text=String(v==null?'':v).trim();if(text.length>100)throw new Error('条件は100文字以内で入力してください。');return text;});
       const outputs=r.outputs.map(function(v){const text=String(v==null?'':v);if(text.length>10000)throw new Error('出力は10000文字以内で入力してください。');return text;});
-      return {conditions:conditions,outputs:outputs,enabled:scoringTemplateFlag_(r.enabled,'使用する'),visible:scoringTemplateFlag_(r.visible,'採点画面に表示'),sheetRow:Number(r.sheetRow)||null};
+      const flags=r.outputVisible===undefined?[true,true,true]:r.outputVisible;
+      if(!Array.isArray(flags) || flags.length!==3)throw new Error(name+': 出力1〜3の表示設定を3件で指定してください。');
+      return {conditions:conditions,outputs:outputs,outputVisible:flags.map(function(v,o){return scoringTemplateFlag_(v,'出力'+(o+1)+'を表示');}),enabled:scoringTemplateFlag_(r.enabled,'使用する'),sheetRow:Number.isInteger(r.sheetRow)&&r.sheetRow>=2?r.sheetRow:null};
     }).filter(function(r){return r.conditions.some(Boolean) || r.outputs.some(function(v){return v!=='';});});
-    return {name:name,domains:domains,rules:rules};
+    return {name:name,scorePolicy:scorePolicy,rules:rules};
   });
 }
-function scoringReadTemplateTable_() {
+// 連結文字の衝突を避けるため、ブックIDと名前をそれぞれJSON化してハッシュにする。
+function scoringTemplatePolicyPrefix_() {return 'TURRET_TEMPLATE_POLICY_V2_'+scoringDigest_(getAppSpreadsheet_().getId())+'_';}
+function scoringTemplatePolicyKey_(name) {return scoringTemplatePolicyPrefix_()+scoringDigest_(name);}
+function scoringTemplateRecoveryKey_() {return 'TURRET_TEMPLATE_RECOVERY_V2_'+scoringDigest_(getAppSpreadsheet_().getId());}
+function scoringTemplatePolicySnapshot_() {
+  const prefix=scoringTemplatePolicyPrefix_(),all=PropertiesService.getScriptProperties().getProperties(),values={};
+  Object.keys(all).filter(function(k){return k.indexOf(prefix)===0;}).sort().forEach(function(k){values[k]=all[k];});
+  return values;
+}
+function scoringReadTemplatePolicies_(raw,names) {
+  const policies=new Map();
+  Object.keys(raw).forEach(function(key){
+    let record;try{record=JSON.parse(raw[key]);}catch(e){throw new Error('採点テンプレの入力制限を読み取れません。設定JSONと内部設定を確認してください。');}
+    if(!record || typeof record.name!=='string' || !Array.isArray(record.scorePolicy) || key!==scoringTemplatePolicyKey_(record.name))throw new Error('採点テンプレの入力制限と名前が一致しません。設定JSONと内部設定を確認してください。');
+    const policy=scoringNormalizeScorePolicy_(record.scorePolicy,record.name);
+    if(!names.has(record.name) && policy.some(function(p){return p.mode==='list';}))throw new Error('入力制限があるテンプレート「'+record.name+'」がシートにありません。シートで改名・削除した場合は元の名前に戻し、編集画面で名前変更・削除してください。入力制限を別の名前へ自動で引き継ぐことはできません。');
+    if(names.has(record.name))policies.set(record.name,policy);
+  });
+  return policies;
+}
+function scoringReadTemplateTable_(allowInProgress) {
   const ss=getAppSpreadsheet_(),sheet=ss.getSheetByName('採点テンプレ'),headers=scoringTemplateHeaders_();
-  const values=sheet && sheet.getLastRow()?sheet.getRange(1,1,sheet.getLastRow(),Math.max(headers.length,sheet.getLastColumn())).getDisplayValues():[];
-  const revision=scoringDigest_(values),templates=[],byName=new Map(),metadata=new Map();
-  // 旧版のテンプレート単位の使用列は読み捨て、次の保存で消去する。
-  const legacyWidth=values.length && values[0][16]==='テンプレートを使用'?17:16;
-  if(values.length && (values[0].slice(0,headers.length).join('\t')!==headers.join('\t') || values.some(function(r){return r.slice(legacyWidth).some(Boolean);})))throw new Error('採点テンプレのヘッダ構成が異なります。列名と余分な列を確認してください。');
+  const recovery=PropertiesService.getScriptProperties().getProperty(scoringTemplateRecoveryKey_());
+  if(recovery && allowInProgress!==true)throw new Error('採点テンプレの保存処理中、または保存からの復旧が未完了です。シートと入力制限を設定JSONから確認し、復旧してから再開してください。'+recovery);
+  const rawValues=sheet && sheet.getLastRow()?sheet.getRange(1,1,sheet.getLastRow(),Math.max(headers.length,sheet.getLastColumn())).getDisplayValues():[];
+  if(rawValues.length && (rawValues[0].slice(0,13).join('\t')!==headers.join('\t') || rawValues.some(function(r){return r.slice(13).some(function(v){return String(v).trim()!=='';});})))throw scoringTemplateOldFormatError_();
+  const values=rawValues.map(function(row){return row.slice(0,13);}),templates=[],byName=new Map();
   values.slice(1).forEach(function(row,index){
-    if(!row.slice(0,16).some(function(v){return String(v).trim()!=='';}))return;
+    if(!row.some(function(v){return String(v).trim()!=='';}))return;
     const name=String(row[0] || '').trim();if(!name)throw new Error('採点テンプレ '+(index+2)+'行: テンプレート名が空欄です。');
-    if(!byName.has(name)){const t={name:name,domains:[[],[],[],[],[]],rules:[]};byName.set(name,t);templates.push(t);metadata.set(name,{});}
-    const t=byName.get(name),meta=metadata.get(name);
-    for(let i=11;i<16;i++) {
-      if(String(row[i] || '').trim()==='')continue;
-      if(Object.prototype.hasOwnProperty.call(meta,i) && meta[i]!==String(row[i]).trim())throw new Error(name+': '+headers[i]+'が行によって異なります。最初の行だけに記入してください。');
-      meta[i]=String(row[i]).trim();t.domains[i-11]=row[i];
-    }
-    if(row.slice(1,9).some(function(v){return v!=='';}))t.rules.push({conditions:row.slice(1,6),outputs:row.slice(6,9),enabled:scoringTemplateFlag_(row[9],'使用する'),visible:scoringTemplateFlag_(row[10],'採点画面に表示'),sheetRow:index+2});
+    if(!byName.has(name)){const t={name:name,rules:[]};byName.set(name,t);templates.push(t);}
+    if(row.slice(1,9).some(function(v){return v!=='';}))byName.get(name).rules.push({conditions:row.slice(1,6),outputs:row.slice(6,9),outputVisible:row.slice(9,12),enabled:row[12],sheetRow:index+2});
   });
-  return {templates:scoringNormalizeTemplates_(templates),revision:revision,url:'https://docs.google.com/spreadsheets/d/'+ss.getId()+'/edit'+(sheet?'#gid='+sheet.getSheetId():'')};
+  const rawPolicies=scoringTemplatePolicySnapshot_(),policies=scoringReadTemplatePolicies_(rawPolicies,new Set(byName.keys()));
+  templates.forEach(function(t){t.scorePolicy=policies.get(t.name);});
+  return {templates:scoringNormalizeTemplates_(templates),revision:scoringDigest_([ss.getId(),values,rawPolicies]),url:'https://docs.google.com/spreadsheets/d/'+ss.getId()+'/edit'+(sheet?'#gid='+sheet.getSheetId():'')};
 }
-function scoringEnsureTemplateTable_() {
+function scoringEnsureTemplateTable_(allowInProgress) {
+  // 既存の旧形式を変更しない。初期化にも読込みと同じ安全検査を適用する。
+  scoringReadTemplateTable_(allowInProgress);
   const ss=getAppSpreadsheet_();let sheet=ss.getSheetByName('採点テンプレ');
   if(!sheet)sheet=ss.insertSheet('採点テンプレ');
+  if(sheet.getMaxColumns()<13)sheet.insertColumnsAfter(sheet.getMaxColumns(),13-sheet.getMaxColumns());
   if(!sheet.getLastRow()){
-    sheet.getRange(1,1,sheet.getMaxRows(),16).setNumberFormat('@');
-    sheet.getRange(1,1,1,16).setValues([scoringTemplateHeaders_()]).setFontWeight('bold').setBackground('#e7f0ea');sheet.setFrozenRows(1);
-    sheet.setColumnWidths(1,1,180);sheet.setColumnWidths(2,5,80);sheet.setColumnWidths(7,3,240);sheet.setColumnWidths(10,7,125);
-    sheet.getRange(1,1,sheet.getMaxRows(),16).setWrap(true);
+    sheet.getRange(1,1,sheet.getMaxRows(),13).setNumberFormat('@');
+    sheet.getRange(1,1,1,13).setValues([scoringTemplateHeaders_()]).setFontWeight('bold').setBackground('#e7f0ea');sheet.setFrozenRows(1);
+    sheet.setColumnWidths(1,1,180);sheet.setColumnWidths(2,5,80);sheet.setColumnWidths(7,3,240);sheet.setColumnWidths(10,4,125);
+    sheet.getRange(1,1,sheet.getMaxRows(),13).setWrap(true);
   }
+  sheet.getRange(1,1,1,13).setNotes([scoringTemplateHeaderNotes_()]);
   return sheet;
 }
-function scoringGetTemplateTable() {assertWebOperator_();return scoringReadTemplateTable_();}
+function scoringGetTemplateTable() {assertWebOperator_();return withAppLock_(scoringReadTemplateTable_);}
+function scoringTemplatePolicyValues_(templates) {
+  const values={},props=PropertiesService.getScriptProperties(),all=props.getProperties(),prefix=scoringTemplatePolicyPrefix_();
+  templates.forEach(function(t){
+    const key=scoringTemplatePolicyKey_(t.name),value=JSON.stringify({name:t.name,scorePolicy:t.scorePolicy});
+    if(utf8ByteLength_(value)>8000)throw new Error(t.name+': 入力制限は8,000バイト以内にしてください。');
+    values[key]=value;
+  });
+  const bytes=Object.keys(all).filter(function(k){return k.indexOf(prefix)!==0;}).reduce(function(n,k){return n+utf8ByteLength_(k)+utf8ByteLength_(all[k]);},0)
+    +Object.keys(values).reduce(function(n,k){return n+utf8ByteLength_(k)+utf8ByteLength_(values[k]);},0);
+  // 改名時は新旧のキーが一時的に併存するため、その最大容量も確認する。
+  const peak=Object.keys(all).reduce(function(n,k){return n+utf8ByteLength_(k)+utf8ByteLength_(all[k]);},0)
+    +Object.keys(values).reduce(function(n,k){return n+(Object.prototype.hasOwnProperty.call(all,k)?Math.max(0,utf8ByteLength_(values[k])-utf8ByteLength_(all[k])):utf8ByteLength_(k)+utf8ByteLength_(values[k]));},0);
+  if(Math.max(bytes,peak)>450000)throw new Error('内部設定の容量が不足しています。不要なテンプレートや設定をバックアップして整理してください（450,000バイト以内）。');
+  return values;
+}
+function scoringReplaceTemplatePolicies_(values) {
+  const props=PropertiesService.getScriptProperties(),current=scoringTemplatePolicySnapshot_();
+  Object.keys(values).forEach(function(k){if(current[k]!==values[k])props.setProperty(k,values[k]);});
+  Object.keys(current).forEach(function(k){if(!Object.prototype.hasOwnProperty.call(values,k))props.deleteProperty(k);});
+  const stored=scoringTemplatePolicySnapshot_(),ordered={};
+  Object.keys(values).sort().forEach(function(k){ordered[k]=values[k];});
+  if(scoringDigest_(stored)!==scoringDigest_(ordered))throw new Error('採点テンプレの入力制限の保存を確認できません。');
+}
+function scoringTemplateSnapshot_(ss) {
+  const snapshot=snapshotSheetContents_(ss,'採点テンプレ'),sheet=ss.getSheetByName('採点テンプレ');
+  snapshot.formulas=sheet?sheet.getDataRange().getFormulas():[];snapshot.policies=scoringTemplatePolicySnapshot_();
+  return snapshot;
+}
+function scoringClearTemplateWriteMarker_() {
+  const props=PropertiesService.getScriptProperties(),key=scoringTemplateRecoveryKey_();
+  props.deleteProperty(key);
+  if(props.getProperty(key)!==null)throw new Error('採点テンプレの保存中マーカーを解除できません。');
+}
+function scoringRestoreTemplateSnapshot_(ss,snapshot,revision) {
+  // 書込み前に失敗した場合は、変更されていない保存先へ復元を書き込まない。
+  try{if(scoringReadTemplateTable_(true).revision===revision){scoringClearTemplateWriteMarker_();return;}}catch(readError){}
+  const failures=[];
+  try{
+    let sheet=ss.getSheetByName('採点テンプレ');
+    if(!snapshot.exists){if(sheet)ss.deleteSheet(sheet);}
+    else{
+      if(!sheet)sheet=ss.insertSheet('採点テンプレ');
+      const height=Math.max(snapshot.values.length,sheet.getLastRow(),1),width=Math.max(snapshot.values[0]?snapshot.values[0].length:0,sheet.getLastColumn(),13);
+      const rows=Array.from({length:height},function(_,r){return Array.from({length:width},function(_,c){
+        if(snapshot.formulas[r] && snapshot.formulas[r][c])return snapshot.formulas[r][c];
+        return snapshot.values[r] && snapshot.values[r][c]!=null?scoringSheetLiteral_(snapshot.values[r][c]):'';
+      });});
+      if(sheet.getMaxRows()<height)sheet.insertRowsAfter(sheet.getMaxRows(),height-sheet.getMaxRows());
+      sheet.getRange(1,1,height,width).setValues(rows);
+    }
+  }catch(e){failures.push(String(e));}
+  try{scoringReplaceTemplatePolicies_(snapshot.policies);}catch(e){failures.push(String(e));}
+  if(failures.length)throw new Error(failures.join('\n'));
+  if(scoringReadTemplateTable_(true).revision!==revision)throw new Error('採点テンプレートの復元値が一致しません。');
+  scoringClearTemplateWriteMarker_();
+}
+function scoringTemplateComparable_(templates) {
+  return templates.map(function(t){return {name:t.name,scorePolicy:t.scorePolicy,rules:t.rules.map(function(r){return {conditions:r.conditions,outputs:r.outputs,outputVisible:r.outputVisible,enabled:r.enabled};})};});
+}
 function scoringWriteTemplateTable_(templates,revision,onBeforeWrite) {
   const normalized=scoringNormalizeTemplates_(templates),validation=scoringValidateTemplateTable_({templates:normalized});
   const errors=validation.issues.filter(function(i){return i.severity==='error';});
   if(errors.length)throw new Error(errors.slice(0,5).map(function(i){return i.message;}).join('\n'));
   const current=scoringReadTemplateTable_();
-  if(typeof revision!=='string' || revision!==current.revision)throw new Error('シートが変更されています。編集内容をコピーしてから再読込してください。');
-  const rows=[scoringTemplateHeaders_()];
+  if(typeof revision!=='string' || revision!==current.revision)throw new Error('シートが変更されています。入力制限も含めて編集内容をコピーしてから再読込してください。');
+  const policyValues=scoringTemplatePolicyValues_(normalized),ss=getAppSpreadsheet_(),snapshot=scoringTemplateSnapshot_(ss),rows=[scoringTemplateHeaders_()];
   normalized.forEach(function(t){
-    const rules=t.rules.length?t.rules:[{conditions:['','','','',''],outputs:['','',''],enabled:true,visible:true}];
-    rules.forEach(function(r,i){rows.push([t.name].concat(r.conditions,r.outputs,[r.enabled?'1':'0',r.visible?'1':'0'],i===0?t.domains.map(function(d){return d.join(',');}):['','','','','']));});
+    const rules=t.rules.length?t.rules:[{conditions:['','','','',''],outputs:['','',''],enabled:true,outputVisible:[true,true,true]}];
+    rules.forEach(function(r){rows.push([t.name].concat(r.conditions,r.outputs,r.outputVisible.map(function(v){return v?'1':'0';}),[r.enabled?'1':'0']));});
   });
   // 競合検査を通り、実際の変更に入る時点を一括読み込み側へ通知する。
-  if(onBeforeWrite)onBeforeWrite();
-  const sheet=scoringEnsureTemplateTable_(),oldRows=sheet.getLastRow();
-  if(sheet.getMaxRows()<rows.length)sheet.insertRowsAfter(sheet.getMaxRows(),rows.length-sheet.getMaxRows());
-  // 一度の書込みに末尾の消去も含め、先に既存内容を消さない。
-  const width=Math.max(16,sheet.getLastColumn());
-  while(rows.length<oldRows)rows.push(Array(16).fill(''));
-  sheet.getRange(1,1,rows.length,width).setNumberFormat('@').setValues(rows.map(function(row){return row.concat(Array(width-row.length).fill('')).map(scoringSheetLiteral_);}));
-  sheet.setFrozenRows(1);
-  return scoringReadTemplateTable_();
+  if(scoringReadTemplateTable_().revision!==current.revision)throw new Error('シートが変更されています。編集内容をコピーしてから再読込してください。');
+  let writeAttempted=false;
+  try{
+    // 両保存先の変更中は別リクエストの採点を止め、中断時にも安全側で停止する。
+    const props=PropertiesService.getScriptProperties(),markerKey=scoringTemplateRecoveryKey_(),marker='保存処理中です。完了しない場合はシートと入力制限をバックアップから確認してください。';
+    props.setProperty(markerKey,marker);
+    if(props.getProperty(markerKey)!==marker)throw new Error('採点テンプレの保存中マーカーを確認できません。');
+    if(scoringReadTemplateTable_(true).revision!==current.revision)throw new Error('シートが変更されています。編集内容をコピーしてから再読込してください。');
+    if(onBeforeWrite)onBeforeWrite();
+    writeAttempted=true;
+    const sheet=scoringEnsureTemplateTable_(true),oldRows=sheet.getLastRow();
+    if(sheet.getMaxRows()<rows.length)sheet.insertRowsAfter(sheet.getMaxRows(),rows.length-sheet.getMaxRows());
+    // 末尾の消去も一度の書込みに含める。書込み後に表と入力制限の両方を検証する。
+    while(rows.length<oldRows)rows.push(Array(13).fill(''));
+    sheet.getRange(1,1,rows.length,13).setNumberFormat('@').setValues(rows.map(function(row){return row.map(scoringSheetLiteral_);}));
+    sheet.setFrozenRows(1);scoringReplaceTemplatePolicies_(policyValues);SpreadsheetApp.flush();
+    const saved=scoringReadTemplateTable_(true);
+    if(scoringDigest_(scoringTemplateComparable_(saved.templates))!==scoringDigest_(scoringTemplateComparable_(normalized)))throw new Error('採点テンプレの保存結果が一致しません。');
+    scoringClearTemplateWriteMarker_();
+    return saved;
+  }catch(error){
+    try{if(writeAttempted)scoringRestoreTemplateSnapshot_(ss,snapshot,current.revision);else scoringClearTemplateWriteMarker_();}
+    catch(restoreError){
+      const detail=String(error)+'\n'+String(restoreError);
+      try{PropertiesService.getScriptProperties().setProperty(scoringTemplateRecoveryKey_(),detail.slice(0,1000));}catch(markerError){Logger.log(markerError);}
+      throw new Error('採点テンプレの保存に失敗し、復旧も完了していません。シートと入力制限をバックアップから確認してください。'+detail);
+    }
+    throw error;
+  }
 }
 function scoringSaveTemplateTable(payload) {
   assertWebOperator_();return withAppLock_(function(){return scoringWriteTemplateTable_(payload && payload.templates,payload && payload.revision);});
 }
 function scoringValidateTemplateTable(payload) {assertWebOperator_();return scoringValidateTemplateTable_(payload);}
+// 各枠を有限集合または数値区間として扱い、全組合せを作らずに重複を調べる。
+function scoringConditionDomain_(policy,condition) {
+  if(policy.mode==='list')return {values:policy.values.filter(function(v){return scoringConditionMatches_(condition,v);})};
+  const d={low:-Infinity,high:Infinity,lowClosed:false,highClosed:false,blank:condition.op==='any'};
+  if(['=','>','>='].includes(condition.op)){d.low=condition.value;d.lowClosed=condition.op!=='>';}
+  if(['=','<','<='].includes(condition.op)){d.high=condition.value;d.highClosed=condition.op!=='<';}
+  return d;
+}
+function scoringDomainContains_(domain,value) {
+  if(domain.values)return domain.values.indexOf(value)>=0;
+  if(value===null)return domain.blank;
+  return (value>domain.low || value===domain.low && domain.lowClosed) && (value<domain.high || value===domain.high && domain.highClosed);
+}
+function scoringDomainIntersection_(a,b) {
+  if(a.values || b.values){const finite=a.values?a:b,other=a.values?b:a;return {values:finite.values.filter(function(v){return scoringDomainContains_(other,v);})};}
+  const low=Math.max(a.low,b.low),high=Math.min(a.high,b.high);
+  return {low:low,high:high,lowClosed:(a.low!==low || a.lowClosed) && (b.low!==low || b.lowClosed),highClosed:(a.high!==high || a.highClosed) && (b.high!==high || b.highClosed),blank:a.blank && b.blank};
+}
+function scoringDomainExample_(domain) {
+  if(domain.values)return domain.values.length?domain.values[0]:undefined;
+  if(domain.low>domain.high || domain.low===domain.high && !(domain.lowClosed && domain.highClosed))return domain.blank?null:undefined;
+  if(Number.isFinite(domain.low) && domain.lowClosed)return domain.low;
+  if(Number.isFinite(domain.high) && domain.highClosed)return domain.high;
+  if(domain.low===-Infinity && domain.high===Infinity)return 0;
+  if(domain.low===-Infinity){const candidate=domain.high-Math.max(1,Math.abs(domain.high)*Number.EPSILON);return Number.isFinite(candidate)&&scoringDomainContains_(domain,candidate)?candidate:undefined;}
+  if(domain.high===Infinity){const candidate=domain.low+Math.max(1,Math.abs(domain.low)*Number.EPSILON);return Number.isFinite(candidate)&&scoringDomainContains_(domain,candidate)?candidate:undefined;}
+  const candidate=domain.low/2+domain.high/2;return scoringDomainContains_(domain,candidate)?candidate:undefined;
+}
+function scoringDomainSubset_(a,b) {
+  if(a.values)return a.values.every(function(v){return scoringDomainContains_(b,v);});
+  if(b.values)return a.low===a.high && a.lowClosed && a.highClosed && !a.blank && scoringDomainContains_(b,a.low);
+  return (!a.blank || b.blank) && (a.low>b.low || a.low===b.low && (!a.lowClosed || b.lowClosed)) && (a.high<b.high || a.high===b.high && (!a.highClosed || b.highClosed));
+}
 function scoringValidateTemplateTable_(payload) {
   const templates=scoringNormalizeTemplates_(payload && payload.templates),issues=[];let complete=true;
   templates.forEach(function(t){
-    const active=[],usedOutputs=new Set();
+    const active=[],usedOutputs=new Set(),finite=t.scorePolicy.every(function(p){return p.mode==='list';});
     function issue(code,severity,r,output,message,extra){issues.push(Object.assign({code:code,severity:severity,template:t.name,rule:r?r.index+1:null,sheetRow:r?r.rule.sheetRow:null,output:output,message:t.name+': '+message},extra || {}));}
     t.rules.forEach(function(rule,index){
       if(!rule.enabled)return;
@@ -408,28 +569,30 @@ function scoringValidateTemplateTable_(payload) {
       rule.conditions.forEach(function(cell,i){try{r.conditions.push(scoringParseCondition_(cell));}catch(e){invalid=true;issue('syntax','error',r,null,'ルール'+(index+1)+' 枠'+(i+1)+' '+e.message);}});
       rule.outputs.forEach(function(v,i){if(v!=='')usedOutputs.add(i);});
       if(invalid)return;
-      r.sets=t.domains.map(function(domain,i){return (domain.length?domain:[null]).filter(function(v){return scoringConditionMatches_(r.conditions[i],v);});});
-      if(r.sets.some(function(s){return !s.length;})){issue('impossible','warning',r,null,'ルール'+(index+1)+'は設定した点数では成立しません。');return;}
+      r.sets=t.scorePolicy.map(function(policy,i){return scoringConditionDomain_(policy,r.conditions[i]);});
+      if(r.sets.some(function(s){return scoringDomainExample_(s)===undefined;})){issue('impossible','warning',r,null,'ルール'+(index+1)+'は設定した点数では成立しません。');return;}
       if(!rule.outputs.some(function(v){return v!=='';}))issue('no-output','warning',r,null,'ルール'+(index+1)+'には出力がありません。');
       active.push(r);
     });
-    // 組合せを全展開せず、各枠の集合の交差で重複の具体例を求める。
-    let overlapCount=0;
+    let overlapCount=0;const shadowed=new Set();
     for(let i=0;i<active.length;i++)for(let j=i+1;j<active.length;j++){
-      const a=active[i],b=active[j],intersection=a.sets.map(function(s,k){return s.filter(function(v){return b.sets[k].indexOf(v)>=0;});});
-      if(intersection.some(function(s){return !s.length;}))continue;
+      const a=active[i],b=active[j],examples=a.sets.map(function(s,k){return scoringDomainExample_(scoringDomainIntersection_(s,b.sets[k]));});
+      if(examples.some(function(v){return v===undefined;}))continue;
+      const covered=!finite && b.sets.every(function(s,k){return scoringDomainSubset_(s,a.sets[k]);});
       for(let o=0;o<3;o++)if(a.rule.outputs[o]!=='' && b.rule.outputs[o]!==''){
-        if(overlapCount++<200)issue('overlap','warning',b,o+1,'ルール'+(a.index+1)+'と'+(b.index+1)+'の出力'+(o+1)+'が重複します。上の行を優先します。',{otherRule:a.index+1,otherSheetRow:a.rule.sheetRow,example:intersection.map(function(s){return s[0];})});
+        if(overlapCount++<200)issue('overlap','warning',b,o+1,'ルール'+(a.index+1)+'と'+(b.index+1)+'の出力'+(o+1)+'が重複します。上の行を優先します。',{otherRule:a.index+1,otherSheetRow:a.rule.sheetRow,example:examples});
+        if(covered && !shadowed.has(b.index+':'+o)){shadowed.add(b.index+':'+o);issue('unreachable','warning',b,o+1,'ルール'+(b.index+1)+'の出力'+(o+1)+'は上のルール'+(a.index+1)+'に覆われ、一度も使われません。');}
       }
     }
     if(overlapCount>200)issue('issue-limit','warning',null,null,'重複の表示は最初の200件です（全'+overlapCount+'件）。');
-    const domains=t.domains.map(function(d){return d.length?d:[null];}),count=domains.reduce(function(n,d){return n*d.length;},1);
+    if(!finite){complete=false;issue('non-exhaustive','warning',null,null,'任意の数値を使う枠があるため、書式・条件区間の重複・単一の上位行による被覆のみを確認しました。条件漏れや複数行による被覆の網羅性は保証しません。');return;}
+    const domains=t.scorePolicy.map(function(p){return p.values;}),count=domains.reduce(function(n,d){return n*d.length;},1);
     if(count>50000 || count*Math.max(active.length,1)>5000000){complete=false;issue('analysis-limit','warning',null,null,'組合せが多いため、条件漏れと到達不能の全件検査を省略しました。点数の種類かルール数を減らしてください。');return;}
     const wins=new Set(),gaps={},scores=[];
     function visit(slot){
       if(slot<5){domains[slot].forEach(function(v){scores[slot]=v;visit(slot+1);});return;}
       const matched=[false,false,false];
-      active.forEach(function(r){if(!r.sets.every(function(s,i){return s.indexOf(scores[i])>=0;}))return;
+      active.forEach(function(r){if(!r.sets.every(function(s,i){return scoringDomainContains_(s,scores[i]);}))return;
         for(let o=0;o<3;o++)if(!matched[o] && r.rule.outputs[o]!==''){matched[o]=true;wins.add(r.index+':'+o);}
       });
       usedOutputs.forEach(function(o){if(!matched[o] && !gaps[o])gaps[o]=scores.slice();});
@@ -441,11 +604,17 @@ function scoringValidateTemplateTable_(payload) {
   return {ok:!issues.some(function(i){return i.severity==='error';}),complete:complete,issues:issues};
 }
 function scoringPreviewTemplate(payload) {
-  assertWebOperator_();const t=scoringNormalizeTemplates_([payload.template])[0],scores=payload.scores || [],outputs=['','',''],matched=[false,false,false];
+  assertWebOperator_();const t=scoringNormalizeTemplates_([payload.template])[0],scores=payload.scores===undefined?[]:payload.scores,outputs=['','',''],matched=[false,false,false];
+  if(!Array.isArray(scores) || scores.length>5)throw new Error('枠1〜5の点数は5要素以内の配列で指定してください。');
   const validation=scoringValidateTemplateTable_({templates:[t]});if(!validation.ok)throw new Error(validation.issues.filter(function(i){return i.severity==='error';})[0].message);
-  scores.forEach(function(v,i){if(v!=null && String(v).trim()!=='' && (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(String(v).trim()) || i>4 || !t.domains[i].includes(Number(v))))throw new Error('枠'+(i+1)+'は設定した点数から選んでください。');});
-  t.rules.forEach(function(r){if(!r.enabled || !r.conditions.every(function(c,i){return scoringConditionMatches_(scoringParseCondition_(c),scores[i]);}))return;
-    r.outputs.forEach(function(v,i){if(!matched[i] && v!==''){outputs[i]=scoringTemplateText_(v,scores);matched[i]=true;}});
+  scores.forEach(function(v,i){
+    if(v==null || typeof v==='string' && v.trim()==='')return;
+    if(!['number','string'].includes(typeof v) || !/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(String(v).trim()) || !Number.isFinite(Number(v)))throw new Error('枠'+(i+1)+'には有限の数値を入力してください。');
+    if(t.scorePolicy[i].mode==='list' && !t.scorePolicy[i].values.includes(Number(v)))throw new Error('枠'+(i+1)+'は設定した点数から選んでください。');
+  });
+  const numericScores=scores.map(function(v){return v==null || typeof v==='string' && v.trim()===''?null:Number(v);});
+  t.rules.forEach(function(r){if(!r.enabled || !r.conditions.every(function(c,i){return scoringConditionMatches_(scoringParseCondition_(c),numericScores[i]);}))return;
+    r.outputs.forEach(function(v,i){if(!matched[i] && v!==''){outputs[i]=scoringTemplateText_(v,numericScores);matched[i]=true;}});
   });
   return {outputs:outputs};
 }
@@ -459,9 +628,9 @@ function scoringTableRules_(params) {
   const rules=[];
   t.rules.forEach(function(r,index){if(!r.enabled)return;const conditions=r.conditions.map(scoringParseCondition_);
     r.outputs.forEach(function(message,o){if(message==='')return;rules.push({target:'出力'+(o+1),whenExpr:conditions.map(function(c,i){return c.op==='any'?'':'score'+(i+1)+(c.op==='='?'==':c.op)+c.value;}).filter(Boolean).join(' && '),
-      whenLabel:r.conditions.map(function(c,i){return c?'枠'+(i+1)+' '+c:'';}).filter(Boolean).join('・') || 'すべて',message:message,enabled:1,visible:r.visible?1:0,priority:index+1,_rowNumber:r.sheetRow,_tableConditions:conditions,_tableDomains:t.domains});});
+      whenLabel:r.conditions.map(function(c,i){return c?'枠'+(i+1)+' '+c:'';}).filter(Boolean).join('・') || '条件なし',message:message,enabled:1,visible:r.outputVisible[o]?1:0,outputVisible:r.outputVisible,priority:index+1,_rowNumber:r.sheetRow,_tableConditions:conditions,_scorePolicy:t.scorePolicy});});
   });
-  return {ok:true,templateId:name,tableFormat:true,rules:rules,headers:['target','whenExpr','whenLabel','message','enabled','visible','priority'],skipped:0};
+  return {ok:true,templateId:name,tableFormat:true,scorePolicy:t.scorePolicy,rules:rules,headers:['target','whenExpr','whenLabel','message','enabled','visible','priority'],skipped:0};
 }
 
 function scoringValidateConfigInput_(cfg) {

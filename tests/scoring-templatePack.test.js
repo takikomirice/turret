@@ -188,6 +188,10 @@ test('サンプルテンプレパックJSONは検証を通過する', () => {
   const sample = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'samples', 'template-pack-bio-basic.json'), 'utf8'));
   const normalized = gas.scoringNormalizeTemplates_(sample.templates);
   assert.equal(sample.meta.type, 'turret-grading-template-pack');
+  assert.equal(sample.meta.version, 2);
+  assert.equal(normalized[0].scorePolicy[0].mode, 'list');
+  assert.equal(normalized[0].scorePolicy[3].mode, 'any');
+  assert.deepEqual(plain(normalized[0].rules[0].outputVisible), [true, true, true]);
   assert.equal(normalized[0].name, '生物基礎・記述');
   assert.equal(normalized[0].rules.length, 2);
   assert.equal(gas.scoringValidateTemplateTable_({templates:normalized}).ok,true);
