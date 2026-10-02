@@ -717,30 +717,44 @@ function materialSettingsDraft(r){
  state.materialDrafts=state.materialDrafts||{};
  if(!state.materialDrafts[r.id]){
   const base={materialTitlePattern:r.input&&r.input.materialTitlePattern||r.input&&r.input.titlePattern||'{class_label} 授業の振り返り',description:r.input&&r.input.description||'',topicName:r.input&&r.input.topicName||''};
-  state.materialDrafts[r.id]={...base,base:copy(base),revision:r.revision};
+  state.materialDrafts[r.id]={...base,topicChange:false,base:copy(base),revision:r.revision};
  }
  return state.materialDrafts[r.id];
 }
 function materialSettingsDirty(r){
  const d=state.materialDrafts&&state.materialDrafts[r.id];
- return !!d&&(d.materialTitlePattern!==d.base.materialTitlePattern||d.description!==d.base.description||(d.topicName||'')!==(d.base.topicName||''));
+ return !!d&&(d.materialTitlePattern!==d.base.materialTitlePattern||d.description!==d.base.description||d.topicChange===true);
+}
+// トピック欄の初期値を変更指示と混同しない。空欄の解除にも明示チェックが必要。
+function materialSettingsChanges(d){
+ const changes={materialTitlePattern:d.materialTitlePattern,description:d.description};
+ if(d.topicChange===true){changes.topicName=d.topicName||'';changes.topicChange=true;}
+ return changes;
+}
+function materialTopicIntent(d,attributes,id){
+ return '<label><input type="checkbox" id="'+esc(id)+'-change" '+attributes.replace('topicName','topicChange')+(d.topicChange===true?' checked':'')+'>トピックを変更する（空欄は解除）</label>'+materialTopicSelect(d.topicName||'',attributes+(d.topicChange===true?'':' disabled'),id)+'<p class="help">チェックしない場合、Classroomで設定済みのトピックをそのまま保持します。</p>';
+}
+function materialTopicSummary(changes,preview){
+ if(changes.topicChange!==true)return '変更しない（既存のまま）';
+ const detail=(preview.targets||[]).flatMap(p=>(p.changes||[]).filter(text=>text.startsWith('トピック：')).map(text=>(p.label||p.id)+'：'+text));
+ return (changes.topicName||'（なし・登録済みのトピックを解除）')+(detail.length?'\n'+detail.join('\n'):'');
 }
 function materialSettingsReady(r){return r.materialSettingsSaved!==false&&!materialSettingsDirty(r);}
 function readMaterialSettingsDrafts(){
  if(typeof document==='undefined')return;
  document.querySelectorAll('[data-material-field]').forEach(el=>{
   const r=state.forms&&state.forms.records.find(r=>r.id===el.dataset.record);
-  if(r)materialSettingsDraft(r)[el.dataset.materialField]=el.value;
+  if(r)materialSettingsDraft(r)[el.dataset.materialField]=el.type==='checkbox'?el.checked:el.value;
  });
  document.querySelectorAll('[data-batch-material-field]').forEach(el=>{
-  if(['materialTitlePattern','description','topicName'].includes(el.dataset.batchMaterialField))batchMaterialSettingsDraft()[el.dataset.batchMaterialField]=el.value;
+  if(['materialTitlePattern','description','topicName','topicChange'].includes(el.dataset.batchMaterialField)){const d=batchMaterialSettingsDraft(),value=el.type==='checkbox'?el.checked:el.value;if(d[el.dataset.batchMaterialField]!==value)delete state.batchMaterialTopicProgress;d[el.dataset.batchMaterialField]=value;}
  });
 }
 function batchMaterialSettingsTargets(){return (state.forms&&state.forms.records||[]).filter(editableFormSettingsRecord).reverse();}
 function batchMaterialSettingsDraft(){
  if(!state.batchMaterialDraft){
   const targets=batchMaterialSettingsTargets(),first=targets[0],common=targets.find(r=>r.materialSettingsBaseline),d=common?common.materialSettingsBaseline:first?materialSettingsDraft(first):{materialTitlePattern:'{class_label} 授業の振り返り',description:''};
-  state.batchMaterialDraft={materialTitlePattern:d.materialTitlePattern,description:d.description,topicName:d.topicName||''};
+  state.batchMaterialDraft={materialTitlePattern:d.materialTitlePattern,description:d.description,topicName:d.topicName||'',topicChange:false};
  }
  if(!state.batchMaterialBaseline)state.batchMaterialBaseline=copy(state.batchMaterialDraft);
  return state.batchMaterialDraft;
@@ -780,11 +794,11 @@ function missingMaterialTopicsSummary(preview){
 }
 function batchMaterialSaveStatus(){
  const d=batchMaterialSettingsDraft(),targets=batchMaterialSettingsTargets();
- return targets.length&&targets.every(r=>r.materialSettingsSaved!==false&&['materialTitlePattern','description','topicName'].every(k=>(r.input&&r.input[k]||'')===(d[k]||'')))?'保存済み':'未保存';
+ return targets.length&&d.topicChange!==true&&targets.every(r=>r.materialSettingsSaved!==false&&['materialTitlePattern','description'].every(k=>(r.input&&r.input[k]||'')===(d[k]||'')))?'保存済み':'未保存';
 }
 function renderBatchMaterialSettings(){
  const d=batchMaterialSettingsDraft(),disabled=batchMaterialSettingsTargets().length?'':' disabled';
- return '<section>'+helpHeading('クラスルーム投稿の一括登録','原則として、ここで投稿タイトル・投稿文をまとめて登録します。{class_label} には「フォームを準備」で指定した各クラスの読み方（「クラスの表記」の入力値）が入ります。例：読み方が「1A」なら「{class_label} 授業の振り返り」は「1A 授業の振り返り」になります。「各クラスに反映」で保存し、投稿済み・予約済みの資料にも反映します。個別の文面も置き換わるため、例外は反映後に個別登録してください。')+'<div class="form-grid"><div><label for="batch-materialTitlePattern">投稿タイトル</label><input id="batch-materialTitlePattern" data-batch-material-field="materialTitlePattern" value="'+esc(d.materialTitlePattern)+'"></div><div><label for="batch-description">投稿文</label><textarea rows="3" id="batch-description" data-batch-material-field="description">'+esc(d.description)+'</textarea></div><div>'+materialTopicSelect(d.topicName||'','data-batch-material-field="topicName"','batch-topicName')+'</div></div><p class="help">'+(state.materialTopics?'候補：'+esc(state.materialTopics.courseName)+'（最初の選択クラス）':'先頭の選択クラスから候補を取得します。')+' 空欄はトピックなし（登録済みのトピックも解除）。別クラスでは同名のトピックを使います。</p>'+(state.materialTopicsError?'<p class="notice">'+esc(state.materialTopicsError)+' '+button('トピックを再取得','data-form-command="reload-topics"')+'</p>':'')+'<p class="help" data-batch-material-save-status>'+batchMaterialSaveStatus()+'：このボタンは投稿タイトル・投稿文・トピックだけを保存します。</p><div class="actions">'+button('各クラスに反映','data-form-command="apply-batch-material-settings"'+disabled)+'</div></section>';
+ return '<section>'+helpHeading('クラスルーム投稿の一括登録','原則として、ここで投稿タイトル・投稿文をまとめて登録します。{class_label} には「フォームを準備」で指定した各クラスの読み方（「クラスの表記」の入力値）が入ります。例：読み方が「1A」なら「{class_label} 授業の振り返り」は「1A 授業の振り返り」になります。「各クラスに反映」で保存し、投稿済み・予約済みの資料にも反映します。個別の文面も置き換わるため、例外は反映後に個別登録してください。')+'<div class="form-grid"><div><label for="batch-materialTitlePattern">投稿タイトル</label><input id="batch-materialTitlePattern" data-batch-material-field="materialTitlePattern" value="'+esc(d.materialTitlePattern)+'"></div><div><label for="batch-description">投稿文</label><textarea rows="3" id="batch-description" data-batch-material-field="description">'+esc(d.description)+'</textarea></div><div>'+materialTopicIntent(d,'data-batch-material-field="topicName"','batch-topicName')+'</div></div><p class="help">'+(state.materialTopics?'候補：'+esc(state.materialTopics.courseName)+'（最初の選択クラス）':'先頭の選択クラスから候補を取得します。')+' トピックの変更にチェックした場合だけ反映します。チェックして空欄を保存すると登録済みのトピックを解除します。別クラスでは同名のトピックを使います。</p>'+(state.materialTopicsError?'<p class="notice">'+esc(state.materialTopicsError)+' '+button('トピックを再取得','data-form-command="reload-topics"')+'</p>':'')+'<p class="help" data-batch-material-save-status>'+batchMaterialSaveStatus()+'：このボタンは投稿タイトル・投稿文・トピックだけを保存します。</p><div class="actions">'+button('各クラスに反映','data-form-command="apply-batch-material-settings"'+disabled)+'</div></section>';
 }
 function materialPostButton(label,action,r){return button(label,'data-form-command="'+action+'" data-record="'+esc(r.id)+'" data-material-required="'+esc(r.id)+'"'+(!materialSettingsReady(r)?' disabled':''));}
 function requireMaterialSettings(records){
@@ -794,6 +808,10 @@ function requireMaterialSettings(records){
 }
 function updateMaterialSettingsControls(){
  if(!state.forms)return;
+ document.querySelectorAll('[data-material-field="topicName"],[data-batch-material-field="topicName"]').forEach(el=>{
+  const r=state.forms.records.find(r=>r.id===el.dataset.record),d=el.dataset.batchMaterialField?batchMaterialSettingsDraft():r&&materialSettingsDraft(r);
+  if(d)el.disabled=state.busy||d.topicChange!==true;
+ });
  document.querySelectorAll('[data-material-required]').forEach(el=>{
   const targets=el.dataset.materialRequired==='batch'?batchPostTargets():state.forms.records.filter(r=>r.id===el.dataset.materialRequired);
   el.disabled=state.busy||!targets.length||targets.some(r=>!materialSettingsReady(r));
@@ -816,7 +834,7 @@ function registrationLabel(r){return ['published','scheduled'].includes(r.stage)
 function renderMaterialSettings(r){
  if(!editableFormSettingsRecord(r))return '';
  const d=materialSettingsDraft(r),field=(key,label,textarea)=>'<div><label for="material-'+esc(r.id)+'-'+key+'">'+label+'</label>'+(textarea?'<textarea rows="3"':'<input')+' id="material-'+esc(r.id)+'-'+key+'" data-material-field="'+key+'" data-record="'+esc(r.id)+'"'+(textarea?'>'+esc(d[key])+'</textarea>':' value="'+esc(d[key])+'">')+'</div>';
- return '<details'+publishDetailsAttributes('materialSettings-'+r.id)+'><summary>投稿タイトル・投稿文 <span class="individual-marker" data-individual-material="'+esc(r.id)+'"'+(!individualMaterialSettings(r)?' hidden':'')+'>個別設定あり</span>'+helpButton('投稿タイトル・投稿文','一括登録と異なる文面を、このクラスだけに設定できます。{class_label} には「フォームを準備」で指定したクラスの読み方が入ります。投稿済み・予約済みの資料にも反映します。投稿ID・公開状態・予約日時は保持します。「個別設定あり」は、一括欄の基準文面と異なる入力を示します。')+'</summary><div class="material-settings">'+field('materialTitlePattern','投稿タイトル')+field('description','投稿文',true)+materialTopicSelect(d.topicName||'','data-material-field="topicName" data-record="'+esc(r.id)+'"','material-'+r.id+'-topicName')+'<div class="actions">'+formRecordButton(registrationLabel(r),'save-material-settings',r)+'</div><p class="help" data-material-save-status="'+esc(r.id)+'">'+(materialSettingsReady(r)?'保存済み':'未保存：保存してから投稿してください。')+'</p></div></details>';
+ return '<details'+publishDetailsAttributes('materialSettings-'+r.id)+'><summary>投稿タイトル・投稿文 <span class="individual-marker" data-individual-material="'+esc(r.id)+'"'+(!individualMaterialSettings(r)?' hidden':'')+'>個別設定あり</span>'+helpButton('投稿タイトル・投稿文','一括登録と異なる文面を、このクラスだけに設定できます。{class_label} には「フォームを準備」で指定したクラスの読み方が入ります。投稿済み・予約済みの資料にも反映します。投稿ID・公開状態・予約日時は保持します。「個別設定あり」は、一括欄の基準文面と異なる入力を示します。')+'</summary><div class="material-settings">'+field('materialTitlePattern','投稿タイトル')+field('description','投稿文',true)+materialTopicIntent(d,'data-material-field="topicName" data-record="'+esc(r.id)+'"','material-'+r.id+'-topicName')+'<div class="actions">'+formRecordButton(registrationLabel(r),'save-material-settings',r)+'</div><p class="help" data-material-save-status="'+esc(r.id)+'">'+(materialSettingsReady(r)?'保存済み':'未保存：保存してから投稿してください。')+'</p></div></details>';
 }
 function scheduleInputToIso(value){
  if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value||''))throw Error('日本時間の日時を入力してください。');
@@ -1002,7 +1020,7 @@ function acceptFormConsoleData(data){
   // 未編集の欄だけ最新値へ同期し、再描画時に古い表示を下書きとして拾わない。
   if(typeof document!=='undefined')document.querySelectorAll('[data-material-field]').forEach(el=>{
    const r=data.records.find(r=>r.id===el.dataset.record);
-   if(r&&clean.includes(r.id))el.value=materialSettingsDraft(r)[el.dataset.materialField];
+   if(r&&clean.includes(r.id)){const value=materialSettingsDraft(r)[el.dataset.materialField];if(el.type==='checkbox')el.checked=value===true;else el.value=value;}
   });
  if(data.returnHistory)state.formPage=data.returnHistory.page;
 }
@@ -1052,32 +1070,36 @@ async function formCommand(action,id,registration){
  if(action==='apply-batch-material-settings'){
   readCurrent();if(!requireSaved())return;const allTargets=batchMaterialSettingsTargets();
   if(!allTargets.length){status('投稿設定を編集できる対象がありません。','error');return;}
-  const changes=copy(batchMaterialSettingsDraft());changes.materialTitlePattern=changes.materialTitlePattern.trim();changes.description=changes.description.trim();
+  const changes=materialSettingsChanges(batchMaterialSettingsDraft());changes.materialTitlePattern=changes.materialTitlePattern.trim();changes.description=changes.description.trim();
   if(!changes.materialTitlePattern){status('投稿タイトルを入力してください。','error');return;}
-  changes.topicName=changes.topicName||'';
-  const targets=allTargets.filter(r=>!materialSettingsReady(r)||(r.input.topicName||'')!==changes.topicName||r.input.materialTitlePattern!==changes.materialTitlePattern||(r.input.description||'')!==changes.description||r.materialSettingsBaseline?.materialTitlePattern!==changes.materialTitlePattern||r.materialSettingsBaseline?.description!==changes.description||(r.materialSettingsBaseline?.topicName||'')!==changes.topicName);
-  if(!targets.length){if(registration&&!await confirmAction('一括登録',registration.summary,'一括登録'))return false;state.batchMaterialBaseline=copy(changes);render();status('すべてのクラスに登録済みです。','success');return true;}
+  const topicKey=JSON.stringify(changes),topicProgress=state.batchMaterialTopicProgress;
+  const targets=allTargets.filter(r=>!materialSettingsReady(r)||changes.topicChange===true&&!(topicProgress&&topicProgress.key===topicKey&&topicProgress.completed[r.id]===r.revision)||r.input.materialTitlePattern!==changes.materialTitlePattern||(r.input.description||'')!==changes.description||r.materialSettingsBaseline?.materialTitlePattern!==changes.materialTitlePattern||r.materialSettingsBaseline?.description!==changes.description);
+  const pending=topicProgress&&topicProgress.key===topicKey&&(state.forms.records||[]).filter(r=>topicProgress.targets.includes(r.id)&&r.settingsUpdate);
+  if(pending&&pending.length){status('更新が途中のクラスで「設定の更新を再開」を完了してください：'+pending.map(r=>r.label||r.className||r.id).join('、'),'error');return false;}
+  if(!targets.length){
+   if(registration&&!await confirmAction('一括登録',registration.summary,'一括登録'))return false;state.batchMaterialBaseline=copy(changes);render();status('すべてのクラスに登録済みです。','success');return true;}
   const targetVersions=JSON.stringify(allTargets.map(r=>[r.id,r.revision]));let preview;
   await task(async()=>{
    const plans=[];
    for(let start=0;start<targets.length;start+=100){const part=await rpc('previewManagedFormSettings',{targets:targets.slice(start,start+100).map(r=>({id:r.id,revision:materialSettingsDraft(r).revision})),changes,saveMaterialSettings:true,registerCommonMaterial:true});plans.push(...part.targets);}
    preview={targets:plans};
   });if(!preview)return;
-  const summary=targets.map(r=>r.label||r.className||r.id).join('、')+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+(changes.topicName||'（なし）')+missingMaterialTopicsSummary(preview)+(registration?'\n\n'+registration.summary:'')+'\n\n各クラスの投稿タイトル・投稿文・トピックを保存します。個別の文面も置き換わり、投稿済み・予約済みの資料にも反映します。';
+  const summary=targets.map(r=>r.label||r.className||r.id).join('、')+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+(registration?'\n\n'+registration.summary:'')+'\n\n各クラスの投稿タイトル・投稿文・トピックを保存します。個別の文面も置き換わり、投稿済み・予約済みの資料にも反映します。';
   if(!await confirmAction(registration?'一括登録':'クラスルーム投稿の一括登録',summary,registration?'一括登録':'各クラスに反映'))return;
   if(JSON.stringify(batchMaterialSettingsTargets().map(r=>[r.id,r.revision]))!==targetVersions){status('対象の状態が更新されました。内容を再確認して、もう一度反映してください。','error');return;}
   let completed=false;
   await task(async()=>{
    state.batchMaterialBaseline=copy(changes);
+   if(changes.topicChange===true&&(!state.batchMaterialTopicProgress||state.batchMaterialTopicProgress.key!==topicKey))state.batchMaterialTopicProgress={key:topicKey,targets:allTargets.map(r=>r.id),completed:{}};
    // 失敗したクラスの入力は残し、成功したクラスは再実行から除外する。
    targets.forEach(r=>Object.assign(materialSettingsDraft(r),changes));
    let done=0;const errors=[];
    try{
     for(const p of preview.targets){
-     try{const result=await rpc('runManagedFormSettings',p.id,changes,p.fingerprint,true,true,!!p.missingTopic);const index=state.forms.records.findIndex(r=>r.id===p.id);if(index>=0)state.forms.records[index]=result;delete state.materialDrafts[p.id];done++;}
+     try{const result=await rpc('runManagedFormSettings',p.id,changes,p.fingerprint,true,true,!!p.missingTopic);const index=state.forms.records.findIndex(r=>r.id===p.id);if(index>=0)state.forms.records[index]=result;delete state.materialDrafts[p.id];if(changes.topicChange===true)state.batchMaterialTopicProgress.completed[p.id]=result.revision;done++;}
      catch(e){errors.push((targets.find(r=>r.id===p.id)?.label||p.id)+'：'+(e.message||e));}
     }
-   }finally{render();await reloadForms();}
+   }finally{if(!errors.length){batchMaterialSettingsDraft().topicChange=false;delete state.batchMaterialTopicProgress;}render();await reloadForms();}
    completed=!errors.length;
    status('反映完了 '+done+'件'+(errors.length?'\n'+errors.join('\n'):''),errors.length?'error':'success');
   });return completed;
@@ -1085,7 +1107,7 @@ async function formCommand(action,id,registration){
  if(action==='load-first-material-settings'){
   readCurrent();const targets=batchMaterialSettingsTargets();
   if(!targets.length){status('投稿設定を編集できる対象がありません。','error');return;}
-  const d=materialSettingsDraft(targets[0]);state.batchMaterialDraft={materialTitlePattern:d.materialTitlePattern,description:d.description,topicName:d.topicName||''};render();return;
+  delete state.batchMaterialTopicProgress;const d=materialSettingsDraft(targets[0]);state.batchMaterialDraft={materialTitlePattern:d.materialTitlePattern,description:d.description,topicName:d.topicName||'',topicChange:false};render();return;
  }
   if(action==='reload-material-settings'){
    readMaterialSettingsDrafts();const r=state.forms.records.find(r=>r.id===id);if(!r)return;
@@ -1095,9 +1117,9 @@ async function formCommand(action,id,registration){
   if(action==='save-material-settings'){
    readCurrent();if(!requireSaved())return;
    const r=state.forms.records.find(r=>r.id===id);if(!r||!editableFormSettingsRecord(r))return;
-   const d=materialSettingsDraft(r),changes={materialTitlePattern:d.materialTitlePattern,description:d.description,topicName:d.topicName||''};let preview;
+   const d=materialSettingsDraft(r),changes=materialSettingsChanges(d);let preview;
    await task(async()=>{preview=await rpc('previewManagedFormSettings',{targets:[{id,revision:d.revision}],changes,saveMaterialSettings:true});});if(!preview)return;
-   const summary=(r.label||r.className)+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+(changes.topicName||'（なし）')+missingMaterialTopicsSummary(preview)+'\n\n投稿タイトル・投稿文・トピックを保存します。投稿済み・予約済みの資料にも反映します。';
+   const summary=(r.label||r.className)+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+'\n\n投稿タイトル・投稿文・トピックを保存します。投稿済み・予約済みの資料にも反映します。';
    if(!await confirmAction('投稿設定を保存',summary,'設定を保存'))return;
    await task(async()=>{
     try{
@@ -1140,6 +1162,7 @@ async function formCommand(action,id,registration){
  }
  if(action==='resume-settings'){
   readCurrent();if(!requireSaved())return;const r=state.forms.records.find(r=>r.id===id);if(!r)return;
+  if(r.settingsUpdate?.plan?.topic&&r.settingsUpdate.plan.topicChange!==true&&!await confirmAction('旧バージョンの設定更新を再開','トピックは変更せず、現在のClassroomの設定を保持して他の変更を再開します。トピックを変更する場合は、再開完了後に「トピックを変更する」をチェックして保存してください。','再開する'))return;
   await task(async()=>{try{await rpc('resumeManagedFormSettings',r.id,r.revision);status('設定の更新が完了しました。','success');}finally{await reloadForms();}});return;
  }
  if(action==='select-columns'||action==='clear-column-selection'){

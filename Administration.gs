@@ -963,14 +963,22 @@ function resolveManagedSettingsTopic_(r) {
 /** 既存回答の識別に使うタブ名・列名は固定し、指定された設定だけを変更する。 */
 function managedSettingsPlan_(r, changes) {
   if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('変更する設定がありません。');
-  const keys=Object.keys(changes), allowed=['titlePattern','materialTitlePattern','description','topicName','domains','emails','labels'];
+  const keys=Object.keys(changes), allowed=['titlePattern','materialTitlePattern','description','topicName','topicChange','domains','emails','labels'];
   if (!keys.length || keys.some(function(k){return !allowed.includes(k);})) throw new Error('変更できない設定が含まれています。');
+  if(keys.includes('topicChange')&&typeof changes.topicChange!=='boolean')throw new Error('トピックの変更指定を確認してください。');
+  const topicChanged=changes.topicChange===true;
+  if(topicChanged&&!keys.includes('topicName'))throw new Error('トピックの入力を確認してください。');
   const input=JSON.parse(JSON.stringify(r.input)), result={input:input,label:r.label||r.className,title:r.title,materialTitle:r.materialTitle,changes:[]};
   function change(label,before,after){if(before!==after)result.changes.push(label+'：'+(before||'（空欄）')+' → '+(after||'（空欄）'));}
-  keys.filter(function(k){return k!=='labels';}).forEach(function(k){
+  keys.filter(function(k){return k!=='labels'&&k!=='topicChange';}).forEach(function(k){
     if(typeof changes[k]!=='string' || changes[k].length>(k==='description'?5000:k==='domains'||k==='emails'?5000:150))throw new Error('入力を確認してください：'+k);
     if(['titlePattern','materialTitlePattern'].includes(k) && !/\{class(?:_label)?\}/.test(changes[k]))throw new Error('タイトルに {class_label} を含めてください。');
-    if(!['domains','emails'].includes(k)){const value=k==='topicName'?managedTopicName_(changes[k]):changes[k].trim();change({titlePattern:'フォーム名',materialTitlePattern:'資料タイトル',description:'資料の本文',topicName:'トピック'}[k],k==='topicName'?(input[k]||''):input[k],value);input[k]=value;}
+    if(!['domains','emails'].includes(k)){
+      const value=k==='topicName'?managedTopicName_(changes[k]):changes[k].trim();
+      // 旧画面が送る空欄・古い値では、Classroom 側の手動設定を変更しない。
+      if(k==='topicName'&&!topicChanged)return;
+      change({titlePattern:'フォーム名',materialTitlePattern:'資料タイトル',description:'資料の本文',topicName:'トピック'}[k],k==='topicName'?(input[k]||''):input[k],value);input[k]=value;
+    }
   });
   if(Object.prototype.hasOwnProperty.call(changes,'labels')){
     if(!changes.labels || typeof changes.labels!=='object' || Array.isArray(changes.labels) || Object.values(changes.labels).some(function(v){return typeof v!=='string'||!v.trim()||v.length>100;}))throw new Error('クラスの表記を確認してください。');
@@ -991,7 +999,7 @@ function managedSettingsPlan_(r, changes) {
   result.formTitleChanged=result.title!==r.title;
   result.policyChanged=JSON.stringify(input.policy)!==JSON.stringify(r.input.policy);
   result.materialPatch={};
-  if(keys.includes('topicName'))result.topic={courseId:String(r.courseId),name:input.topicName,topicId:'',missing:false};
+  if(topicChanged){result.topicChange=true;result.topic={courseId:String(r.courseId),name:input.topicName,topicId:'',missing:false};}
   if(result.materialTitle!==r.materialTitle)result.materialPatch.title=result.materialTitle;
   if(input.description!==r.input.description)result.materialPatch.description=input.description;
   return result;
@@ -1028,6 +1036,8 @@ function managedSettingsSnapshot_(r, plan, context) {
     const post=Classroom.Courses.CourseWorkMaterials.get(r.courseId,r.materialId);
     if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
     snapshot.material={};Object.keys(plan.materialPatch).forEach(function(k){snapshot.material[k]=post[k]||'';});
+    // ローカルに名前がなくても、実際に解除する手動トピックを確認画面に示す。
+    if(plan.topic&&!plan.topic.name&&!r.input.topicName&&snapshot.material.topicId)plan.changes.push('トピック：Classroom トピックID '+snapshot.material.topicId+' → （空欄）');
   }
   return snapshot;
 }
@@ -1052,7 +1062,7 @@ function previewManagedFormSettings(raw) {
 }
 
 function assertManagedMaterialSettingsPatch_(changes) {
-  if(Object.keys(changes).some(function(k){return !['materialTitlePattern','description','topicName'].includes(k);}))throw new Error('投稿設定では投稿タイトル・投稿文・トピックだけを保存してください。');
+  if(Object.keys(changes).some(function(k){return !['materialTitlePattern','description','topicName','topicChange'].includes(k);}))throw new Error('投稿設定では投稿タイトル・投稿文・トピックだけを保存してください。');
 }
 
 function runManagedFormSettings(id, changes, fingerprint, saveMaterialSettings, registerCommonMaterial, createMissingTopics) {
@@ -1093,6 +1103,16 @@ function resumeManagedFormSettings(id, revision) {
 function resumeManagedFormSettingsUnlocked_(r) {
   if(!r.settingsUpdate)return r;
   const update=r.settingsUpdate,plan=update.plan,before=update.snapshot;
+  // 旧版の途中更新はトピックの変更意図を判別できないため、現在の設定を保ったまま再開する。
+  if(plan.topic&&plan.topicChange!==true){
+    delete plan.topic;delete plan.materialPatch.topicId;
+    if(Object.prototype.hasOwnProperty.call(r.input,'topicName'))plan.input.topicName=r.input.topicName;
+    else delete plan.input.topicName;
+    if(plan.materialSettingsBaseline)plan.materialSettingsBaseline.topicName=plan.input.topicName||'';
+    if(before.material){delete before.material.topicId;if(!Object.keys(plan.materialPatch).length)delete before.material;}
+    // 再開用の記録を先に更新し、失敗時に旧トピック操作へ戻らないようにする。
+    saveManagedRecord_(r);
+  }
   resolveManagedSettingsTopic_(r);
   function unchanged(current,old,desired){if(current!==old&&current!==desired)throw new Error('更新途中に手動変更されています。元の値または確認した値へ戻してから設定の更新を再開してください。');}
   const form=(plan.formTitleChanged||plan.policyChanged)?FormApp.openById(r.formId):null;
