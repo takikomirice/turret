@@ -711,7 +711,7 @@ button.help-icon:focus-visible,button.context-help:focus-visible{outline:2px sol
 
 <body>
   <div class="wrap">
-    <nav aria-label="画面の移動" class="scoring-navigation"><strong>turret 採点</strong> <a id="scoringSettingsLink" class="navigation-link" hidden target="_blank" rel="noopener">管理画面</a> <a id="scoringOperationLink" class="navigation-link" hidden target="_blank" rel="noopener">運用スプレッドシート</a> <button id="openRuleBuilder" type="button">採点テンプレ</button></nav>
+    <nav aria-label="画面の移動" class="scoring-navigation"><strong>turret 採点</strong> <a id="scoringSettingsLink" class="navigation-link" hidden target="_blank" rel="noopener">管理画面</a> <a id="scoringOperationLink" class="navigation-link" hidden target="_blank" rel="noopener">運用スプレッドシート</a> <button id="openRuleBuilder" type="button">採点テンプレ</button> <button id="refreshNamesBtn" type="button" class="btn--xs" disabled title="読み込み済みの回答シート全体の空欄の名前を補完">名前を反映</button><button type="button" class="context-help" aria-label="名前を反映の説明" data-help-title="名前を反映" data-help-body="読み込み済みの回答シート全体の空欄の名前を、メールアドレスと取り込み済みのClassroom生徒一覧から補います。既存の名前・数式・採点結果は保持します。turretで管理しているフォームの回答シートで利用できます。未照合が残る場合は、管理画面で生徒一覧を更新して再実行してください。">?</button><span id="nameRefreshStatus" class="student-meta" role="status"></span></nav>
     <!-- 上段：生徒文（コンパクト表示） -->
     <section class="frame top" aria-label="生徒の提出内容">
       <div class="student-bar">
@@ -1146,6 +1146,8 @@ button.help-icon:focus-visible,button.context-help:focus-visible{outline:2px sol
         els.sheetSelect = $('sheetSelect');
         els.startRowInput = $('startRowInput');
         els.applyStartBtn = $('applyStartBtn');
+        els.refreshNamesBtn = $('refreshNamesBtn');
+        els.nameRefreshStatus = $('nameRefreshStatus');
         els.startFromLastRowCheckbox = $('startFromLastRowCheckbox');
         els.openSettingsBtn = $('openSettingsBtn');
         els.statusText = $('statusText');
@@ -1390,6 +1392,7 @@ button.help-icon:focus-visible,button.context-help:focus-visible{outline:2px sol
       }
 
       function bindEvents() {
+        if(els.refreshNamesBtn)els.refreshNamesBtn.addEventListener('click',refreshScoringNames_);
         els.applyStartBtn.addEventListener('click', function () {
           if (!preserveCurrentEdit_()) return;
           persistStartRow_();
@@ -4012,12 +4015,12 @@ function initHelpPopovers_() {
         try {data=readDrafts_(targetKey);}catch(error){setStatus('下書きの読み込みに失敗しました','error');return;}
         var rows=Object.keys(data).map(Number).sort(function(a,b){return a-b;});
         if (!rows.length) {setStatus('保存済み','ok');return;}
-        state.saving=true;clearAutoFlushTimer();setStatus('シートへ保存中…','sending');
+        state.saving=true;updateNameRefreshButton_();clearAutoFlushTimer();setStatus('シートへ保存中…','sending');
         if(els.navFlush)els.navFlush.disabled=true;
         var offset=0,successes=0,failures=0;
         function next() {
           if(offset>=rows.length) {
-            state.saving=false;if(els.navFlush)els.navFlush.disabled=false;
+            state.saving=false;updateNameRefreshButton_();if(els.navFlush)els.navFlush.disabled=false;
             if(state.currentSheet===targetKey) {
               setStatus(failures ? '保存失敗 '+failures+'件（成功 '+successes+'件）。下書きを保持しています。' : 'シートへ保存しました（'+successes+'件）', failures?'error':'ok');
               // このリクエストの処理中に行われた編集も残す。
@@ -4043,9 +4046,29 @@ function initHelpPopovers_() {
       function preserveCurrentEdit_() {
         return !(state.dirty || state.pendingRuleCalculation) || saveCurrentRow();
       }
+      function updateNameRefreshButton_() {
+        var target=state.targets && state.targets[state.currentSheet];
+        if(els.refreshNamesBtn)els.refreshNamesBtn.disabled=!target || !target.namesAvailable || !!state.loading || !!state.saving || !!state.namesRefreshing;
+        if(els.nameRefreshStatus)els.nameRefreshStatus.textContent=state.nameRefreshTarget===state.currentSheet ? (state.nameRefreshMessage || '') : '';
+      }
+      function refreshScoringNames_() {
+        var target=state.targets && state.targets[state.currentSheet];
+        if(!target || !target.namesAvailable || state.loading || state.saving || state.namesRefreshing || !preserveCurrentEdit_())return;
+        var key=state.currentSheet;state.namesRefreshing=true;state.nameRefreshTarget=key;state.nameRefreshMessage='名前を反映中…';updateNameRefreshButton_();
+        google.script.run.withSuccessHandler(function(result) {
+          state.namesRefreshing=false;
+          state.nameRefreshMessage='補完 '+result.updated+'件・未照合 '+result.unmatched+'件';
+          if(state.currentSheet===key) {
+            var row=state.rows[state.currentIndex];loadInitData(row && row.rowNumber);
+          }
+          updateNameRefreshButton_();
+        }).withFailureHandler(function(error) {
+          state.namesRefreshing=false;state.nameRefreshMessage='名前の反映に失敗: '+(error && error.message ? error.message : error);updateNameRefreshButton_();
+        }).scoringRefreshNames(key);
+      }
       function loadInitData(preferredRowNumber) {
         if(!state.currentSheet || !state.config || !preserveCurrentEdit_())return;
-        var requestId=(state.loadRequestId||0)+1;state.loadRequestId=requestId;state.loading=true;
+        var requestId=(state.loadRequestId||0)+1;state.loadRequestId=requestId;state.loading=true;updateNameRefreshButton_();
         els.scoreInputs.forEach(function(el){el.disabled=true;});(els.ruleOutInputs || []).forEach(function(el){if(el)el.disabled=true;});
         // 可能なら同じ行番号を維持して再描画（表示列変更などで再読み込みしても位置が飛びにくい）
         var keepRowNumber = null;
@@ -4064,7 +4087,7 @@ function initHelpPopovers_() {
         google.script.run
           .withSuccessHandler(function (res) {
             if(requestId!==state.loadRequestId || state.currentSheet!==params.sheetName)return;
-            state.loading=false;state.dirty=false;(els.ruleOutInputs || []).forEach(function(el){if(el)el.disabled=false;});
+            state.loading=false;state.dirty=false;updateNameRefreshButton_();(els.ruleOutInputs || []).forEach(function(el){if(el)el.disabled=false;});
             els.scoreInputs.forEach(function(el,i){updateColumnDisabledState(i,!!state.colChecks[i]);});
             state.rows = res.rows || [];
             state.config = res.config || state.config;
@@ -4073,6 +4096,8 @@ function initHelpPopovers_() {
             state.allHeaders = res.allHeaders || [];
             state.headerRow = res && res.headerRow ? Number(res.headerRow) : (state.config && state.config.headerRow ? Number(state.config.headerRow) : 1);
             state.currentSheet = res.sheetName || params.sheetName;
+            if(res.target && state.targets)state.targets[state.currentSheet]=res.target;
+            updateNameRefreshButton_();
             if (els.settingsModal && els.settingsModal.style.display !== 'none') {
               refreshHeaderSelectOptions_(state.config);
             } else {

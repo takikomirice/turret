@@ -48,9 +48,9 @@ test('legacy roster initialization inserts optional number without rewriting exi
  const format=['n','email','name-style','class-style','course-style','id-style'];
  const insert=s.insertColumnBefore;s.insertColumnBefore=c=>{format.splice(c-1,0,'');return insert(c);};
  h.sheets.set('生徒一覧',s);h.context.ensureStudentSheetForSync_();
- assert.deepEqual(s.rows,[numberedHeaders,[1,'old@example.com','','=A2','Old A','a','old']]);
+ assert.deepEqual(s.rows,[numberedHeaders.concat('除外(1)'),[1,'old@example.com','','=A2','Old A','a','old']]);
  assert.equal(format[3],'name-style');
- h.context.ensureStudentSheetForSync_();assert.equal(s.rows[0].length,7);
+ h.context.ensureStudentSheetForSync_();assert.equal(s.rows[0].length,8);
 });
 test('legacy migration rolls back column insertion when header write fails',()=>{
  const h=harness(),s=sheet(students),get=s.getRange;
@@ -63,7 +63,7 @@ test('numbered roster keeps attendance numbers per course and email across sync'
  h.sheets.set('生徒一覧',sheet([numberedHeaders,[1,'SAME@example.com','001','Old','A','a','s'],[2,'same@example.com','07','Old','B','b','s']]));
  h.context.Classroom.Courses.Students.list=()=>({students:[{profile:{id:'s',emailAddress:'same@example.com',name:{fullName:'New'}}}]});
  h.context.studentdataMultiUnlocked_();
- assert.deepEqual(h.sheets.get('生徒一覧').rows,[numberedHeaders,[1,'same@example.com','001','New','A','a','s'],[2,'same@example.com','07','New','B','b','s']]);
+ assert.deepEqual(h.sheets.get('生徒一覧').rows,[numberedHeaders.concat('除外(1)'),[1,'same@example.com','001','New','A','a','s',''],[2,'same@example.com','07','New','B','b','s','']]);
 });
 test('conflicting stored attendance numbers stop before fetching or changing roster',()=>{
  const h=harness(),rows=[numberedHeaders,[1,'student@example.com','01','S','A','a','s'],[2,'STUDENT@example.com','02','S','A','a','s']];

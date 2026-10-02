@@ -64,17 +64,19 @@ function gradeParseIcs(text) { assertWebOperator_(); return gradeParseIcs_(text)
 /** 集計は純粋関数にして、全員出力と未解決データの非欠落を検証する。 */
 function gradeBuild_(data, profile) {
   const base=profile.base,rules=profile.rules,issues=(data.issues || []).slice(),output=[];
+  const excluded=new Set((data.excludedStudents||[]).map(function(s){return makeStudentLookupKey_(s.courseId,s.email);}));
   const selected=data.classes.filter(function(c){return !base.classIds.length || base.classIds.includes(c.id);});
   base.classIds.forEach(function(id){if(!data.classes.some(function(c){return c.id===id;}))issues.push({type:'class',message:'対象クラスが見つかりません: '+id});});
   selected.forEach(function(course){
-    const calendar=profile.calendar.filter(function(e){return base.mapping[course.id] && e.title===base.mapping[course.id];});
-    if(base.mapping[course.id] && !calendar.length)issues.push({type:'calendar',courseId:course.id,message:'対応するICS授業がありません。対応を選び直すか「ICSを使わない」を選んでください。'});
+    const calendar=course.students.length ? profile.calendar.filter(function(e){return base.mapping[course.id] && e.title===base.mapping[course.id];}) : [];
+    if(course.students.length && base.mapping[course.id] && !calendar.length)issues.push({type:'calendar',courseId:course.id,message:'対応するICS授業がありません。対応を選び直すか「ICSを使わない」を選んでください。'});
     const days=new Map(),groups=new Map(),byEmail=new Map(),dateIssues=new Map();
     course.students.forEach(function(s){if(byEmail.has(s.email))issues.push({type:'roster',courseId:course.id,message:'名簿に同じメールの生徒が重複しています: '+s.email});byEmail.set(s.email,s);});
     calendar.forEach(function(e){if(!gradeInPeriod_(e.date,base))return;const day=days.get(e.date)||{date:e.date,extra:false,slots:0};day.slots++;days.set(e.date,day);});
     (rules.lessons||[]).filter(function(x){return x.courseId===course.id && gradeInPeriod_(x.date,base);}).forEach(function(x){const day=days.get(x.date)||{date:x.date,extra:false,slots:1};day.slots=x.count;days.set(x.date,day);});
     const responses=data.responses.filter(function(r){return r.courseId===course.id;});
     responses.forEach(function(original){
+      if(excluded.has(makeStudentLookupKey_(course.id,original.email)))return;
       const r=Object.assign({},original),own=rules.answers.find(function(x){return x.id===r.id && x.fingerprint===r.fingerprint;});
       const stale=rules.answers.find(function(x){return x.id===r.id && x.fingerprint!==r.fingerprint;});
       if(stale && r.date && stale.to && !gradeInPeriod_(r.date,base) && !gradeInPeriod_(stale.to,base))return;
@@ -127,7 +129,7 @@ function gradeBuild_(data, profile) {
       });
       rows.push(leading.concat(columns.map(function(col){return cells.get(gradeKey_([s.email,col.bucket,col.slot])) || '';})));
     });
-    output.push({id:course.id,name:course.name,rows:rows});
+    if(students.length)output.push({id:course.id,name:course.name,rows:rows});
   });
   if(!output.length)issues.push({type:'class',message:'生徒一覧に対象クラスがありません。生徒一覧を取得してください。'});
   return {classes:output,issues:issues};
@@ -203,10 +205,10 @@ function gradeWriteStore_(value, expected) {
   return gradeReadStore_();
 }
 function gradeReadData_(base, strict) {
-  const read=scoringReadContext_(),classes=new Map(),issues=[],headers=new Set(),responses=[],roster=read.operation.getSheetByName(STUDENT_SHEET_NAME);
+  const read=scoringReadContext_(),classes=new Map(),issues=[],headers=new Set(),responses=[],excludedStudents=[],roster=read.operation.getSheetByName(STUDENT_SHEET_NAME);
   if(roster && roster.getLastRow()>1){const values=roster.getDataRange().getDisplayValues(),h=createHeaderMap_(values[0]);
     ['メールアドレス','名前','コースID'].forEach(function(k){if(h[k]==null)throw new Error('生徒一覧に必要な列がありません: '+k);});
-    values.slice(1).forEach(function(row){const id=gradeText_(row[h['コースID']]).trim(),email=gradeText_(row[h['メールアドレス']]).trim().toLowerCase();if(!id||!email)throw new Error('生徒一覧のクラスまたはメールが空欄です。');const c=classes.get(id)||{id:id,name:row[h['クラス名']]||id,students:[]};c.students.push({email:email,name:row[h['名前']]||'',number:row[h['出席番号（任意）']]||'',no:row[h.No]||''});classes.set(id,c);});
+    readStudentRosterRecords_(roster).forEach(function(s){const c=classes.get(s.courseId)||{id:s.courseId,name:s.className||s.courseId,students:[]};if(s.excluded)excludedStudents.push({courseId:s.courseId,email:s.email});else c.students.push({email:s.email,name:s.name,number:s.number,no:s.no});classes.set(s.courseId,c);});
   }
   const mappings=readMappingEntries_(true);
   getScoringTargets_(null,read).forEach(function(target){
@@ -217,6 +219,9 @@ function gradeReadData_(base, strict) {
     if(!strict)return;
     if(!courseId){issues.push({type:'mapping',message:target.label+' のクラス対応を設定の「対応表」で指定してください。'});return;}
     if(!classes.has(courseId)){issues.push({type:'roster',message:target.label+' のクラスが生徒一覧にありません。'});return;}
+    // 全員除外の回答タブはメールだけで判定し、不要な過去の評価列・日付列で出力を止めない。
+    if(!classes.get(courseId).students.length && names.filter(function(n){return n===read.app.emailHeader;}).length===1 &&
+      values.slice(1).filter(function(row){return row.some(function(v){return v!=='' && v!=null;});}).every(function(row){return excludedStudents.some(function(s){return s.courseId===courseId && s.email===gradeText_(row[h[read.app.emailHeader]]).trim().toLowerCase();});}))return;
     const required=[read.app.emailHeader,base.dateHeader,base.valueHeader].concat(base.leading.filter(function(k){return k.startsWith('field:');}).map(function(k){return k.slice(6);}));
     if(required.some(function(k){return !k || names.filter(function(n){return n===k;}).length!==1;})){issues.push({type:'columns',courseId:courseId,message:target.label+' に選択した列がないか、列名が重複しています。'});return;}
     const timezone=scoringBook_(read,target.spreadsheetId).getSpreadsheetTimeZone();
@@ -226,7 +231,7 @@ function gradeReadData_(base, strict) {
       responses.push({id:id,courseId:courseId,email:email,date:date,rawDate:display[index+1][h[base.dateHeader]],submitted:display[index+1][h['タイムスタンプ']]||display[index+1][h.Timestamp]||'',source:target.sheetName+' '+(index+2)+'行',fields:fields,fingerprint:gradeDigest_([id,row.filter(function(_,i){return names[i]!==SCORING_MANAGEMENT_HEADER && names[i]!==read.app.formStatusHeader;})])});
     });
   });
-  return {classes:Array.from(classes.values()),headers:Array.from(headers).sort(),responses:responses,issues:issues};
+  return {classes:Array.from(classes.values()),headers:Array.from(headers).sort(),responses:responses,issues:issues,excludedStudents:excludedStudents};
 }
 function gradeGetConsole() {
   assertWebOperator_();return withAppLock_(function(){const store=gradeReadStore_();return {store:store,data:gradeReadData_(store.value.draft.base,false)};});
@@ -516,8 +521,8 @@ function getFormSetupProgress_(sourceReady, records) {
   };
   if (!managed.length) return result(sourceReady?'complete':'pending',sourceReady?'既存の回答先を登録済み':'ひな形から作成、または既存のフォームを登録します',
     sourceReady?'complete':'pending',sourceReady?'既存フォームの共有はClassroom側で確認してください':'フォームの準備後に投稿します');
-  const updating = managed.filter(function(r) {return r.formUpdate;}).length;
-  if (updating) return result('attention',updating+'件のフォームが更新途中です','attention','「更新を再開」でフォームと回答列の整理を完了してください');
+  const updating = managed.filter(function(r) {return r.formUpdate||r.settingsUpdate;}).length;
+  if (updating) return result('attention',updating+'件のフォームが更新途中です','attention','一覧の更新再開ボタンでフォーム・設定の更新を完了してください');
   const unfinished = managed.filter(function(r) { return ['registered','published','scheduled','draft','schedule_review','deleted','publish_review','delete_review'].indexOf(r.stage) < 0; }).length;
   const published = managed.filter(function(r) { return r.stage === 'published'; }).length;
   const scheduled = managed.filter(function(r) { return r.stage === 'scheduled'; }).length;
@@ -539,6 +544,11 @@ function normalizeFormSetup_(raw) {
   const input = { templateId: managedId_(raw.templateId), folderId: managedId_(raw.folderId) };
   if (raw.verifiedEmailConfirmed !== true) throw new Error('ひな形の設定画面でメールアドレスの収集が「確認済み」であることを確認し、確認欄にチェックしてください。');
   input.verifiedEmailConfirmed = true;
+  // 新しい画面では投稿設定を準備から分離する。旧画面の入力形式も引き続き受け付ける。
+  if (raw.deferMaterialSettings === true) {
+    input.deferMaterialSettings = true;
+    raw = Object.assign({}, raw, {materialTitlePattern:raw.titlePattern,description:''});
+  }
   const legacy = !Object.prototype.hasOwnProperty.call(raw, 'additionalColumns') && raw.gradeHeader !== undefined;
   ['titlePattern','materialTitlePattern','description','prefix','emailHeader','nameHeader','statusHeader'].concat(legacy ? ['gradeHeader','commentHeader'] : []).forEach(function(key) {
     input[key] = String(raw[key] || '').trim();
@@ -555,7 +565,8 @@ function normalizeFormSetup_(raw) {
   if (input.policy.domains.some(function(d) { return !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d) || ['gmail.com','googlemail.com'].includes(d); }) ||
       input.policy.emails.some(function(e) { return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); })) throw new Error('回答者の指定が不正です。個人アカウントはメールで指定してください。');
   input.labels = {};
-  Object.keys(raw.labels || {}).forEach(function(k) { input.labels[k] = String(raw.labels[k] || '').trim(); });
+  // 確認と開始のRPCでキー順が変わっても、同じクラス表記は同じ変更判定値にする。
+  Object.keys(raw.labels || {}).sort().forEach(function(k) { input.labels[k] = String(raw.labels[k] || '').trim(); });
   return input;
 }
 
@@ -683,7 +694,8 @@ function managedRoster_(courseId, context) {
   if(context)context.rosterValues=values;
   const map = createHeaderMap_(values[0] || []);
   if (['メールアドレス','名前','コースID'].some(function(k) { return !(k in map); })) throw new Error('生徒一覧を取得してください。');
-  return values.slice(1).filter(function(row) { return String(row[map['コースID']]) === courseId; }).map(function(row) {
+  // 除外者は権限確認・氏名補完の対象にしない。氏名競合は既存の補完処理で空欄のまま残す。
+  return values.slice(1).filter(function(row) { return String(row[map['コースID']]) === courseId && String(row[map['除外(1)']]||'').trim()!=='1'; }).map(function(row) {
     return { email: String(row[map['メールアドレス']] || '').trim().toLowerCase(), name: String(row[map['名前']] || '').trim() };
   }).filter(function(student) { return !!student.email; });
 }
@@ -734,7 +746,7 @@ function beginFormSetup(raw, expectedRevision, fingerprint) {
     return batch.targets.map(function(t) {
       const id=batch.id+':'+t.courseId,existing=records.find(function(r){return r.id===id;});
       if(existing){assertManagedOwner_(existing);return existing;}
-      return saveManagedRecord_(Object.assign({},t,{id:id,kind:'form',jobId:batch.id,input:batch.input,stage:'pending',requestFingerprint:fingerprint}));
+      return saveManagedRecord_(Object.assign({},t,{id:id,kind:'form',jobId:batch.id,input:batch.input,stage:'pending',requestFingerprint:fingerprint},batch.input.deferMaterialSettings?{materialSettingsSaved:false}:{}));
     });
   });
 }
@@ -772,7 +784,8 @@ function managedAnswerSheet_(record, context) {
 function managedDestinationId_(form) {
   try {return form.getDestinationId();}
   catch (error) {
-    if (/The form currently has no response destination\.?$/.test(String(error.message || error))) return '';
+    // 複製直後の未接続は正常。GASの英語・日本語環境どちらでも回答先の接続へ進む。
+    if (/^(?:Exception: )?(?:The form currently has no response destination\.?|フォームに応答先がありません。?)$/.test(String(error.message || error))) return '';
     throw error;
   }
 }
@@ -869,6 +882,258 @@ function registerManagedSource_(r) {
 }
 
 function managedLiteral_(value) { return /^[=+\-@]/.test(String(value)) ? "'"+value : value; }
+
+/** 既存回答の識別に使うタブ名・列名は固定し、指定された設定だけを変更する。 */
+function managedSettingsPlan_(r, changes) {
+  if (!changes || typeof changes !== 'object' || Array.isArray(changes)) throw new Error('変更する設定がありません。');
+  const keys=Object.keys(changes), allowed=['titlePattern','materialTitlePattern','description','domains','emails','labels'];
+  if (!keys.length || keys.some(function(k){return !allowed.includes(k);})) throw new Error('変更できない設定が含まれています。');
+  const input=JSON.parse(JSON.stringify(r.input)), result={input:input,label:r.label||r.className,title:r.title,materialTitle:r.materialTitle,changes:[]};
+  function change(label,before,after){if(before!==after)result.changes.push(label+'：'+(before||'（空欄）')+' → '+(after||'（空欄）'));}
+  keys.filter(function(k){return k!=='labels';}).forEach(function(k){
+    if(typeof changes[k]!=='string' || changes[k].length>(k==='description'?5000:k==='domains'||k==='emails'?5000:150))throw new Error('入力を確認してください：'+k);
+    if(['titlePattern','materialTitlePattern'].includes(k) && !/\{class(?:_label)?\}/.test(changes[k]))throw new Error('タイトルに {class_label} を含めてください。');
+    if(!['domains','emails'].includes(k)){change({titlePattern:'フォーム名',materialTitlePattern:'資料タイトル',description:'資料の本文'}[k],input[k],changes[k].trim());input[k]=changes[k].trim();}
+  });
+  if(Object.prototype.hasOwnProperty.call(changes,'labels')){
+    if(!changes.labels || typeof changes.labels!=='object' || Array.isArray(changes.labels) || Object.values(changes.labels).some(function(v){return typeof v!=='string'||!v.trim()||v.length>100;}))throw new Error('クラスの表記を確認してください。');
+    if(Object.prototype.hasOwnProperty.call(changes.labels,r.courseId)){
+      result.label=changes.labels[r.courseId].trim();change('クラスの表記',r.label||r.className,result.label);input.labels=Object.assign({},input.labels);input.labels[r.courseId]=result.label;
+    }
+  }
+  function title(pattern){return String(pattern||'').replace(/\{class(?:_label)?\}/g,function(){return result.label;});}
+  if(keys.includes('titlePattern') || result.label!==(r.label||r.className))result.title=title(input.titlePattern);
+  if(keys.includes('materialTitlePattern') || result.label!==(r.label||r.className))result.materialTitle=title(input.materialTitlePattern);
+  if(!result.title || result.title.length>300 || !result.materialTitle || result.materialTitle.length>300)throw new Error('展開後のタイトルを確認してください。');
+  if(keys.includes('domains')||keys.includes('emails')){
+    function list(k){return Object.prototype.hasOwnProperty.call(changes,k)?Array.from(new Set(changes[k].split(/[\s,、]+/).map(function(v){return v.toLowerCase();}).filter(Boolean))):input.policy[k].slice();}
+    const policy={domains:list('domains'),emails:list('emails')};
+    if(!policy.domains.length&&!policy.emails.length || policy.domains.some(function(d){return !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)||['gmail.com','googlemail.com'].includes(d);}) || policy.emails.some(function(e){return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);}))throw new Error('回答者の指定が不正です。学校ドメインまたは個別メールを指定してください。');
+    ['domains','emails'].forEach(function(k){change(k==='domains'?'回答許可ドメイン':'回答許可メール',input.policy[k].join('、'),policy[k].join('、'));});input.policy=policy;
+  }
+  result.formTitleChanged=result.title!==r.title;
+  result.policyChanged=JSON.stringify(input.policy)!==JSON.stringify(r.input.policy);
+  result.materialPatch={};
+  if(result.materialTitle!==r.materialTitle)result.materialPatch.title=result.materialTitle;
+  if(input.description!==r.input.description)result.materialPatch.description=input.description;
+  return result;
+}
+
+function assertManagedSettingsEditable_(r) {
+  assertManagedOwner_(r);
+  if(r.kind!=='form'||!['registered','published','scheduled','draft','deleted'].includes(r.stage))throw new Error('フォームの準備と投稿結果の照合を完了してください。');
+  if(r.formUpdate||r.columnSetup||r.settingsUpdate)throw new Error('更新が途中です。フォーム・列・設定の更新を再開して完了してください。');
+}
+
+function managedSettingsAccess_(r, policy, context) {
+  const students=managedRoster_(r.courseId,context).map(function(s){return s.email;});
+  if(!students.length||students.some(function(email){return !policy.emails.includes(email)&&!policy.domains.includes(email.split('@')[1]);}))throw new Error('対象クラスの生徒全員を回答許可の範囲に含めてください。');
+  return students.sort();
+}
+
+function managedSettingsSnapshot_(r, plan, context) {
+  const snapshot={};
+  if(plan.formTitleChanged){snapshot.formTitle=FormApp.openById(r.formId).getTitle();snapshot.fileName=DriveApp.getFileById(r.formId).getName();}
+  if(plan.policyChanged){
+    const form=FormApp.openById(r.formId);
+    if(!form.collectsEmail())throw new Error('フォームのメール収集を有効にしてください。');
+    snapshot.students=managedSettingsAccess_(r,plan.input.policy,context);snapshot.accepting=form.isAcceptingResponses();
+    snapshot.permissions=publishedPermissions_(r.formId).map(managedCanonicalSnapshot_).sort(function(a,b){return JSON.stringify(a).localeCompare(JSON.stringify(b));});
+    if(snapshot.permissions.some(function(p){return p.role!=='reader';}))throw new Error('回答者権限を安全に変更できません。フォーム画面で権限を確認してください。');
+  }
+  if(r.materialId&&r.stage!=='deleted'&&Object.keys(plan.materialPatch).length){
+    const post=Classroom.Courses.CourseWorkMaterials.get(r.courseId,r.materialId);
+    if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
+    snapshot.material={};Object.keys(plan.materialPatch).forEach(function(k){snapshot.material[k]=post[k]||'';});
+  }
+  return snapshot;
+}
+
+function previewManagedFormSettings(raw) {
+  return withAppLock_(function(){
+    if(!raw||!Array.isArray(raw.targets)||!raw.targets.length||raw.targets.length>100||new Set(raw.targets.map(function(t){return t&&t.id;})).size!==raw.targets.length)throw new Error('対象フォームを1〜100件選択してください。');
+    const records=getManagedRecords_(),context={};
+    return {targets:raw.targets.map(function(t){
+      const r=records.find(function(r){return r.id===t.id;});if(!r)throw new Error('管理対象の記録がありません。');assertManagedSettingsEditable_(r);
+      if(typeof t.revision!=='string'||r.revision!==t.revision)throw new Error('記録が更新されました。編集を開き直してください。');
+      const plan=managedSettingsPlan_(r,raw.changes),snapshot=managedSettingsSnapshot_(r,plan,context);
+      const savingMaterial=raw.saveMaterialSettings===true;
+      const registerCommon=raw.registerCommonMaterial===true;
+      if(registerCommon&&!savingMaterial)throw new Error('共通文面は投稿設定の保存と同時に登録してください。');
+      if(savingMaterial)assertManagedMaterialSettingsPatch_(raw.changes);
+      return {id:r.id,label:r.label||r.className,changes:plan.changes,changed:savingMaterial||plan.changes.length>0,fingerprint:adminDigest_(managedCanonicalSnapshot_([r,raw.changes,snapshot].concat(savingMaterial?[true]:[]).concat(registerCommon?[true]:[])))};
+    })};
+  });
+}
+
+function assertManagedMaterialSettingsPatch_(changes) {
+  if(Object.keys(changes).some(function(k){return !['materialTitlePattern','description'].includes(k);}))throw new Error('投稿設定では投稿タイトル・投稿文だけを保存してください。');
+}
+
+function runManagedFormSettings(id, changes, fingerprint, saveMaterialSettings, registerCommonMaterial) {
+  return withAppLock_(function(){
+    const r=loadManagedRecord_(id);assertManagedSettingsEditable_(r);
+    const plan=managedSettingsPlan_(r,changes),snapshot=managedSettingsSnapshot_(r,plan,{});
+    const savingMaterial=saveMaterialSettings===true;
+    const registerCommon=registerCommonMaterial===true;
+    if(registerCommon&&!savingMaterial)throw new Error('共通文面は投稿設定の保存と同時に登録してください。');
+    if(savingMaterial)assertManagedMaterialSettingsPatch_(changes);
+    if(adminDigest_(managedCanonicalSnapshot_([r,changes,snapshot].concat(savingMaterial?[true]:[]).concat(registerCommon?[true]:[])))!==fingerprint)throw new Error('確認後に設定・フォーム・資料が更新されました。再確認してください。');
+    if(!plan.changes.length&&!savingMaterial)return r;
+    if(savingMaterial)plan.materialSettingsSaved=true;
+    // 共通文面も更新計画に保持し、途中からの再開と画面の再表示で基準を失わない。
+    if(registerCommon)plan.materialSettingsBaseline={materialTitlePattern:plan.input.materialTitlePattern,description:plan.input.description||''};
+    if(snapshot.material)ScriptApp.requireScopes(ScriptApp.AuthMode.FULL,['https://www.googleapis.com/auth/classroom.courseworkmaterials']);
+    r.settingsUpdate={plan:plan,snapshot:snapshot,accepting:snapshot.accepting};saveManagedRecord_(r);
+    return resumeManagedFormSettingsUnlocked_(r);
+  });
+}
+
+function resumeManagedFormSettings(id, revision) {
+  return withAppLock_(function(){return resumeManagedFormSettingsUnlocked_(loadManagedRecord_(id,revision));});
+}
+
+/** 書き込み結果が不明でも同じ値の再適用だけで復旧し、手動変更は上書きしない。 */
+function resumeManagedFormSettingsUnlocked_(r) {
+  if(!r.settingsUpdate)return r;
+  const update=r.settingsUpdate,plan=update.plan,before=update.snapshot;
+  function unchanged(current,old,desired){if(current!==old&&current!==desired)throw new Error('更新途中に手動変更されています。元の値または確認した値へ戻してから設定の更新を再開してください。');}
+  const form=(plan.formTitleChanged||plan.policyChanged)?FormApp.openById(r.formId):null;
+  if(plan.formTitleChanged){
+    const file=DriveApp.getFileById(r.formId);unchanged(form.getTitle(),before.formTitle,plan.title);unchanged(file.getName(),before.fileName,plan.title);
+    form.setTitle(plan.title);file.setName(plan.title);
+  }
+  if(plan.policyChanged){
+    managedSettingsAccess_(r,plan.input.policy,{});
+    if(!form.collectsEmail())throw new Error('フォームのメール収集を有効にしてください。');
+    const permissions=publishedPermissions_(r.formId),policy=plan.input.policy;
+    function identity(p){return [p.type,p.role,p.domain||p.emailAddress||'',p.view].join('|');}
+    const original=before.permissions.map(identity),desired=policy.domains.map(function(d){return 'domain|reader|'+d+'|published';}).concat(policy.emails.map(function(e){return 'user|reader|'+e+'|published';}));
+    if(permissions.some(function(p){return !original.includes(identity(p))&&!desired.includes(identity(p));}))throw new Error('更新途中に回答者権限が変更されています。フォーム画面で確認してください。');
+    form.setAcceptingResponses(false);
+    ensureCopiedResponderPolicy_(Object.assign({},r,{input:plan.input}));
+    validateResponderAccess_(publishedPermissions_(r.formId),policy,managedSettingsAccess_(r,policy,{}),true);
+  }
+  if(before.material){
+    const service=Classroom.Courses.CourseWorkMaterials,post=service.get(r.courseId,r.materialId);
+    if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
+    Object.keys(plan.materialPatch).forEach(function(k){unchanged(post[k]||'',before.material[k],plan.materialPatch[k]);});
+    service.patch(plan.materialPatch,r.courseId,r.materialId,{updateMask:Object.keys(plan.materialPatch).join(',')});
+  }
+  r.input=plan.input;r.label=plan.label;r.title=plan.title;r.materialTitle=plan.materialTitle;
+  if(plan.materialSettingsSaved===true)r.materialSettingsSaved=true;
+  if(plan.materialSettingsBaseline)r.materialSettingsBaseline=plan.materialSettingsBaseline;
+  saveManagedRecord_(r);
+  if(plan.policyChanged){form.setAcceptingResponses(update.accepting===true&&!managedCloseIsDue_(r));r.accepting=form.isAcceptingResponses();}
+  delete r.settingsUpdate;r.lastError='';return saveManagedRecord_(r);
+}
+
+/** フォーム作成とは別に、準備済みの回答タブへ評価・コメント列を追加する。 */
+function previewResponseColumns(raw, expectedRevision) {
+  return withAppLock_(function() {return previewResponseColumnsUnlocked_(raw,expectedRevision);});
+}
+
+function responseColumnsContext_(record) {
+  if (record.settingsUpdate) throw new Error('設定の更新を再開して完了してください。');
+  if (record.formUpdate) throw new Error('フォーム更新を完了してから列を設定してください。');
+  return managedUpdateContext_(record);
+}
+
+function validateResponseColumns_(record, columns, headers) {
+  managedUniqueHeaders_(headers);
+  const reserved=[record.input.emailHeader,record.input.nameHeader,record.input.statusHeader,SCORING_MANAGEMENT_HEADER,'タイムスタンプ','Timestamp'];
+  if (reserved.slice(0,3).some(function(h){return !headers.includes(h);})) throw new Error('名前・送信状態などの必要な列を確認してください。');
+  const names=columns.map(function(c){return c.header;});
+  if (new Set(names).size!==names.length) throw new Error('追加する列名が重複しています。');
+  if (names.some(function(h){return reserved.includes(h) || (record.baseHeaders || []).includes(h);})) throw new Error('システム列やフォームの質問列は追加列に指定できません。');
+}
+
+function previewResponseColumnsUnlocked_(raw, expectedRevision) {
+  const config=getConfig_();
+  if (expectedRevision!==getConfigRevision_(config)) throw new Error('設定が更新されました。状態を更新してください。');
+  if (!raw || !Array.isArray(raw.recordIds) || !raw.recordIds.length || raw.recordIds.length>100 || raw.recordIds.some(function(id){return typeof id!=='string' || !id;}) || new Set(raw.recordIds).size!==raw.recordIds.length) throw new Error('対象の回答タブを1〜100件選択してください。');
+  const columns=normalizeManagedColumns_(raw.additionalColumns);
+  if (raw.columnNamesOnly !== undefined && typeof raw.columnNamesOnly !== 'boolean') throw new Error('列名のみの設定は真偽値で指定してください。');
+  if (raw.columnNamesOnly && columns.some(function(c){return c.choices.length;})) throw new Error('列名のみの設定では入力用の選択肢は指定できません。');
+  if (!columns.length) throw new Error('追加する列を入力してください。');
+  const targets=raw.recordIds.map(function(id) {
+    const r=loadManagedRecord_(id);
+    if (r.columnSetup) throw new Error('列の設定が途中です。「列の設定を再開」を実行してください。');
+    const sheet=responseColumnsContext_(r).sheet,headers=managedSheetHeaders_(sheet);
+    validateResponseColumns_(r,columns,headers);
+    managedSourceConfig_(Object.assign({},r.input,{additionalColumns:columns}),config);
+    return {id:r.id,revision:r.revision,label:r.label,sheetName:sheet.getName(),sheetId:sheet.getSheetId(),headers:headers,added:columns.filter(function(c){return !headers.includes(c.header);}).map(function(c){return c.header;})};
+  });
+  const preview={additionalColumns:columns,targets:targets,configRevision:expectedRevision};
+  if (raw.columnNamesOnly) preview.columnNamesOnly=true;
+  preview.fingerprint=adminDigest_(preview);
+  return preview;
+}
+
+function applyResponseColumns(raw, expectedRevision, fingerprint) {
+  return withAppLock_(function() {
+    const p=previewResponseColumnsUnlocked_(raw,expectedRevision);
+    if (p.fingerprint!==fingerprint) throw new Error('確認後に回答列や設定が変更されました。再確認してください。');
+    let completed=0;const errors=[];
+    p.targets.forEach(function(target) {
+      try {
+        const r=loadManagedRecord_(target.id,target.revision);
+        // 書込み前に入力と元の見出しを保存し、部分成功でも同じ列設定を再開する。
+        r.columnSetup={columns:p.additionalColumns,headers:target.headers};
+        if (p.columnNamesOnly) r.columnSetup.columnNamesOnly=true;
+        saveManagedRecord_(r);
+        finishResponseColumns_(r);completed++;
+      } catch(error) {errors.push({id:target.id,label:target.label,message:String(error.message || error)});}
+    });
+    return {completed:completed,errors:errors};
+  });
+}
+
+function resumeResponseColumns(id, expectedRevision) {
+  return withAppLock_(function() {
+    const r=loadManagedRecord_(id,expectedRevision);
+    if (!r.columnSetup) return r;
+    return finishResponseColumns_(r);
+  });
+}
+
+function finishResponseColumns_(r) {
+  const sheet=responseColumnsContext_(r).sheet,columns=normalizeManagedColumns_(r.columnSetup.columns);
+  const namesOnly=r.columnSetup.columnNamesOnly === true;
+  let headers=managedSheetHeaders_(sheet);
+  validateResponseColumns_(r,columns,headers);
+  const original=r.columnSetup.headers;
+  if (original.some(function(h){return !headers.includes(h);}) || headers.some(function(h){return h!==SCORING_MANAGEMENT_HEADER && !original.includes(h) && !columns.some(function(c){return c.header===h;});})) throw new Error('列の設定中に回答列が変更されました。見出しを確認してください。');
+  const existing=managedCustomColumns_(r.input).filter(function(c){return !!c.header;});
+  const merged=existing.map(function(c){return namesOnly ? c : columns.find(function(n){return n.header===c.header;}) || c;});
+  columns.forEach(function(c){if(!merged.some(function(old){return old.header===c.header;}))merged.push(c);});
+  const input=Object.assign({},r.input,{additionalColumns:merged});
+  const config=managedSourceConfig_(input,getConfig_());
+  const added=columns.filter(function(c){return !headers.includes(c.header);});
+  if (added.length) {
+    const width=headers.length;
+    if (sheet.getMaxColumns()<width+added.length) sheet.insertColumnsAfter(sheet.getMaxColumns(),width+added.length-sheet.getMaxColumns());
+    sheet.getRange(1,width+1,1,added.length).setValues([added.map(function(c){return managedLiteral_(c.header);})]);
+    // 書込みを確定し、追加列も含めた列数で移動先を計算する。
+    SpreadsheetApp.flush();
+  }
+  // 全列移動でセルの値・数式・メモを保持し、管理・送信状態を右端へ戻す。
+  scoringManagementColumn_(sheet,true,r.input.statusHeader);
+  headers=managedSheetHeaders_(sheet);
+  columns.forEach(function(column) {
+    // 列名だけの設定では既存の入力規則を保持する。新規列は自由入力にする。
+    if (namesOnly && original.includes(column.header)) return;
+    const range=sheet.getRange(2,headers.indexOf(column.header)+1,Math.max(1,sheet.getMaxRows()-1),1);
+    if (!column.choices.length) {range.clearDataValidations();return;}
+    const rule=SpreadsheetApp.newDataValidation().requireValueInList(column.choices,true).setAllowInvalid(false).build();
+    range.setDataValidation(rule);
+  });
+  SpreadsheetApp.flush();
+  const savedHeaders=managedSheetHeaders_(sheet);
+  if (columns.some(function(c){return !savedHeaders.includes(c.header);})) throw new Error('追加列の保存結果を確認できません。列の設定を再開してください。');
+  applyConfigDraft_(config,getConfigRevision_(getConfig_()));
+  r.input=input;delete r.columnSetup;return saveManagedRecord_(r);
+}
 
 function fillManagedNames_(record, sheet, firstRow, numberRows, context) {
   context=context||{};
@@ -1158,7 +1423,9 @@ function arrangeManagedFormColumns_(sheet, plan) {
 }
 
 function assertNoManagedFormUpdate_() {
-  if (getManagedRecords_().some(function(r) {return r.kind === 'form' && r.formUpdate;})) throw new Error('フォームの更新が途中です。「資料を投稿」の「更新を再開」を完了してから処理してください。');
+  const records=getManagedRecords_();
+  if (records.some(function(r) {return r.kind==='form' && r.columnSetup;})) throw new Error('回答列の設定が途中です。「評価・コメント列」の「列の設定を再開」を完了してから処理してください。');
+  if (records.some(function(r) {return r.kind === 'form' && r.formUpdate;})) throw new Error('フォームの更新が途中です。「資料を投稿」の「更新を再開」を完了してから処理してください。');
 }
 
 function managedUpdateContext_(record) {
@@ -1174,6 +1441,8 @@ function previewManagedFormUpdate(id) {
 
 function previewManagedFormUpdateUnlocked_(id) {
   const r = loadManagedRecord_(id);
+  if (r.settingsUpdate) throw new Error('設定の更新を再開して完了してください。');
+  if (r.columnSetup) throw new Error('回答列の設定を再開し、完了してからフォームを更新してください。');
   if (r.formUpdate) throw new Error('フォームの更新が途中です。「更新を再開」を実行してください。');
   const context = managedUpdateContext_(r), target = managedUpdateMetadata_(r.formId), template = managedUpdateMetadata_(r.input.templateId);
   if (!target.revisionId || !template.revisionId) throw new Error('フォームの更新版を確認できません。');
@@ -1384,6 +1653,7 @@ function applyManagedMaterialState_(record, post) {
 function previewManagedFormAction(id, action, options) { return withAppLock_(function(){return previewManagedFormActionUnlocked_(id,action,options);}); }
 function previewManagedFormActionUnlocked_(id, action, options) {
   const r=loadManagedRecord_(id),desired={};let snapshot;options=options||{};
+  if(r.settingsUpdate&&action!=='close')throw new Error('設定の更新が途中です。「設定の更新を再開」を完了してください。');
   if(r.formUpdate&&action!=='close')throw new Error('フォームの更新が途中です。「更新を再開」を完了してください。');
   if(['schedule','reschedule'].includes(action)) {
     desired.scheduledTime=managedFutureTime_(options.scheduledTime);
@@ -1403,6 +1673,7 @@ function previewManagedFormActionUnlocked_(id, action, options) {
     if(!managedPostId_(r)||r.stage==='deleted')throw new Error('削除対象の投稿がありません。');
     snapshot=managedPostService_(r).get(r.courseId,managedPostId_(r));
   }else if(['publish','schedule','reschedule','cancel-schedule','open','close'].includes(action)) {
+    if(['publish','schedule','reschedule'].includes(action)&&r.materialSettingsSaved===false)throw new Error('投稿タイトルと投稿文の「設定を保存」を押してから投稿・予約してください。');
     if(r.kind!=='form'||!(['registered','published','scheduled','draft','deleted','publish_review','schedule_review'].includes(r.stage)||(action==='close'&&r.stage==='delete_review')))throw new Error('フォームの準備が完了していません。');
     if(['publish','schedule'].includes(action)&&!['registered','deleted','draft'].includes(r.stage))throw new Error('投稿済み・予約済み、または投稿結果の確認待ちです。投稿結果を照合してください。');
     if(['reschedule','cancel-schedule'].includes(action)&&!['scheduled','draft'].includes(r.stage))throw new Error('予約を変更できません。公開状態・投稿結果を照合してください。');
@@ -1448,7 +1719,7 @@ function runManagedFormAction(id, action, fingerprint, verifiedEmailConfirmed, o
       r.stage='deleted';r.deletedAt=new Date().toISOString();return saveManagedRecord_(r);
     }
     const form=FormApp.openById(r.formId);
-    if(action==='close'){form.setAcceptingResponses(false);r.accepting=form.isAcceptingResponses();if(r.formUpdate)r.formUpdate.accepting=false;return saveManagedRecord_(r);}
+    if(action==='close'){form.setAcceptingResponses(false);r.accepting=form.isAcceptingResponses();if(r.formUpdate)r.formUpdate.accepting=false;if(r.settingsUpdate)r.settingsUpdate.accepting=false;return saveManagedRecord_(r);}
     if(action==='open'){form.setPublished(true);form.setAcceptingResponses(true);r.accepting=form.isAcceptingResponses();return saveManagedRecord_(r);}
     if(r.stage==='deleted'&&r.materialId){r.deletedPosts=(r.deletedPosts||[]).concat([{id:r.materialId,deletedAt:r.deletedAt}]);delete r.materialId;delete r.postUrl;}
     const changing=!!r.materialId;
@@ -1599,7 +1870,8 @@ function rememberWebConsoleUrl_() {
 }
 
 function isPublishedWebConsoleUrl_(url) {
-  return typeof url === 'string' && /^https:\/\/script\.google\.com\/(?:macros|a\/macros\/[A-Za-z0-9.-]+)\/s\/[A-Za-z0-9_-]+\/exec$/.test(url);
+  // 学校ドメイン付きURLは、デプロイ画面とgetUrl()でドメインの位置が異なる場合がある。
+  return typeof url === 'string' && /^https:\/\/script\.google\.com\/(?:macros|a\/macros\/[A-Za-z0-9.-]+|a\/[A-Za-z0-9.-]+\/macros)\/s\/[A-Za-z0-9_-]+\/exec$/.test(url);
 }
 
 function getVerifiedWebConsoleUrl_() {
@@ -1744,8 +2016,8 @@ function getAdminConsoleDataUnlocked_() {
   const classes = adminNonemptyRows_(values.classes);
   const selected = classes.filter(function(row) { return String(row[2] || '').trim() === '1' && String(row[1] || '').trim(); });
   const selectedIds = selected.map(function(row) { return String(row[1]).trim(); }).sort();
-  const students = adminNonemptyRows_(values.students);
-  const studentMap = createHeaderMap_(values.students[0] || []);
+  const allStudents=adminNonemptyRows_(values.students),studentMap = createHeaderMap_(values.students[0] || []);
+  const students = allStudents.filter(function(row){return String(row[studentMap['除外(1)']]||'').trim()!=='1';});
   const studentCourses = new Set(students.map(function(row) { return String(row[studentMap['コースID']] || '').trim(); }));
   const lastSelection = PropertiesService.getScriptProperties().getProperty('TURRET_ROSTER_SELECTION');
   const rosterCurrent = selectedIds.length > 0 && lastSelection === JSON.stringify(selectedIds);
@@ -1754,7 +2026,7 @@ function getAdminConsoleDataUnlocked_() {
   });
   const studentsReady = rosterCurrent && validStudents && selectedIds.every(function(id) { return studentCourses.has(id); });
   const emailCourses = new Map();
-  students.forEach(function(row) {
+  allStudents.forEach(function(row) {
     const email = String(row[studentMap['メールアドレス']] || '').trim().toLowerCase();
     const course = String(row[studentMap['コースID']] || '').trim();
     if (!email || !course) return;
@@ -1768,6 +2040,7 @@ function getAdminConsoleDataUnlocked_() {
   });
   const mappingOptional = studentsReady && !mappingNeeded && !mappings.length;
   const sourceReady = config.formSources.length > 0 && config.formSheetNamePrefix.length > 0;
+  const notificationsReady = automationRecipientsValid_(config) || config.reminderOptOutConfirmed === true;
   let configError = '';
   try { validateAppConfig_(config); } catch (error) { configError = String(error.message || error); }
   let fieldsReady = false;
@@ -1798,7 +2071,7 @@ function getAdminConsoleDataUnlocked_() {
     { id: 'prepare', title: 'シートの準備', state: prepared ? 'complete' : 'pending', detail: prepared ? '必要なシートを作成済み' : '最初に管理用シートを準備します' },
     { id: 'classes', title: 'クラスの選択', state: selected.length ? 'complete' : 'pending', detail: selected.length ? selected.length + 'クラスを選択中' : '一覧を取得し、同期対象に1を入力します' },
     { id: 'students', title: '生徒の取得', state: studentsReady ? 'complete' : (students.length ? 'attention' : 'pending'), detail: studentsReady ? students.length + '名の名簿を取得済み' : '対象クラスの生徒一覧を取得・確認してください' },
-    { id: 'sources', title: 'フォームと通知先', state: sourceReady ? 'complete' : 'pending', detail: sourceReady ? config.formSources.length + '件のフォームを登録済み（接続はヘッダー取得で確認）' : 'フォームURLと対象シート名を登録します' },
+    { id: 'sources', title: '回答先と通知先', state: sourceReady && notificationsReady ? 'complete' : 'pending', detail: !sourceReady ? '「フォームを準備」で回答先を自動接続します' : !notificationsReady ? '通知先を登録するか、メール通知を利用しないことを確認して保存してください' : config.reminderOptOutConfirmed ? '回答先を登録済み。メール通知を利用しないことを確認済み' : '回答先と通知先メールを登録済み' },
     { id: 'mapping', title: 'クラスとの対応', state: !studentsReady ? 'pending' : (mappingOptional || mappingReady ? 'complete' : 'attention'), detail: !studentsReady ? '生徒一覧を取得すると、対応表が必要か確認できます' : (mappingOptional ? '任意。同じ生徒が複数クラスにいなければ省略できます' : (mappingReady ? mappings.length + '件を割り当て済み。対象フォームとの対応を確認してください' : '対応表で各フォームの送信先クラスを選んでください')) },
     { id: 'fields', title: '列と取り込み項目', state: fieldsReady ? 'complete' : 'pending', detail: fieldsReady ? config.fields.length + '項目を登録済み' : 'フォームの列と、その用途を指定します' },
     { id: 'template', title: '返信本文', state: templateReady ? 'complete' : (config.messageTemplate.trim() ? 'attention' : 'pending'), detail: templateReady ? '本文を登録済み。プレビューで内容を確認できます' : (templateWarnings[0] || '送る文面を作成します') },
@@ -1816,7 +2089,7 @@ function getAdminConsoleDataUnlocked_() {
   if (configParseError) warnings.push('保存済み設定の読み込みに失敗しました。内部バックアップから表示した設定と設定JSONを確認してから保存してください。');
   return { config: config, revision: getConfigRevision_(config), progress: progress, counts: counts, sheets: sheets,
     health: buildAdminHealth_(values, recoveryRequired || configParseError),
-    ready: !recoveryRequired && !configParseError && prepared && !configError && studentsReady && (!mappingNeeded || mappingReady) && templateReady,
+    ready: !recoveryRequired && !configParseError && prepared && !configError && notificationsReady && studentsReady && (!mappingNeeded || mappingReady) && templateReady,
     mappingNeeded: mappingNeeded, configParseError: configParseError, recoveryRequired: recoveryRequired, warnings: warnings,
     initialPanel: PropertiesService.getUserProperties().getProperty('TURRET_ADMIN_PANEL') || 'setup', actionRevisions: actionRevisions };
 }
@@ -1905,7 +2178,7 @@ function diagnoseSetup(expectedRevision) {
       if (!email) return;
       const list = students.get(email) || [];
       list.push({ name: String(row[sh['名前']] || '').trim(), className: String(row[sh['クラス名']] || '').trim(),
-        courseId: String(row[sh['コースID']] || '').trim(), studentId: String(row[sh.studentId] || '').trim() });
+        courseId: String(row[sh['コースID']] || '').trim(), studentId: String(row[sh.studentId] || '').trim(),excluded:String(row[sh['除外(1)']]||'').trim()==='1' });
       students.set(email, list);
     });
     if (!students.size) check('error', '生徒一覧', '照合できる生徒がいません。', 'クラスを選択して生徒一覧を取得してください。');
@@ -1964,6 +2237,7 @@ function diagnoseSetup(expectedRevision) {
       const matches = courseId ? list.filter(function(s) { return s.courseId === courseId; }) : list;
       if (matches.length !== 1) { fail(matches.length ? '送信先の生徒・クラスを一意に特定できません。' : '生徒一覧と宛先が一致しません。'); return; }
       const student = matches[0];
+      if(student.excluded){fail('このクラスの生徒は名簿で除外されています。');return;}
       if (!student.studentId || !student.courseId || (item.studentId && item.studentId !== student.studentId)) { fail('studentIdまたはコースIDを確認してください。'); return; }
       let name = item.saved ? item.name : (student.name || item.name);
       let body = item.body;
@@ -2070,7 +2344,7 @@ function adminSheetUrl_(ss, sheet) {
 }
 
 function runAdminAction(action, confirmed, expectedRevision) {
-  const allowed = ['initialize', 'classes', 'students', 'mapping', 'import', 'prepare', 'send', 'remind', 'clearEval', 'clearSend', 'clearErrors'];
+  const allowed = ['initialize', 'classes', 'students', 'sortClasses', 'sortStudents', 'mapping', 'import', 'prepare', 'send', 'remind', 'clearEval', 'clearSend', 'clearErrors'];
   if (allowed.indexOf(action) < 0) throw new Error('未対応の操作です。');
   return withAppLock_(function() {
     const config = getConfig_();
@@ -2084,6 +2358,8 @@ function runAdminAction(action, confirmed, expectedRevision) {
       case 'initialize': initializeSheetsUnlocked_(); message = '必要なシートを準備しました（クラス一覧・生徒一覧・採点テンプレ・対応表・送信シート・エラー・システム管理）。'; break;
       case 'classes': classroomdataUnlocked_(); message = 'クラス一覧を更新しました。シートで同期対象に1を入力してください。'; break;
       case 'students': message = studentdataMultiUnlocked_(); break;
+      case 'sortClasses': sortRosterSheet_('クラス一覧'); message='クラス一覧を整列しました。'; break;
+      case 'sortStudents': sortRosterSheet_(STUDENT_SHEET_NAME); message='生徒一覧を整列しました。転退学者は除外(1)に1を入力すると再取得後も除外します。'; break;
       case 'mapping': message = createMappingSheetUnlocked_(); break;
       case 'import':
       case 'prepare': prepareSendDataUnlocked_(); message = '送信データの準備が終了しました。送信シートとエラーを確認してください。'; break;
@@ -2463,6 +2739,8 @@ function applySettingsProfile(json, expectedRevision) {
       throw new Error('設定JSONを適用する前に、自動実行を停止してください。');
     }
     const config = Object.assign({}, current, profile.config);
+    // JSONの通知先を取り込む場合、通知しない選択はこの運用で改めて確認する。
+    if (Object.prototype.hasOwnProperty.call(profile.config, 'reminderTo')) config.reminderOptOutConfirmed = false;
     const oldSchedule = getAutomationSchedule_();
     const props = PropertiesService.getScriptProperties();
     const oldTemplateUrl = profile.templateFormUrl ? props.getProperty(TEMPLATE_FORM_URL_KEY_) : null;
@@ -2566,6 +2844,7 @@ function managedFormScheduleTick_(event) {
         if(r.accepting)throw new Error('フォームが受付中のままです。');
         r.closeState='closed';r.closedAt=new Date().toISOString();r.closeError='';
         if(r.formUpdate)r.formUpdate.accepting=false;
+        if(r.settingsUpdate)r.settingsUpdate.accepting=false;
       }catch(error){r.closeState='error';r.closeError=String(error.message||error).slice(0,500);}
       r.closeCheckedAt=new Date().toISOString();
       try{saveManagedRecord_(r,cache);}catch(error){Logger.log('受付終了の結果記録に失敗しました。次回に再確認します。');}
@@ -2600,7 +2879,7 @@ function managedFormResponseReceived_(event) {
     assertManagedOwner_(record);
     if(record.formUpdate)return;
     const result=fillManagedNames_(record,sheet,start,1);
-    if(result.unmatched)ensureErrorSheet_().appendRow([new Date(),sheet.getName(),start,'','','NAME_UNMATCHED','Classroom生徒一覧に照合できません。名簿を更新してフォーム管理の「名前を補完」を実行してください。']);
+    if(result.unmatched)ensureErrorSheet_().appendRow([new Date(),sheet.getName(),start,'','','NAME_UNMATCHED','Classroom生徒一覧に照合できません。名簿を更新して採点画面の「名前を反映」を実行してください。']);
   });
 }
 

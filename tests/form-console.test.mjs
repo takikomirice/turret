@@ -14,6 +14,15 @@ function env(){
  return e;
 }
 
+test('form preparation defers posting settings and starts with an unsaved material record',()=>{
+ const e=provisioningEnv();e.raw.deferMaterialSettings=true;delete e.raw.materialTitlePattern;delete e.raw.description;
+ const p=e.preview();
+ assert.equal(p.input.materialTitlePattern,'振り返り {class}');assert.equal(p.input.description,'');
+ const records=e.c.beginFormSetup(e.raw,p.configRevision,p.fingerprint);
+ assert.equal(records[0].materialSettingsSaved,false);
+ assert.equal(e.c.loadManagedRecord_(records[0].id).materialSettingsSaved,false);
+});
+
 test('template includes one required lesson date with year, stays unpublished and retries reuse it',()=>{
  const {c,props}=env();let creates=0;const before=JSON.stringify([...props]);
  const form=new NativeForm('new-template-form-id');
@@ -361,6 +370,48 @@ test('one class provisions, links, registers and posts only on explicit action; 
  confirm=c.previewManagedFormAction(r.id,'delete');r=c.runManagedFormAction(r.id,'delete',confirm.fingerprint);assert.equal(calls.removes,1);
  confirm=c.previewManagedFormAction(r.id,'publish');r=c.runManagedFormAction(r.id,'publish',confirm.fingerprint,true);assert.equal(calls.posts,2);assert.equal(r.deletedPosts[0].id,'material-1');
 });
+function sevenClassProvisioningEnv(){
+ const e=provisioningEnv();
+ // 実際のコースIDと同じく、整数インデックスとして自動整列されない桁数を使う。
+ const ids=['710000000007','710000000002','710000000006','710000000001','710000000005','710000000003','710000000004'];
+ e.sheets.get('クラス一覧').rows=[['クラス名','コースID','同期対象(1)'],...ids.map((id,i)=>['第'+(i+1)+'組',id,'1'])];
+ e.sheets.get('生徒一覧').rows=[['メールアドレス','名前','コースID'],...ids.map((id,i)=>['kid'+i+'@example.com','生徒'+i,id])];
+ e.raw.labels=Object.fromEntries(ids.map((id,i)=>[id,'1-'+(i+1)]));
+ return e;
+}
+
+test('seven classes provision once when separate RPC calls reorder label keys without changing values',()=>{
+ const e=sevenClassProvisioningEnv(),{c,calls}=e,p=e.preview();
+ // 確認と開始は別々のRPCなので、同じ対応表でもキーの列挙順は変わり得る。
+ const raw=plain(e.raw);raw.labels=Object.fromEntries(Object.entries(raw.labels).reverse());
+ const records=c.beginFormSetup(raw,p.configRevision,p.fingerprint);
+ assert.equal(records.length,7);
+ assert.deepEqual(plain(records.map(r=>[r.className,r.label])),[
+  ['第1組','1-1'],['第2組','1-2'],['第3組','1-3'],['第4組','1-4'],['第5組','1-5'],['第6組','1-6'],['第7組','1-7']
+ ]);
+ for(const r of records)assert.equal(c.prepareFormTarget(r.id,r.revision).stage,'registered');
+ // 開始要求の再送でも同じ記録を使い、既存のフォームを複製し直さない。
+ const resumed=c.beginFormSetup(e.raw,p.configRevision,p.fingerprint);
+ assert.deepEqual(plain(resumed.map(r=>r.id)),plain(records.map(r=>r.id)));
+ for(const r of resumed)c.prepareFormTarget(r.id,r.revision);
+ assert.equal(calls.copies,7);assert.equal(calls.destination,7);assert.equal(calls.posts,0);
+ assert.equal(c.getManagedRecords_().filter(r=>r.kind==='batch').length,1);
+});
+
+for(const change of ['label','roster','classes','template','config','columns'])test('seven-class setup rejects a real change before creating records or forms: '+change,()=>{
+ const e=sevenClassProvisioningEnv(),{c}=e;
+ flexibleInput(e,[{header:'観点A',choices:[]},{header:'観点B',choices:[]}]);
+ const p=e.preview();
+ if(change==='label')e.raw.labels['710000000007']='別の表記';
+ if(change==='roster')e.sheets.get('生徒一覧').rows[1][0]='changed@example.com';
+ if(change==='classes')e.sheets.get('クラス一覧').rows[1][2]='';
+ if(change==='template')c.DriveApp.getFileById=()=>({getLastUpdated:()=>new Date('2026-09-30T00:00:00Z')});
+ if(change==='config'){const cfg=plain(c.getConfig_());cfg.messageTemplate='変更した本文';e.props.set('APP_CONFIG',JSON.stringify(cfg));}
+ if(change==='columns')e.raw.additionalColumns.reverse();
+ assert.throws(()=>c.beginFormSetup(e.raw,p.configRevision,p.fingerprint),/更新|再確認/);
+ assert.equal(c.getManagedRecords_().length,0);assert.equal(e.calls.copies,0);assert.equal(e.calls.posts,0);
+});
+
 test('copy success followed by response loss never triggers a second copy',()=>{
  const e=provisioningEnv(),{c,calls}=e;const [r]=e.begin(),copy=c.Drive.Files.copy;
  c.Drive.Files.copy=body=>{copy(body);throw Error('response lost');};
@@ -397,6 +448,7 @@ test('500 tracked return IDs use one registry read per execution with cache',()=
 test('deployed send path records IDs and preserves uncertain journal outcomes without resending',()=>{
  for(const fails of [false,true]){
   const {c,sheets,ss}=env();let posts=0;
+  sheets.set('生徒一覧',new AdminSheet('生徒一覧',[['メールアドレス','名前','コースID','studentId'],['kid@example.com','生徒','100','student-1']]));
   const config=c.getConfig_(),headers=plain(c.getConfiguredSendHeaders_(config));
   const row=headers.map(h=>({'元SS_ID':'source_12345678901234567890','元シート名':'回答 1','元行番号':'2','No':'1','メールアドレス':'kid@example.com','名前':'生徒','コースID':'100','studentId':'student-1','送信状態':'未','返信本文':'確認用','点数':'5'}[h]||''));
   const send=new AdminSheet('送信シート',[headers,row]);sheets.set('送信シート',send);
@@ -452,11 +504,27 @@ test('setup requires explicit human confirmation of the verified email setting',
  assert.throws(()=>e.preview(),/メール収集/);
 });
 
-test('new Forms throw for a missing destination; provisioning links once and propagates other errors',()=>{
+for(const message of ['The form currently has no response destination.','フォームに応答先がありません。','Exception: フォームに応答先がありません。'])test('missing response destination is normal during provisioning: '+message,()=>{
  const e=provisioningEnv(),{c,forms}=e,copy=c.Drive.Files.copy;
- c.Drive.Files.copy=(...args)=>{const r=copy(...args),f=forms.get(r.id);f.getDestinationId=()=>{if(!f.state.destination)throw Error('The form currently has no response destination.');return f.state.destination;};return r;};
+ c.Drive.Files.copy=(...args)=>{const r=copy(...args),f=forms.get(r.id);f.getDestinationId=()=>{if(!f.state.destination)throw Error(message);return f.state.destination;};return r;};
  let [r]=e.begin();r=c.prepareFormTarget(r.id,r.revision);assert.equal(r.stage,'registered');assert.equal(e.calls.destination,1);
- assert.throws(()=>c.managedDestinationId_({getDestinationId(){throw Error('permission denied');}}),/permission denied/);
+ c.prepareFormTarget(r.id,r.revision);assert.equal(e.calls.copies,1);assert.equal(e.calls.destination,1);
+});
+test('destination lookup preserves unexpected errors and refuses a different spreadsheet',()=>{
+ const e=provisioningEnv(),{c,forms}=e,copy=c.Drive.Files.copy;
+ for(const message of ['permission denied','フォームを開く権限がありません。','Unexpected error: フォームに応答先がありません。']){
+  const error=Error(message);assert.throws(()=>c.managedDestinationId_({getDestinationId(){throw error;}}),e=>e===error);
+ }
+ c.Drive.Files.copy=(...args)=>{const r=copy(...args);forms.get(r.id).state.destination='other-spreadsheet';return r;};
+ const [r]=e.begin();assert.throws(()=>c.prepareFormTarget(r.id,r.revision),/回答先が別のスプシ/);assert.equal(e.calls.destination,0);
+});
+test('preparation resumes the existing copied form after destination lookup failed',()=>{
+ const e=provisioningEnv(),{c,forms}=e,copy=c.Drive.Files.copy;
+ c.Drive.Files.copy=(...args)=>{const r=copy(...args);forms.get(r.id).getDestinationId=()=>{throw Error('permission denied');};return r;};
+ let [r]=e.begin();assert.throws(()=>c.prepareFormTarget(r.id,r.revision),/permission denied/);
+ r=c.loadManagedRecord_(r.id);assert.equal(r.stage,'linking');const formId=r.formId,f=forms.get(formId);
+ f.getDestinationId=()=>{if(!f.state.destination)throw Error('フォームに応答先がありません。');return f.state.destination;};
+ r=c.prepareFormTarget(r.id,r.revision);assert.equal(r.stage,'registered');assert.equal(r.formId,formId);assert.equal(e.calls.copies,1);assert.equal(e.calls.destination,1);
 });
 test('publishing requires a fresh human confirmation and closing never needs email verification',()=>{
  const e=provisioningEnv(),{c}=e;let [r]=e.begin();r=c.prepareFormTarget(r.id,r.revision);

@@ -9,8 +9,8 @@ test('managed forms show intake stop while publication result is unknown',()=>{
  const c=model();
  vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'r1',kind:'form',stage:'publish_review',label:'<script>bad</script>',materialTitle:'資料'}]};",c);
  const rendered=vm.runInContext("renderForms('publish')",c);
- assert.match(rendered,/data-form-command="close"/);
- assert.doesNotMatch(rendered,/data-form-command="open"/);
+ assert.match(rendered,/<option value="close">/);
+ assert.doesNotMatch(rendered,/<option value="open">/);
  assert.match(rendered,/&lt;script&gt;bad&lt;\/script&gt;/);
  assert.match(rendered,/投稿結果を照合/);
 });
@@ -42,22 +42,22 @@ test('adding or reordering columns keeps the expanded creation form open after a
 
 test('extra column up/down moves keep dropdown choices with their header and enforce boundaries',async()=>{
  const c=model();
- vm.runInContext("readFormDraft=()=>{};render=()=>{};state.formDraft={additionalColumns:[{header:'評価',choices:'1,2,3'},{header:'コメント',choices:''},{header:'観点',choices:'A,B'}]};",c);
+  vm.runInContext("readColumnDraft=()=>{};render=()=>{};state.columnDraft={additionalColumns:[{header:'評価',choices:'1,2,3'},{header:'コメント',choices:''},{header:'観点',choices:'A,B'}]};",c);
  await vm.runInContext("formCommand('column-up','2')",c);
- assert.equal(vm.runInContext('JSON.stringify(state.formDraft.additionalColumns)',c),JSON.stringify([{header:'評価',choices:'1,2,3'},{header:'観点',choices:'A,B'},{header:'コメント',choices:''}]));
+  assert.equal(vm.runInContext('JSON.stringify(state.columnDraft.additionalColumns)',c),JSON.stringify([{header:'評価',choices:'1,2,3'},{header:'観点',choices:'A,B'},{header:'コメント',choices:''}]));
  await vm.runInContext("formCommand('column-down','0')",c);
  await vm.runInContext("formCommand('column-up','0')",c);
- assert.equal(vm.runInContext('state.formDraft.additionalColumns[0].header',c),'観点');
+  assert.equal(vm.runInContext('state.columnDraft.additionalColumns[0].header',c),'観点');
 });
 
 test('form update and resume controls distinguish finished forms from interrupted updates',()=>{
  const c=model();
  vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'r1',kind:'form',stage:'published',label:'テスト',materialId:'m1'}]};",c);
- assert.match(vm.runInContext("renderForms('publish')",c),/data-form-command="update-form"/);
+ assert.match(vm.runInContext("renderForms('publish')",c),/<option value="update-form">/);
  vm.runInContext("state.forms.records[0].formUpdate={phase:'columns'}",c);
  const markup=vm.runInContext("renderForms('publish')",c);
- assert.match(markup,/data-form-command="resume-update"/);
- assert.doesNotMatch(markup,/data-form-command="update-form"|data-form-command="delete"|data-form-command="open"/);
+ assert.match(markup,/<option value="resume-update">/);
+ assert.doesNotMatch(markup,/<option value="(?:update-form|delete|open)">/);
 });
 
 test('web setup sheet controls link directly to the exact tab and disable absent tabs',()=>{
@@ -72,7 +72,7 @@ test('web setup sheet controls link directly to the exact tab and disable absent
 
 function backgroundModel(){
  const c=interactiveModel();
- c.document={getElementById:()=>({scrollTop:0,focus(){},querySelectorAll:()=>[]}),activeElement:null};
+ c.document={getElementById:()=>({scrollTop:0,focus(){},querySelectorAll:()=>[]}),querySelectorAll:()=>[],activeElement:null};
  vm.runInContext("const renders=[];render=()=>renders.push(state.panel);readFormDraft=()=>{};let finish,fail;rpc=()=>new Promise((resolve,reject)=>{finish=resolve;fail=reject});state.forms={classes:[],defaults:{},records:[]};",c);
  return c;
 }
@@ -124,7 +124,7 @@ test('background rerender keeps typed input, focus, selection, expanded details 
  const afterDetails=[{open:false}],content={scrollTop:120,querySelectorAll:()=>[{open:true}]};
  const input={focus(){focused=true;},setSelectionRange(...args){selection=args;}};
  const copyInputs={copyName:{value:'次の学期'},copyFolder:{value:'folder-url'}};
- c.document={getElementById:id=>id==='content'?content:copyInputs[id]||input,activeElement:{id:'form-description',selectionStart:2,selectionEnd:4}};
+ c.document={getElementById:id=>id==='content'?content:copyInputs[id]||input,querySelectorAll:()=>[],activeElement:{id:'form-titlePattern',selectionStart:2,selectionEnd:4}};
  c.afterDetails=afterDetails;
  vm.runInContext("state.panel='setup';state.step='forms';readFormDraft=()=>{state.formDraft={description:'編集中'}};render=()=>{document.getElementById('content').scrollTop=0;document.getElementById('content').querySelectorAll=()=>afterDetails;document.getElementById('copyName').value='';document.getElementById('copyFolder').value=''};renderUpdatedForms()",c);
  assert.equal(vm.runInContext('state.formDraft.description',c),'編集中');assert.equal(content.scrollTop,120);
@@ -138,7 +138,7 @@ test('console is modeless so sheet tables can be edited', () => {
   assert.equal(existsSync('Sidebar.html'), false);
 });
 test('guided console offers every step, local JSON files, and accessible confirmation', () => {
-  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(steps.map(s=>s.id))', model())), ['prepare','classes','forms','sources','fields','template','publish','automation']);
+  assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(steps.map(s=>s.id))', model())), ['prepare','classes','forms','columns','sources','fields','template','publish','automation']);
   assert.match(html,/data-panel="setup"[^>]*>設定<\/button>/);
   assert.doesNotMatch(html,/data-panel="forms"/);
   assert.match(html, /<dialog[^>]+id="confirmDialog"/);
@@ -183,7 +183,7 @@ test('automation requires complete server-confirmed preconditions', () => {
 
 test('different object key order and normalized source IDs do not create phantom edits', () => {
  const c=model();
- vm.runInContext("state.data={config:{formSources:[{id:'123',url:'https://docs.google.com/spreadsheets/d/123/edit'}],fields:[]},revision:'r1'}; putDraft('sources',{reminderTo:[],formSheetNamePrefix:[],formSources:[{url:'https://docs.google.com/spreadsheets/d/123/edit'}]});",c);
+ vm.runInContext("state.data={config:{formSources:[{id:'123',url:'https://docs.google.com/spreadsheets/d/123/edit'}],fields:[]},revision:'r1'}; putDraft('sources',{reminderTo:[],reminderOptOutConfirmed:false,formSheetNamePrefix:[],formSources:[{url:'https://docs.google.com/spreadsheets/d/123/edit'}]});",c);
  assert.equal(vm.runInContext('dirtySections().length',c),0);
 });
 
@@ -543,7 +543,7 @@ test('editing notification recipients preserves legacy per-source course assignm
  vm.runInContext("state.data={config:{formSources:[{id:'123',url:'https://docs.google.com/spreadsheets/d/123/edit',courseId:'course_456'}],reminderTo:['old@example.test'],formSheetNamePrefix:['回答']},revision:'r1'};const sourceDraft=draftValue('sources');sourceDraft.formSources=sourceDraft.formSources.map(s=>parseSourceLine(formatSourceLine(s)));sourceDraft.reminderTo=['new@example.test'];putDraft('sources',sourceDraft);",c);
  assert.equal(vm.runInContext("draftValue('sources').formSources[0].courseId",c),'course_456');
  assert.equal(vm.runInContext("draftValue('sources').formSources[0].url",c),'https://docs.google.com/spreadsheets/d/123/edit');
- assert.match(vm.runInContext("renderStep('sources')",c),/edit \| course_456/);
+ assert.doesNotMatch(vm.runInContext("renderStep('sources')",c),/data-source-entry="formSources"/);
 });
 
 test('grade conversion draft preserves empty and custom scales, with legacy migration fallback',()=>{
@@ -629,6 +629,7 @@ test('conversion inputs are collected with field roles and survive navigation dr
 
 test('fictional template preview carries unsaved conversion rules to server renderer',async()=>{
  const c=interactiveModel();
+ vm.runInContext("state.step='template';document={getElementById:()=>({textContent:'',classList:{toggle(){}}})};clearTimeout=()=>{};",c);
  vm.runInContext("state.data.config.gradeScale=[];const p=draftValue('fields');p.gradeScale=[{from:'PASS',to:'合格'}];putDraft('fields',p);",c);
  await vm.runInContext("command('preview')",c);
  assert.equal(vm.runInContext('calls[0].method',c),'previewReplyTemplate');
@@ -693,7 +694,7 @@ test('mapping follows form creation and source registration rather than roster r
  assert.match(markup,/data-action="students"/);
  assert.doesNotMatch(markup,/回答シートとクラスの対応表/);
  markup=vm.runInContext("renderStep('sources')",c);
- assert.match(markup,/data-command="mapping-sources"/);
+ assert.match(markup,/data-step="forms"/);
  assert.doesNotMatch(markup,/data-action="mapping"/);
  vm.runInContext("state.data.config.formSources=[{url:'test'}];state.data.config.formSheetNamePrefix=['回答'];",c);
  markup=vm.runInContext("renderStep('sources')",c);
@@ -708,9 +709,9 @@ test('form preparation and Classroom publishing render distinct actions and reta
  vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'f1',kind:'form',stage:'registered',label:'A',materialTitle:'資料'},{id:'f2',kind:'form',stage:'pending',label:'B'}]};",c);
  const forms=vm.runInContext("renderStep('forms')",c),publish=vm.runInContext("renderStep('publish')",c);
  assert.match(forms,/data-form-command="create-template"/);assert.match(forms,/data-form-command="prepare"/);
- assert.doesNotMatch(forms,/data-form-command="publish"/);assert.match(forms,/既存のフォーム/);
- assert.match(publish,/data-form-command="publish"/);assert.doesNotMatch(publish,/id="form-templateId"/);
- assert.match(publish,/data-step="forms"/);
+ assert.doesNotMatch(forms,/data-form-command="publish"/);assert.match(forms,/通知先と対応表へ/);
+ assert.match(publish,/<option value="publish">/);assert.doesNotMatch(publish,/id="form-templateId"/);
+ assert.match(publish,/<option value="prepare-form">/);
 });
 
 test('form drafts survive leaving the integrated step and publishing navigation only reads',async()=>{
@@ -727,7 +728,7 @@ test('late return history does not collapse the open period-copy section',()=>{
  const c=interactiveModel();
  const after=[{id:'formReturnDetails',open:false},{id:'operationCopyDetails',open:false}];
  const content={scrollTop:12,querySelectorAll:()=>[{id:'operationCopyDetails',open:true}]};
- c.document={getElementById:id=>id==='content'?content:null,activeElement:null};c.after=after;
+ c.document={getElementById:id=>id==='content'?content:null,querySelectorAll:()=>[],activeElement:null};c.after=after;
  vm.runInContext("state.panel='maintenance';readFormDraft=()=>{};render=()=>{document.getElementById('content').querySelectorAll=()=>after;};renderUpdatedForms();",c);
  assert.equal(after[0].open,false);assert.equal(after[1].open,true);
 });
@@ -750,14 +751,17 @@ test('management keeps return history and period copying outside form preparatio
  assert.doesNotMatch(forms,/次の期間用に複製|個別返却の履歴|data-form-command="delete"/);
 });
 
-test('sources use two-row URL entries and single-line email entries',()=>{
+test('sources show notification recipients and help without connection or prefix editors',()=>{
  const c=interactiveModel();
  vm.runInContext("state.data.config.formSources=[{url:'first'},{url:'second'}];state.data.config.reminderTo=['one@example.test','two@example.test'];",c);
  const markup=vm.runInContext("renderStep('sources')",c);
- assert.equal((markup.match(/textarea rows="2" data-source-entry="formSources"/g)||[]).length,2);
+ assert.doesNotMatch(markup,/data-source-entry="formSources"|data-add-entry="formSources"|formSheetNamePrefix|フォーム回答スプレッドシートのURL|対象シート名の先頭文字/);
  assert.equal((markup.match(/input type="email" data-source-entry="reminderTo"/g)||[]).length,2);
- assert.match(markup,/data-add-entry="formSources"/);
- assert.match(markup,/formSheetNamePrefix/);
+ assert.match(markup,/未採点リマインダー\/エラーの通知先メールアドレス/);
+ assert.match(markup,/aria-label="未採点リマインダー\/エラーの通知先メールアドレスの説明"/);
+ assert.match(markup,/id="reminderOptOutConfirmed"/);
+ const form=vm.runInContext("state.forms={classes:[],defaults:{},records:[]};renderForms('prepare')",c);
+ assert.doesNotMatch(form,/id="form-prefix"|回答タブの先頭文字/);
 });
 
 test('top settings panel owns export and import; management keeps only operational controls',()=>{
@@ -831,35 +835,36 @@ test('form columns start empty and class guidance disables preparation until sel
  const markup=vm.runInContext('renderForms()',c);
  assert.match(markup,/クラスを選択してください/);assert.match(markup,/data-step="classes"/);
  assert.match(markup,/data-form-command="preview"[^>]*disabled/);
- assert.match(markup,/総合/);assert.match(markup,/data-step="fields"/);
+ assert.match(markup,/data-step="columns"/);
+ assert.match(vm.runInContext('renderResponseColumns()',c),/総合/);
  assert.doesNotMatch(markup,/id="form-gradeHeader"|id="form-commentHeader"|id="form-gradeChoices"/);
 });
 
-test('custom columns render escaped names and individual optional choice controls',()=>{
- const c=model();vm.runInContext("state.forms={classes:[{courseId:'1',className:'化学'}],defaults:{},records:[]};state.formDraft=defaultFormDraft();state.formDraft.additionalColumns=[{header:'<観点>',choices:'1,2,3'}]",c);
- const markup=vm.runInContext('renderForms()',c);
- assert.match(markup,/&lt;観点&gt;/);assert.match(markup,/data-extra-header/);assert.match(markup,/data-extra-choices/);
+test('custom columns render escaped names without input-domain controls',()=>{
+ const c=model();vm.runInContext("state.forms={classes:[{courseId:'1',className:'化学'}],defaults:{},records:[]};state.columnDraft=defaultColumnDraft();state.columnDraft.additionalColumns=[{header:'<観点>',choices:'1,2,3'}]",c);
+ const markup=vm.runInContext('renderResponseColumns()',c);
+ assert.match(markup,/&lt;観点&gt;/);assert.match(markup,/data-extra-header/);assert.doesNotMatch(markup,/data-extra-choices/);
  assert.match(markup,/data-form-command="add-column"/);assert.match(markup,/data-form-command="remove-column"/);
- assert.match(markup,/data-class-label="1"/);assert.doesNotMatch(markup,/data-form-command="preview"[^>]*disabled/);
+ assert.match(vm.runInContext('renderForms()',c),/data-class-label="1"/);
 });
 
 test('add and remove custom columns preserve current inputs without invoking a server mutation',async()=>{
  const c=interactiveModel();
- vm.runInContext("state.forms={defaults:{},classes:[],records:[]};state.formDraft=defaultFormDraft();state.formDraft.additionalColumns=[{header:'理解',choices:'1,2'},{header:'表現',choices:''}];readFormDraft=()=>{};const focused=[];document={getElementById:id=>({focus:()=>focused.push(id)})}",c);
+ vm.runInContext("state.forms={defaults:{},classes:[],records:[]};state.columnDraft=defaultColumnDraft();state.columnDraft.additionalColumns=[{header:'理解',choices:'1,2'},{header:'表現',choices:''}];readColumnDraft=()=>{};const focused=[];document={getElementById:id=>({focus:()=>focused.push(id)})}",c);
  await vm.runInContext("formCommand('add-column')",c);
- assert.equal(vm.runInContext('state.formDraft.additionalColumns.length',c),3);
+ assert.equal(vm.runInContext('state.columnDraft.additionalColumns.length',c),3);
  assert.equal(vm.runInContext('focused[0]',c),'extra-header-2');
  await vm.runInContext("formCommand('remove-column','1')",c);
- assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.formDraft.additionalColumns)',c)),[{header:'理解',choices:'1,2'},{header:'',choices:''}]);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.columnDraft.additionalColumns)',c)),[{header:'理解',choices:'1,2'},{header:''}]);
  assert.equal(vm.runInContext('calls.length',c),0);
 });
 
-test('form draft collects optional columns and labels before navigation',()=>{
+test('form draft collects labels and leaves evaluation columns for the separate step',()=>{
  const c=model();
  const inputs={'form-templateId':{value:'template'},'form-nameHeader':{value:'名前'}};
  c.document={getElementById:id=>inputs[id],querySelectorAll:selector=>selector==='[data-extra-column]'?[{querySelector:sel=>({value:sel==='[data-extra-header]'?'観点':'A,B'})}]:selector==='[data-class-label]'?[{dataset:{classLabel:'1'},value:'1-1'}]:[]};
  vm.runInContext("state.forms={defaults:{}};state.panel='setup';state.step='forms';readCurrent()",c);
- assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.formDraft.additionalColumns)',c)),[{header:'観点',choices:'A,B'}]);
+ assert.deepEqual(JSON.parse(vm.runInContext('JSON.stringify(state.formDraft.additionalColumns)',c)),[]);
  assert.equal(vm.runInContext("state.formDraft.labels['1']",c),'1-1');
 });
 
@@ -893,18 +898,32 @@ test('visible individual grade rules are collected without leaking into the shar
 });
 
 
-test('adding a URL entry renders a blank input and never serializes its object',async()=>{
+test('adding a notification entry renders a blank email input and preserves connection settings',async()=>{
  const c=interactiveModel();
  c.document={querySelectorAll:()=>[{focus(){}}]};
- vm.runInContext("state.data.config.formSources=[{url:'https://docs.google.com/spreadsheets/d/123/edit'}];const event={target:{closest:()=>({disabled:false,dataset:{addEntry:'formSources'}})}};",c);
+ vm.runInContext("state.data.config.formSources=[{url:'https://docs.google.com/spreadsheets/d/123/edit'}];const event={target:{closest:()=>({disabled:false,dataset:{addEntry:'reminderTo'}})}};",c);
  await vm.runInContext('handleClick(event)',c);
- assert.equal(vm.runInContext("draftValue('sources').formSources.length",c),2);
- assert.equal(vm.runInContext("formatSourceLine(draftValue('sources').formSources[1])",c),'');
+ assert.equal(vm.runInContext("draftValue('sources').reminderTo.length",c),2);
+ assert.equal(vm.runInContext("draftValue('sources').reminderTo[1]",c),'');
+ assert.equal(vm.runInContext("draftValue('sources').formSources.length",c),1);
  const markup=vm.runInContext("renderStep('sources')",c);
  assert.doesNotMatch(markup,/\[object Object\]/);
- assert.match(markup,/aria-label="URL2"><\/textarea>/);
+ assert.match(markup,/type="email"[^>]+aria-label="メールアドレス2" value=""/);
  assert.equal(vm.runInContext("formatSourceLine('legacy-source')",c),'legacy-source');
  assert.equal(vm.runInContext("formatSourceLine({id:'123',courseId:'456'})",c),'123 | 456');
+});
+
+test('notification drafts preserve hidden connections and require saving before showing complete',()=>{
+ const c=model(),optOut={checked:true},nodes={reminderOptOutConfirmed:optOut,draftStatus:{}};
+ c.document={getElementById:id=>nodes[id],querySelectorAll:selector=>selector==='[data-source-entry="reminderTo"]'?[{value:''}]:[]};
+ vm.runInContext("state.data={config:{formSources:[{url:'legacy',courseId:'course'}],formSheetNamePrefix:['旧回答'],reminderTo:[]},revision:'r1',counts:{},progress:[{id:'sources',state:'pending'}]};state.step='sources';readCurrent();",c);
+ assert.equal(vm.runInContext("draftValue('sources').reminderOptOutConfirmed",c),true);
+ assert.equal(vm.runInContext("draftValue('sources').formSources[0].courseId",c),'course');
+ assert.equal(vm.runInContext("draftValue('sources').formSheetNamePrefix[0]",c),'旧回答');
+ assert.equal(vm.runInContext("visibleProgress('sources').state",c),'pending');
+ c.document.querySelectorAll=selector=>selector==='[data-source-entry="reminderTo"]'?[{value:'teacher@example.test'}]:[];vm.runInContext('readCurrent()',c);
+ assert.equal(vm.runInContext("draftValue('sources').reminderOptOutConfirmed",c),false);
+ assert.equal(optOut.checked,false);assert.equal(optOut.disabled,true);
 });
 
 test('closing the web console preserves unsaved-input confirmation and only guides closing the tab',async()=>{

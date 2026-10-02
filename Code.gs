@@ -38,7 +38,9 @@ const SEND_BASE_HEADERS = [
 ];
 
 const LEGACY_STUDENT_SHEET_HEADERS = ['No', 'メールアドレス', '名前', 'クラス名', 'コースID', 'studentId'];
-const STUDENT_SHEET_HEADERS = ['No', 'メールアドレス', '出席番号（任意）', '名前', 'クラス名', 'コースID', 'studentId'];
+const NUMBERED_STUDENT_SHEET_HEADERS = ['No', 'メールアドレス', '出席番号（任意）', '名前', 'クラス名', 'コースID', 'studentId'];
+const STUDENT_SHEET_HEADERS = NUMBERED_STUDENT_SHEET_HEADERS.concat(['除外(1)']);
+const ROSTER_SORT_HEADER = '_TURRET_ROSTER_SORT_';
 const MAPPING_SHEET_HEADERS = ['元SS_ID', '元スプシ名', '元シート名', 'クラス名', 'courseId', 'メモ'];
 const SEND_REVIEW_STATUS = '送信確認待ち';
 const SCORING_MANAGEMENT_HEADER = '管理';
@@ -97,6 +99,7 @@ function getScoringTargets_(books,read) {
       targets.push({key:JSON.stringify([id, sheet.getSheetId()]), spreadsheetId:id, sheetId:sheet.getSheetId(),
         spreadsheetName:bookName, sheetName:name, label:bookName + ' / ' + name,
         courseId:String(record && record.courseId || source.courseId || ''), returnEnabled:returnEnabled,
+        namesAvailable:!!record && !record.formUpdate && !record.settingsUpdate && !record.columnSetup,
         warning:returnEnabled ? '' : '返却対象の登録または接頭辞が一致していません。管理画面で確認してください。',
         url:'https://docs.google.com/spreadsheets/d/' + id + '/edit#gid=' + sheet.getSheetId()});
     });
@@ -119,6 +122,23 @@ function resolveScoringTarget_(target,read) {
 }
 
 function scoringGetTargets() { assertWebOperator_(); return getScoringTargets_(); }
+
+/** 採点画面で選択した管理フォームの回答タブ全体に、空欄の名前を補完する。 */
+function scoringRefreshNames(target) {
+  assertWebOperator_();
+  return withAppLock_(function() {
+    const read=scoringReadContext_(),context=resolveScoringTarget_(target,read);
+    const record=read.managed.find(function(r) {
+      return r.kind==='form' && r.ownerSpreadsheetId===context.target.spreadsheetId &&
+        r.ownerSpreadsheetId===read.operation.getId() && r.ownerScriptId===ScriptApp.getScriptId() &&
+        String(r.responseSheetId)===String(context.target.sheetId);
+    });
+    if(!record)throw new Error('名前補完はturretで管理しているフォームの回答シートで利用できます。');
+    assertManagedOwner_(record);
+    if(record.formUpdate || record.settingsUpdate || record.columnSetup)throw new Error('フォーム・列・設定の更新を完了してから名前を補完してください。');
+    return fillManagedNames_(record,context.sheet,undefined,undefined,read);
+  });
+}
 
 function scoringGetConfig() { assertWebOperator_(); return scoringLegacyApiGetConfig_(); }
 function scoringSetConfig(config) {
@@ -551,9 +571,11 @@ function scoringArrangeManagement_(sheet,column,statusHeader) {
     if(sheet.getRange(1,column).getNote()!==note)throw new Error('管理列の移行前情報を保存確認できません。');
   }
   const width=headers.length;
-  if(column!==width)sheet.moveColumns(sheet.getRange(1,column,sheet.getMaxRows(),1),width+1);
+  // 後続列を左へまとめて移し、フォーム回答のテーブルでも範囲外へ移動しない。
+  if(column!==width)sheet.moveColumns(sheet.getRange(1,column+1,sheet.getMaxRows(),width-column),column);
   headers=sheet.getRange(1,1,1,width).getDisplayValues()[0];
-  sheet.moveColumns(sheet.getRange(1,headers.indexOf(status)+1,sheet.getMaxRows(),1),width+1);
+  const statusColumn=headers.indexOf(status)+1;
+  if(statusColumn!==width)sheet.moveColumns(sheet.getRange(1,statusColumn+1,sheet.getMaxRows(),width-statusColumn),statusColumn);
   SpreadsheetApp.flush();
   headers=sheet.getRange(1,1,1,width).getDisplayValues()[0];
   if(headers[width-2]!==SCORING_MANAGEMENT_HEADER || headers[width-1]!==status)throw new Error('管理列と送信状態の配置を確認できません。再実行してください。');
@@ -876,7 +898,7 @@ function withAppLock_(operation) {
 function onOpen() {
   const ui = SpreadsheetApp.getUi();
 
-  ui.createMenu('自動送信システム')
+  ui.createMenu('操作画面')
     .addItem('管理画面を開く', 'connectWebConsole')
     .addItem('採点画面を開く', 'connectScoringConsole')
     .addItem('採点テンプレ作成画面へ', 'openScoringRuleEditor')
@@ -961,7 +983,7 @@ function saveSetupSection(section, payload, expectedRevision) {
 function saveSetupSections(payload, expectedRevision) {
   return withAppLock_(function() {
     const sections = {
-      sources: ['formSources', 'reminderTo', 'formSheetNamePrefix'],
+      sources: ['formSources', 'reminderTo', 'reminderOptOutConfirmed', 'formSheetNamePrefix'],
       fields: ['emailHeader', 'studentNameHeader', 'formStatusHeader', 'scoreSourceHeader', 'replyBodyHeader', 'fields', 'gradeScale'],
       template: ['messageTemplate']
     };
@@ -976,6 +998,8 @@ function saveSetupSections(payload, expectedRevision) {
       }
       Object.keys(values).forEach(function(key) {
         if (sections[section].indexOf(key) < 0) throw new Error('この手順では保存できない設定です: ' + key);
+        if (key==='formStatusHeader' && values[key]!==config.formStatusHeader) throw new Error('送信状態はシステム専用列です。列名は変更できません。');
+        if (key==='replyBodyHeader' && values[key] !== (config.replyBodyHeader || '返信本文')) throw new Error('送信シートの本文列名は固定です。変更できません。');
         config[key] = values[key];
       });
     });
@@ -1032,7 +1056,7 @@ function collectAvailableSourceHeaders_(urlList, prefix) {
     return { headers: headers, warnings: warnings };
   }
   if (normalizedPrefixes.length === 0) {
-    warnings.push('対象シート名の接頭辞が未設定です。設定シートの FORM_SHEET_PREFIX を入力してください。');
+    warnings.push('対象シート名の接頭辞が未設定です。管理画面の「フォームを準備」で回答先を接続してください。');
     return { headers: headers, warnings: warnings };
   }
 
@@ -1139,7 +1163,13 @@ function ensureSheet_(name, headers) {
     sheet.setFrozenRows(1);
   }
 
+  if (name==='クラス一覧' || name===STUDENT_SHEET_NAME) ensureRosterFilter_(sheet,headers.length);
   return sheet;
+}
+
+/** 並べ替えはシートで行う。既存のフィルター条件は変更しない。 */
+function ensureRosterFilter_(sheet,width) {
+  if (!sheet.getFilter()) sheet.getRange(1,1,sheet.getMaxRows(),Math.max(width,sheet.getLastColumn())).createFilter();
 }
 
 function ensureErrorSheet_() {
@@ -1202,6 +1232,69 @@ function createHeaderMap_(headers) {
 
 function makeStudentLookupKey_(courseId, email) {
   return String(courseId || '').trim() + '\t' + String(email || '').trim().toLowerCase();
+}
+
+/** 名簿の物理行・Noに依存せず照合し、順序によって宛先が変わる重複を拒否する。 */
+function readStudentRosterRecords_(sheet) {
+  const values=sheet && sheet.getLastRow()>0 ? sheet.getDataRange().getDisplayValues() : [];
+  if(!values.length)return [];
+  const h=createHeaderMap_(values[0]),seen=new Set();
+  ['メールアドレス','コースID'].forEach(function(key){if(h[key]==null)throw new Error('生徒一覧に必要な列がありません: '+key);});
+  return values.slice(1).filter(function(row){return row.some(function(v){return String(v).trim();});}).map(function(row){
+    const email=String(row[h['メールアドレス']]||'').trim().toLowerCase(),courseId=String(row[h['コースID']]||'').trim();
+    if(!email || !courseId)throw new Error('生徒一覧のメールアドレス・コースIDが空欄です。');
+    const key=makeStudentLookupKey_(courseId,email),flag=String(row[h['除外(1)']]||'').trim();
+    if(seen.has(key))throw new Error('同じ生徒・クラスの行が重複しています。出席番号が一致する場合も重複行を整理してください: '+email+' / '+courseId);
+    if(flag && flag!=='1')throw new Error('生徒一覧の除外(1)は、空欄または1にしてください: '+email);
+    seen.add(key);
+    return {key:key,email:email,courseId:courseId,name:String(row[h['名前']]||'').trim(),className:String(row[h['クラス名']]||'').trim(),
+      studentId:String(row[h.studentId]||'').trim(),number:String(row[h['出席番号（任意）']]||'').trim(),no:String(row[h.No]||''),excluded:flag==='1',row:row};
+  });
+}
+
+function rosterCompareText_(a,b) {return String(a||'').localeCompare(String(b||''),'ja',{numeric:true});}
+/** 整列が途中終了した場合も、専用の末尾列だけを除去して次の実行へ収束させる。 */
+function recoverRosterSortColumn_(sheet) {
+  if(!sheet || typeof sheet.getMaxColumns!=='function')return;
+  const last=sheet.getLastColumn();
+  if(last===sheet.getMaxColumns() && sheet.getRange(1,last).getValue()===ROSTER_SORT_HEADER)sheet.deleteColumns(last,1);
+}
+function rosterCompareRows_(name,headers,a,b) {
+  const h=createHeaderMap_(headers);
+  if(name==='クラス一覧')return rosterCompareText_(a[h['クラス名']],b[h['クラス名']])||rosterCompareText_(a[h['コースID']],b[h['コースID']]);
+  const an=String(a[h['出席番号（任意）']]||'').trim(),bn=String(b[h['出席番号（任意）']]||'').trim();
+  return rosterCompareText_(a[h['クラス名']],b[h['クラス名']])||rosterCompareText_(a[h['コースID']],b[h['コースID']])||
+    Number(String(a[h['除外(1)']]||'').trim()==='1')-Number(String(b[h['除外(1)']]||'').trim()==='1')||
+    Number(!an)-Number(!bn)||rosterCompareText_(an,bn)||rosterCompareText_(a[h['名前']],b[h['名前']])||
+    rosterCompareText_(String(a[h['メールアドレス']]||'').toLowerCase(),String(b[h['メールアドレス']]||'').toLowerCase());
+}
+
+/** 手編集したセルの数式・書式を値へ変換せず、行全体をSheetsのsortで移動する。Noは保持する。 */
+function sortRosterSheet_(name) {
+  if(name!=='クラス一覧' && name!==STUDENT_SHEET_NAME)throw new Error('整列対象が不正です。');
+  const sheet=getAppSpreadsheet_().getSheetByName(name);
+  if(!sheet)throw new Error('一覧を取得してから整列してください。');
+  recoverRosterSortColumn_(sheet);
+  if(name===STUDENT_SHEET_NAME){studentRosterLayout_(sheet);readStudentRosterRecords_(sheet);ensureStudentSheetForSync_();}
+  else if(!hasMatchingHeaders_(sheet,['クラス名','コースID','同期対象(1)']))throw new Error('クラス一覧の構成が一致しません。');
+  const count=sheet.getLastRow()-1;if(count<2)return;
+  const values=sheet.getDataRange().getDisplayValues(),headers=values[0];
+  const order=values.slice(1).map(function(row,index){return {row:row,index:index};});
+  order.sort(function(a,b){return rosterCompareRows_(name,headers,a.row,b.row)||a.index-b.index;});
+  const ranks=Array(count);order.forEach(function(item,index){ranks[item.index]=[index+1];});
+  const column=sheet.getMaxColumns()+1;
+  sheet.insertColumnsAfter(column-1,1);
+  let failure=null;
+  try {
+    sheet.getRange(1,column).setValue(ROSTER_SORT_HEADER);
+    sheet.getRange(2,column,count,1).setValues(ranks);
+    sheet.getRange(2,1,count,column).sort({column:column,ascending:true});
+    SpreadsheetApp.flush();
+  } catch(error){failure=error;throw error;}
+  finally {
+    try {sheet.deleteColumns(column,1);}
+    catch(error){throw new Error('整列の一時列を削除できませんでした。管理画面で一覧の整列を再実行してください。'+(failure ? failure+' / ' : '')+error);}
+  }
 }
 
 function makeMappingLookupKey_(sourceId, sheetName) {
@@ -1282,7 +1375,7 @@ function isManagedInternalSheet_(name, sourceId) {
 
 function buildDefaultConfig_() {
   return {
-    reminderTo: [], formSheetNamePrefix: [], formSources: [], fields: [], gradeScale: [],
+    reminderTo: [], reminderOptOutConfirmed: false, formSheetNamePrefix: [], formSources: [], fields: [], gradeScale: [],
     emailHeader: '', studentNameHeader: '', formStatusHeader: '', scoreSourceHeader: '',
     replyBodyHeader: '返信本文', messageTemplate: ''
   };
@@ -1425,6 +1518,7 @@ function getFieldSendHeader_(field) {
 function normalizeAppConfig_(rawConfig) {
   const defaults = buildDefaultConfig_();
   const config = rawConfig || {};
+  const reminderTo = normalizeStringArray_(config.reminderTo != null ? config.reminderTo : defaults.reminderTo);
   const formSources = Array.isArray(config.formSources) ? config.formSources : [];
   const fields = Array.isArray(config.fields) ? config.fields : [];
   const normalizedFields = fields.map(function(field, index) { return normalizeFieldConfig_(field, index); });
@@ -1439,7 +1533,8 @@ function normalizeAppConfig_(rawConfig) {
   }
 
   return {
-    reminderTo: normalizeStringArray_(config.reminderTo != null ? config.reminderTo : defaults.reminderTo),
+    reminderTo: reminderTo,
+    reminderOptOutConfirmed: !reminderTo.length && config.reminderOptOutConfirmed === true,
     formSheetNamePrefix: normalizeStringArray_(config.formSheetNamePrefix != null ? config.formSheetNamePrefix : defaults.formSheetNamePrefix),
     emailHeader: String(config.emailHeader != null ? config.emailHeader : defaults.emailHeader).trim(),
     studentNameHeader: String(config.studentNameHeader != null ? config.studentNameHeader : defaults.studentNameHeader).trim(),
@@ -1457,10 +1552,10 @@ function validateAppConfig_(config) {
   validateConfigDraft_(config);
   // reminderTo は任意。リマインダー送信時のみチェックする。
   if (config.formSources.length === 0) {
-    throw new Error('フォーム回答スプレッドシートURLを1件以上入力してください。');
+    throw new Error('回答先が未設定です。管理画面の「フォームを準備」で回答先を接続してください。');
   }
   if (config.formSheetNamePrefix.length === 0) {
-    throw new Error('管理画面の「フォームと通知先」で対象シート名の接頭辞を入力してください。');
+    throw new Error('対象シート名の接頭辞が未設定です。「フォームを準備」で回答先を接続してください。');
   }
   if (SEND_BASE_HEADERS.indexOf(config.replyBodyHeader) >= 0) {
     throw new Error('返信本文の列名が送信シートの固定列名と重複しています: ' + config.replyBodyHeader);
@@ -1519,6 +1614,7 @@ function validateAppConfig_(config) {
 /** 正規化前に入力を厳密に確認する。未完成の下書き項目は許容する。 */
 function validateConfigDraft_(config) {
   if (!config || typeof config !== 'object' || Array.isArray(config)) throw new Error('設定の形式が不正です。');
+  if (config.reminderOptOutConfirmed !== undefined && typeof config.reminderOptOutConfirmed !== 'boolean') throw new Error('メール通知を利用しない確認は真偽値で指定してください。');
   ['emailHeader', 'studentNameHeader', 'formStatusHeader', 'scoreSourceHeader', 'scoreFieldKey', 'replyBodyHeader', 'messageTemplate'].forEach(function(key) {
     if (config[key] !== undefined && typeof config[key] !== 'string') throw new Error('文字列で入力してください: ' + key);
   });
@@ -1893,7 +1989,9 @@ function ensureSendSheet_(config) {
 /** 列数も検査し、独自列のある名簿を同期で上書きしない。 */
 function studentRosterLayout_(sheet) {
   if (!sheet || !sheet.getLastRow()) return 'empty';
+  recoverRosterSortColumn_(sheet);
   if (sheet.getLastColumn() === STUDENT_SHEET_HEADERS.length && hasMatchingHeaders_(sheet, STUDENT_SHEET_HEADERS)) return 'current';
+  if (sheet.getLastColumn() === NUMBERED_STUDENT_SHEET_HEADERS.length && hasMatchingHeaders_(sheet, NUMBERED_STUDENT_SHEET_HEADERS)) return 'numbered';
   if (sheet.getLastColumn() === LEGACY_STUDENT_SHEET_HEADERS.length && hasMatchingHeaders_(sheet, LEGACY_STUDENT_SHEET_HEADERS)) return 'legacy';
   throw new Error('「生徒一覧」の構成が一致しません。既存データを退避してから見出しを確認してください。');
 }
@@ -1922,12 +2020,29 @@ function ensureStudentSheetForSync_() {
 
   const layout = studentRosterLayout_(sheet);
   if (layout === 'legacy') migrateStudentAttendanceColumn_(sheet);
+  if (layout === 'legacy' || layout === 'numbered') {
+    const oldMax=typeof sheet.getMaxColumns==='function' ? sheet.getMaxColumns() : 8;
+    let added=false;
+    try {
+      if(oldMax<8){sheet.insertColumnsAfter(oldMax,8-oldMax);added=true;}
+      sheet.getRange(1,8).setValue('除外(1)');SpreadsheetApp.flush();
+    } catch(error) {
+      const rollback=[];
+      try {sheet.getRange(1,8).clearContent();}catch(e){rollback.push(String(e));}
+      if(added)try{sheet.deleteColumns(oldMax+1,8-oldMax);}catch(e){rollback.push(String(e));}
+      if(layout==='legacy')try{sheet.deleteColumn(3);}catch(e){rollback.push(String(e));}
+      try{SpreadsheetApp.flush();}catch(e){rollback.push(String(e));}
+      if(rollback.length)throw new Error('名簿の除外列移行からの復旧が未完了です。列構成を確認してください。'+error+' / '+rollback.join(' / '));
+      throw error;
+    }
+  }
   if (layout === 'empty') {
     sheet.clear();
     sheet.getRange(1, 1, 1, STUDENT_SHEET_HEADERS.length).setValues([STUDENT_SHEET_HEADERS]);
   }
 
   sheet.setFrozenRows(1);
+  ensureRosterFilter_(sheet,STUDENT_SHEET_HEADERS.length);
   return sheet;
 }
 
@@ -2266,7 +2381,7 @@ function collectFormTargetSheets_(config) {
   const prefixes = Array.isArray(config && config.formSheetNamePrefix) ? config.formSheetNamePrefix : [];
   const formSources = Array.isArray(config && config.formSources) ? config.formSources : [];
   if (formSources.length === 0) {
-    throw new Error('管理画面の「フォームと通知先」にフォーム回答スプレッドシートを登録してください。');
+    throw new Error('管理画面の「フォームを準備」で回答先スプレッドシートを接続してください。');
   }
 
   const seen = {};
@@ -2429,6 +2544,7 @@ function classroomdata() {
 function classroomdataUnlocked_() {
   const ss = getAppSpreadsheet_();
   const existing = ss.getSheetByName('クラス一覧');
+  recoverRosterSortColumn_(existing);
   const flags = new Map();
   if (existing && existing.getLastRow() > 0) {
     if (!hasMatchingHeaders_(existing, ['クラス名', 'コースID', '同期対象(1)'])) throw new Error('クラス一覧の構成が一致しません。見出しを確認してください。');
@@ -2442,6 +2558,9 @@ function classroomdataUnlocked_() {
     Array.prototype.push.apply(courses, response.courses || []);
     pageToken = response.nextPageToken || '';
   } while (pageToken);
+  const courseKeys=new Set();
+  courses.forEach(function(course){const id=String(course && course.id || '').trim(),name=String(course && course.name || '').trim();if(!id || !name || courseKeys.has(id))throw new Error('取得したクラス一覧に空欄または重複があります。既存一覧は保持しています。');courseKeys.add(id);});
+  courses.sort(function(a,b){return rosterCompareText_(a.name,b.name)||rosterCompareText_(a.id,b.id);});
   replaceRosterRows_('クラス一覧', ['クラス名', 'コースID', '同期対象(1)'], courses.map(function(course) {
     const id = String(course.id);
     return [course.name, id, flags.has(id) ? flags.get(id) : ''];
@@ -2452,14 +2571,18 @@ function classroomdataUnlocked_() {
 function replaceRosterRows_(name, headers, rows) {
   const ss = getAppSpreadsheet_();
   const snapshot = snapshotSheetContents_(ss, name);
+  let expandedSheet=null,oldMax=0;
   try {
     const sheet = ss.getSheetByName(name) || ss.insertSheet(name);
+    oldMax=typeof sheet.getMaxColumns==='function' ? sheet.getMaxColumns() : headers.length;
+    if(oldMax<headers.length){sheet.insertColumnsAfter(oldMax,headers.length-oldMax);expandedSheet=sheet;}
     sheet.clearContents();
     sheet.getRange(1, 1, rows.length + 1, headers.length).setValues([headers].concat(rows));
     sheet.setFrozenRows(1);
     SpreadsheetApp.flush();
+    if (name==='クラス一覧' || name===STUDENT_SHEET_NAME) ensureRosterFilter_(sheet,headers.length);
   } catch (error) {
-    try { restoreSheetContents_(ss, snapshot); SpreadsheetApp.flush(); }
+    try { restoreSheetContents_(ss, snapshot); if(expandedSheet)expandedSheet.deleteColumns(oldMax+1,headers.length-oldMax); SpreadsheetApp.flush(); }
     catch (rollbackError) { throw new Error('名簿更新と復旧に失敗しました。シートを確認してください。' + error + ' / ' + rollbackError); }
     throw error;
   }
@@ -2480,28 +2603,27 @@ function studentdataMultiUnlocked_() {
   });
   if (!selected.length) return '同期対象クラスがありません。クラス一覧の同期対象に1を入力してください。既存の生徒一覧は保持しています。';
   const studentSheet = ss.getSheetByName(STUDENT_SHEET_NAME);
-  const layout = studentRosterLayout_(studentSheet), attendance = new Map();
-  if (layout === 'current') {
-    const values = studentSheet.getDataRange().getDisplayValues(), headers = createHeaderMap_(values[0]);
-    values.slice(1).forEach(function(row) {
-      const email = String(row[headers['メールアドレス']] || '').trim(), courseId = String(row[headers['コースID']] || '').trim();
-      if (!email || !courseId) return;
-      const key = makeStudentLookupKey_(courseId, email), number = String(row[headers['出席番号（任意）']] || '').trim();
-      if (attendance.has(key) && attendance.get(key) !== number) throw new Error('同じ生徒・クラスの出席番号が一致しません。生徒一覧の重複行を確認してください。');
-      attendance.set(key, number);
-    });
-  }
+  const layout = studentRosterLayout_(studentSheet), stored = new Map();
+  readStudentRosterRecords_(studentSheet).forEach(function(record){stored.set(record.key,record);});
   const rows = [];
   const courseIds = [];
+  const fetchedKeys=new Set();
   selected.forEach(function(item) {
     const courseId = String(item[1]).trim();
     if (courseIds.indexOf(courseId) >= 0) return;
     courseIds.push(courseId);
     getStudentListMax(courseId).forEach(function(student) {
       const key = makeStudentLookupKey_(courseId, student.email);
-      rows.push([rows.length + 1, student.email, attendance.has(key) ? attendance.get(key) : '', student.name, item[0] || '', courseId, student.studentId]);
+      if(!student.email || !student.studentId || fetchedKeys.has(key))throw new Error('取得した生徒一覧に空欄または重複があります。既存名簿は保持しています。');
+      fetchedKeys.add(key);
+      const previous=stored.get(key);
+      rows.push([0, student.email, previous ? previous.number : '', student.name, item[0] || '', courseId, student.studentId,previous && previous.excluded ? '1' : '']);
     });
   });
+  // Classroomから一度消えた除外者も記録を保持し、再登録時に除外が外れないようにする。
+  stored.forEach(function(s){if(s.excluded && !fetchedKeys.has(s.key))rows.push([0,s.email,s.number,s.name,s.className,s.courseId,s.studentId,'1']);});
+  rows.sort(function(a,b){return rosterCompareRows_(STUDENT_SHEET_NAME,STUDENT_SHEET_HEADERS,a,b);});
+  rows.forEach(function(row,index){row[0]=index+1;});
   // Classroomの全取得に成功するまでは、見出しも既存の名簿も変更しない。
   const migrated = layout === 'legacy' && migrateStudentAttendanceColumn_(studentSheet);
   try { replaceRosterRows_(STUDENT_SHEET_NAME, STUDENT_SHEET_HEADERS, rows); }
@@ -2513,7 +2635,7 @@ function studentdataMultiUnlocked_() {
     throw error;
   }
   PropertiesService.getScriptProperties().setProperty('TURRET_ROSTER_SELECTION', JSON.stringify(courseIds.sort()));
-  return '生徒一覧を更新しました（' + rows.length + '名）。';
+  return '生徒一覧を更新しました（対象' + rows.filter(function(r){return r[7]!=='1';}).length + '名、除外' + rows.filter(function(r){return r[7]==='1';}).length + '名）。';
 }
 
 function getStudentListMax(classId) {
@@ -2623,6 +2745,7 @@ function collectSendPreparationCandidates_(config, cache, guard, sendKeys) {
 
 function prepareSendDataUnlocked_() {
   if(typeof assertNoManagedFormUpdate_==='function')assertNoManagedFormUpdate_();
+  const rosterRecords=readStudentRosterRecords_(getStudentSheet_());
   if(typeof refreshAllManagedNames_==='function')refreshAllManagedNames_();
   const config = getConfig_();
   validateAppConfig_(config);
@@ -2648,8 +2771,8 @@ function prepareSendDataUnlocked_() {
 
   const studentMap = new Map();
   const studentsByEmail = new Map();
-  for (let i = 1; i < studentValues.length; i++) {
-    const row = studentValues[i];
+  for (const rosterRecord of rosterRecords) {
+    const row = rosterRecord.row;
     const email = String(row[studentHeaderMap['メールアドレス']] || '').trim();
     const courseId = String(row[studentHeaderMap['コースID']] || '').trim();
     const lookupKey = makeStudentLookupKey_(courseId, email);
@@ -2658,7 +2781,8 @@ function prepareSendDataUnlocked_() {
       name: String(row[studentHeaderMap['名前']] || '').trim(),
       className: String(row[studentHeaderMap['クラス名']] || '').trim(),
       courseId: courseId,
-      studentId: String(row[studentHeaderMap['studentId']] || '').trim()
+      studentId: String(row[studentHeaderMap['studentId']] || '').trim(),
+      excluded:rosterRecord.excluded
     };
     studentMap.set(lookupKey, record);
 
@@ -2754,6 +2878,12 @@ function prepareSendDataUnlocked_() {
         '生徒一覧にメールアドレスが存在しません'
       ]);
       stateUpdates.push({ legacyRow: item.legacyRow, state: '準備×', srcState: '準備×', srcSsId: srcSsId, srcSheetName: srcSheetName, srcRow: srcRow });
+      continue;
+    }
+
+    if(student.excluded) {
+      errorSheet.appendRow([new Date(),SEND_SHEET_NAME,'-',email,'','ROSTER_EXCLUDED','このクラスの生徒は名簿で除外されています。別クラスへの振り替えは行いません。']);
+      stateUpdates.push({legacyRow:item.legacyRow,state:'準備×',srcState:'準備×',srcSsId:srcSsId,srcSheetName:srcSheetName,srcRow:srcRow});
       continue;
     }
 
@@ -2982,6 +3112,17 @@ function sendMessagesUnlocked_() {
     }
     if (!scoringMayReturn_(scoringGuard,responseKey)) { reviewCount++;continue; }
 
+    // スクリプトのロックはシートの手編集を止めないため、投稿ごとに名簿を読み直す。
+    const currentRoster=new Map();
+    readStudentRosterRecords_(getStudentSheet_()).forEach(function(s){if(!s.excluded)currentRoster.set(s.key,s);});
+    const recipient=currentRoster.get(makeStudentLookupKey_(courseId,email));
+    if(!recipient || recipient.studentId!==studentId) {
+      statusCell.setValue(SEND_REVIEW_STATUS);
+      errorSheet.appendRow([new Date(),SEND_SHEET_NAME,r+1,email,SEND_REVIEW_STATUS,'ROSTER_RECIPIENT_CHANGED','生徒が名簿から削除・除外されたか、studentIdが変更されています。宛先を確認してください。']);
+      reviewCount++;
+      continue;
+    }
+
     // 外部 API を呼ぶ前に処理位置を保存する。ここで停止した場合や結果が不明な場合、
     // 次の実行で再投稿してはならない。
     statusCell.setValue(SEND_REVIEW_STATUS);
@@ -3054,7 +3195,7 @@ function remindUngradedAndErrorsUnlocked_() {
   validateAppConfig_(config);
 
   if (!Array.isArray(config.reminderTo) || config.reminderTo.length === 0) {
-    throw new Error('リマインドメール送信先が設定されていません。管理画面の「フォームと通知先」で通知先を入力してください。');
+    throw new Error('リマインドメール送信先が設定されていません。管理画面の「回答先と通知先」で通知先を入力してください。');
   }
 
   const submissionSourceHeader = config.emailHeader;

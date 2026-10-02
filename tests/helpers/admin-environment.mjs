@@ -21,6 +21,7 @@ export class AdminSheet {
   getLastColumn() { return Math.max(0, ...this.rows.map(row => row.length)); }
   getMaxColumns() { return this.maxColumns; }
   getMaxRows() { return 1000; }
+  getFilter() { return this.filter || null; }
   getDataRange() { return this.getRange(1, 1, Math.max(1, this.getLastRow()), Math.max(1, this.getLastColumn())); }
   getRange(row, col, height = 1, width = 1) {
     const read = () => Array.from({length:height}, (_,y) => Array.from({length:width},(_,x)=>this.rows[row+y-1]?.[col+x-1] ?? ''));
@@ -35,7 +36,8 @@ export class AdminSheet {
       setValues: values => { this.beforeWrite?.(values); values.forEach((r,y)=>r.forEach((value,x)=>{this.rows[row+y-1] ??=[]; this.rows[row+y-1][col+x-1]=value;})); return range; },
       clearContent: () => range.setValues(Array.from({length:height},()=>Array(width).fill(''))),
       setNumberFormat: () => range, setFontWeight: () => range, setBackground: () => range, setWrap: () => range,
-      setFormulas: values => range.setValues(values), clearDataValidations: () => range
+      setFormulas: values => range.setValues(values), clearDataValidations: () => range,
+      createFilter: () => { if(this.filter)throw Error('filter exists');return this.filter={row,column:col,rows:height,columns:width}; }
     }; return range;
   }
   appendRow(row) { this.rows.push([...row]); return this; }
@@ -47,7 +49,7 @@ export class AdminSheet {
   insertColumnsAfter(start,count) { this.maxColumns+=count; return this; }
   insertColumnBefore(col) { this.rows.forEach(r=>r.splice(col-1,0,''));this.maxColumns++;return this; }
   deleteColumn(col) { this.rows.forEach(r=>r.splice(col-1,1));this.maxColumns--;return this; }
-  moveColumns(range,to) {const from=range.getColumn()-1,width=this.getLastColumn();for(const rows of [this.rows,this.notes])for(const row of rows){while(row.length<width)row.push('');const [value]=row.splice(from,1);row.splice(to-1-(from<to-1?1:0),0,value);}return this;}
+  moveColumns(range,to) {const from=range.getColumn()-1,count=range.getNumColumns(),width=this.getLastColumn();for(const rows of [this.rows,this.notes])for(const row of rows){while(row.length<width)row.push('');const values=row.splice(from,count);row.splice(to-1-(from<to-1?count:0),0,...values);}return this;}
   setFrozenRows() { return this; }
   setColumnWidths() { return this; }
   insertRowsAfter(start,count) { return this; }

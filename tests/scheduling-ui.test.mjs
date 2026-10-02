@@ -13,7 +13,7 @@ test('scheduled forms offer changing/cancelling and deadline controls with expli
  const c=model();vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'r1',kind:'form',stage:'scheduled',label:'クラス',materialId:'m1',scheduledTime:'2026-10-01T01:00:00Z',closesAt:'2026-10-02T03:00:00Z',closeState:'error',closeError:'接続失敗'}]};",c);
  const html=vm.runInContext("renderForms('publish')",c);
  assert.match(html,/予約済み/);assert.match(html,/2026-10-01T10:00/);assert.match(html,/data-form-command="reschedule"/);
- assert.match(html,/data-form-command="cancel-schedule"/);assert.match(html,/data-form-command="set-close"/);assert.match(html,/接続失敗/);
+ assert.match(html,/<option value="cancel-schedule">/);assert.match(html,/data-form-command="set-close"/);assert.match(html,/接続失敗/);
  assert.doesNotMatch(html,/data-form-command="publish" data-record="r1"/);
 });
 test('schedule drafts remain attached to their record across refreshes',()=>{

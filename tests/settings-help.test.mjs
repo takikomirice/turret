@@ -75,12 +75,13 @@ test('pointer departure dismisses help and hovering the explanation keeps it rea
 test('routine explanations move to help across setup, automation, and settings',()=>{
   const c=model();
   for(const [expression,explanation] of [
-    ["renderStep('sources')",'新規作成した回答先は自動登録済み'],
+    ["renderStep('sources')",'未採点・未送信・エラー'],
     ['renderFields()','差し込み名は半角英数字'],
     ['renderTemplate()','本文のカーソル位置に挿入'],
     ['renderAutomation()','指定した1時間の間に実行'],
     ['renderSettings()','名簿・送信履歴・自動実行の有効状態'],
-    ["renderForms('prepare')",'採点・コメントなど必要な列だけ追加'],
+    ["renderForms('prepare')",'作成時は非公開で準備します'],
+    ['renderResponseColumns()','同名の既存列と回答・採点値・入力規則は保持します'],
     ["renderForms('publish')",'Classroomの「授業」に資料を即時投稿'],
   ]){
     const markup=vm.runInContext(expression,c);

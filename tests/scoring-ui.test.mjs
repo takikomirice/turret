@@ -52,6 +52,46 @@ function readyPage(){
  p.load=()=>{p.h.loadInitData();p.calls.at(-1).success(p.response());};p.load();return p;
 }
 
+function namesPage(){
+ const p=readyPage();p.h.state.targets={[p.h.state.currentSheet]:{namesAvailable:true}};p.load();return p;
+}
+
+test('scoring name enrichment preserves grading drafts and refreshes the displayed student name',()=>{
+ const p=namesPage(),button=p.elements.get('refreshNamesBtn');assert.ok(button);assert.equal(button.disabled,false);
+ p.h.els.scoreInputs[0].value='5';p.h.markDirty();button.onclick();
+ const request=p.calls.at(-1);assert.equal(request.method,'scoringRefreshNames');assert.equal(request.payload,'["book",1]');
+ assert.equal(button.disabled,true);const count=p.calls.length;button.onclick();assert.equal(p.calls.length,count);
+ p.h.els.scoreInputs[0].value='6';p.h.markDirty();
+ request.success({updated:1,unmatched:2,skipped:0});const reload=p.calls.at(-1);assert.equal(reload.method,'scoringGetInitData');
+ const response=p.response();response.rows[0].name='補完した名前';reload.success(response);
+ assert.match(p.elements.get('studentName').textContent,/補完した名前/);assert.equal(p.h.els.scoreInputs[0].value,'6');
+ assert.match(p.elements.get('nameRefreshStatus').textContent,/補完 1件.*未照合 2件/);assert.equal(button.disabled,false);
+});
+
+test('name enrichment failures retain inputs and allow retry; unsupported targets do not send requests',()=>{
+ const p=namesPage(),button=p.elements.get('refreshNamesBtn');assert.ok(button);
+ p.h.els.scoreInputs[0].value='5';p.h.markDirty();button.onclick();p.calls.at(-1).failure(Error('名簿がありません'));
+ assert.equal(button.disabled,false);assert.equal(p.h.els.scoreInputs[0].value,'5');assert.match(p.elements.get('nameRefreshStatus').textContent,/名簿がありません/);
+ p.h.state.targets[p.h.state.currentSheet].namesAvailable=false;p.load();assert.equal(button.disabled,true);
+ const count=p.calls.length;button.onclick();assert.equal(p.calls.length,count);
+});
+
+test('a name enrichment response for the previous target cannot reload a newly selected sheet',()=>{
+ const p=namesPage(),button=p.elements.get('refreshNamesBtn');assert.ok(button);button.onclick();const request=p.calls.at(-1);
+ p.h.state.currentSheet='["other",2]';p.h.state.targets[p.h.state.currentSheet]={namesAvailable:true};p.load();const count=p.calls.length;
+ request.success({updated:1,unmatched:0,skipped:0});assert.equal(p.calls.length,count);assert.equal(p.h.state.currentSheet,'["other",2]');
+ assert.equal(p.elements.get('nameRefreshStatus').textContent,'');assert.equal(button.disabled,false);
+});
+
+test('loading, grading saves and failed local persistence prevent name enrichment requests',()=>{
+ for(const blocked of ['loading','saving','storage']){
+  const p=namesPage(),button=p.elements.get('refreshNamesBtn');assert.ok(button);
+  if(blocked==='storage'){p.h.els.scoreInputs[0].value='5';p.h.markDirty();p.storage.set=()=>{throw Error('quota');};}
+  else p.h.state[blocked]=true;
+  const count=p.calls.length;button.onclick();assert.equal(p.calls.length,count);
+ }
+});
+
 test('lesson timing and duplicate status have independent warning colors across row changes',()=>{
  const p=readyPage();
  const contents=el=>el.textContent+(el.children || []).map(contents).join('');

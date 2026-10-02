@@ -155,14 +155,46 @@ test('an unverified bound URL is never offered as a working web link',()=>{
  assert.doesNotMatch(html,/\/deleted\/exec/);assert.match(html,/一度開/);
 });
 
-test('authorized published entry registers its URL and rejects other viewers before writing',()=>{
+for(const url of [
+ 'https://script.google.com/macros/s/current/exec',
+ 'https://script.google.com/a/macros/e.osakamanabi.jp/s/current/exec',
+ 'https://script.google.com/a/e.osakamanabi.jp/macros/s/current/exec'
+])test('authorized published entry registers its URL for all menu screens and rejects other viewers: '+url,()=>{
  const {c,props}=adminEnvironment();c.Session.getActiveUser=c.Session.getEffectiveUser=()=>({getEmail:()=> 'owner@example.com'});
- c.ScriptApp.getScriptId=()=> 'script-one';c.ScriptApp.getService=()=>({getUrl:()=> 'https://script.google.com/macros/s/current/exec'});
+ c.ScriptApp.getScriptId=()=> 'script-one';c.ScriptApp.getService=()=>({getUrl:()=>url});
  const html={getContent:()=>'<script></script>',setContent(){return this;},setTitle(){return this;},addMetaTag(){return this;}};
  c.HtmlService={createHtmlOutputFromFile:name=>{assert.equal(name,'Setting');return html;}};assert.equal(c.doGet(),html);
- assert.equal(c.getVerifiedWebConsoleUrl_(),'https://script.google.com/macros/s/current/exec');
+ assert.equal(c.getVerifiedWebConsoleUrl_(),url);
+ assert.deepEqual(JSON.parse(props.get('TURRET_WEB_ENTRY')),{scriptId:'script-one',url});
+ let dialog='';c.HtmlService.createHtmlOutput=value=>{dialog=value;return {setWidth(){return this;},setHeight(){return this;}};};
+ c.SpreadsheetApp.getUi=()=>({showModelessDialog(){}});
+ for(const [entry,suffix] of [['connectWebConsole',''],['connectScoringConsole','?page=scoring'],['openScoringRuleEditor','?page=templates']]){
+  c[entry]();assert.ok(dialog.includes('href="'+url+suffix+'"'),entry+' must open the registered deployment');
+ }
  props.delete('TURRET_WEB_ENTRY');c.Session.getActiveUser=()=>({getEmail:()=> 'other@example.com'});
  assert.throws(()=>c.doGet(),/本人/);assert.equal(props.has('TURRET_WEB_ENTRY'),false);
+});
+
+test('development and untrusted URLs never replace a registered published entry',()=>{
+ const {c,props}=adminEnvironment();const url='https://script.google.com/macros/s/current/exec';
+ c.ScriptApp.getScriptId=()=> 'script-one';c.ScriptApp.getService=()=>({getUrl:()=>url});c.rememberWebConsoleUrl_();
+ const stored=props.get('TURRET_WEB_ENTRY');
+ for(const rejected of [
+  null,undefined,'',
+  'https://script.google.com/macros/s/current/dev',
+  'https://script.google.com/a/macros/e.osakamanabi.jp/s/current/dev',
+  'https://script.google.com/a/e.osakamanabi.jp/macros/s/current/dev',
+  'http://script.google.com/a/e.osakamanabi.jp/macros/s/current/exec',
+  'https://example.com/a/e.osakamanabi.jp/macros/s/current/exec',
+  'https://script.google.com.example.com/a/e.osakamanabi.jp/macros/s/current/exec',
+  'https://script.google.com/a/e.osakamanabi.jp/macros/s/current/exec?next=https://example.com',
+  'https://script.google.com/a/e.osakamanabi.jp/macros/s/current/exec/extra'
+ ]){
+  c.ScriptApp.getService=()=>({getUrl:()=>rejected});c.rememberWebConsoleUrl_();
+  assert.equal(c.isPublishedWebConsoleUrl_(rejected),false,String(rejected));
+  assert.equal(props.get('TURRET_WEB_ENTRY'),stored,'invalid URL must preserve the registered entry');
+  assert.equal(c.getVerifiedWebConsoleUrl_(),url);
+ }
 });
 
 for(const entry of ['openSettingsDialog','openMaintenanceDialog','openManualActionsDialog'])test('legacy entry redirects to web connection: '+entry,()=>{

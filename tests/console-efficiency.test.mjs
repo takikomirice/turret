@@ -12,6 +12,7 @@ test('empty send with 5,000 answers does not open or read answer workbooks',()=>
 
 function queued(){
  const e=scoringEnvironment(),sheet=e.c.ensureSendSheet_(e.c.getConfig_());
+ e.sheets.set('生徒一覧',new AdminSheet('生徒一覧',[['メールアドレス','名前','コースID','studentId'],['student@example.com','生徒','100','kid']]));
  const headers=sheet.rows[0];
  const add=(row,status='未')=>sheet.rows.push(headers.map(h=>({'元SS_ID':sourceId,'元シート名':'回答 1','元行番号':row,'メールアドレス':'student@example.com','名前':'生徒','コースID':'100','studentId':'kid','返信本文':'本文','送信状態':status}[h]??'')));
  return {...e,sheet,add};

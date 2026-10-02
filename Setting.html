@@ -15,6 +15,7 @@
  --shadow:#14342a33;--backdrop:#18332d66;
 }
 .grade-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}.grade-toolbar select,.grade-toolbar input{width:auto;max-width:100%}.grade-steps{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;color:var(--muted)}.grade-steps [aria-current]{font-weight:700;color:var(--text)}.grade-classes{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}.grade-classes input{width:auto}.grade-issue{padding:16px;border:1px solid var(--border);border-radius:8px;margin:12px 0}.grade-response{padding:12px;border-bottom:1px solid var(--border)}.grade-preview{overflow:auto;max-height:65vh;margin:16px 0}.grade-preview th{position:sticky;top:0;background:var(--surface)}.grade-toolbar code{overflow-wrap:anywhere;max-width:80%}
+.schedule-row,.operation-row{display:flex;align-items:flex-end;gap:8px;margin:10px 0}.schedule-row>div{flex:1;min-width:0}.schedule-row label{display:block;margin-bottom:4px}.schedule-row input{width:100%;min-width:0}.schedule-row>button,.operation-row>button{flex-shrink:0;white-space:nowrap}.operation-row select{flex:1;min-width:160px}.individual-registration{min-width:320px}.individual-registration details{margin-bottom:8px}.individual-marker{font-size:11px;color:var(--teal);font-weight:600}.individual-marker[hidden]{display:none}#batchSchedules section+section{border-top:1px solid var(--line);margin-top:14px;padding-top:12px}.batch-post{border-top:1px solid var(--line);padding-top:14px}#batchSchedules .schedule-row{max-width:640px}
 </style>
 <style>
 *{box-sizing:border-box}
@@ -221,8 +222,8 @@ h2{font-size:21px}
 @media(max-width:760px){.field-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:520px){.field-grid{grid-template-columns:1fr}}
 
-.extra-columns{margin:12px 0}.extra-column{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;gap:8px;align-items:start;padding:8px 0;border-bottom:1px solid var(--line)}.extra-column details{margin:0}.extra-column>.actions{margin:22px 0 0;gap:4px}.extra-column button{margin:0;padding:5px 10px}@media(max-width:600px){.extra-column{grid-template-columns:minmax(0,1fr) auto}.extra-column details{grid-column:1}.extra-column>.actions{grid-column:2;grid-row:1}}
-.form-table{width:100%;border-collapse:collapse;font-size:13px}.form-table th,.form-table td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px}.form-table .actions{margin:4px 0;gap:5px}.form-table button{padding:4px 8px;font-size:12px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.form-grid .wide{grid-column:1/-1}.form-table a,.form-links a{color:var(--teal);margin-right:10px}.form-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.form-table small{display:block;color:var(--muted)}.form-table td:first-child{min-width:150px}.form-entries{overflow-x:auto}.form-status{font-size:12px;font-weight:600}.operation-welcome{max-width:540px;margin:30px auto}.form-grid textarea{min-height:54px}.web-copy{margin-top:16px}@media(max-width:700px){.form-grid,.form-labels{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}}
+.extra-columns{margin:12px 0}.extra-column{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:start;padding:8px 0;border-bottom:1px solid var(--line)}.extra-column details{margin:0}.extra-column>.actions{margin:22px 0 0;gap:4px}.extra-column button{margin:0;padding:5px 10px}@media(max-width:600px){.extra-column{grid-template-columns:minmax(0,1fr) auto}.extra-column details{grid-column:1}.extra-column>.actions{grid-column:2;grid-row:1}}
+.form-table{width:100%;border-collapse:collapse;font-size:13px}.form-table th,.form-table td{text-align:left;vertical-align:top;border-bottom:1px solid var(--line);padding:8px}.form-table .actions{margin:4px 0;gap:5px}.form-table button{padding:4px 8px;font-size:12px}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.form-grid .wide{grid-column:1/-1}.form-table a,.form-links a{color:var(--teal);margin-right:10px}.form-labels{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.material-settings{min-width:280px;max-width:480px;margin-bottom:12px}.material-settings label{display:block;margin-top:6px}.material-settings textarea{width:100%;min-height:72px}.form-table small{display:block;color:var(--muted)}.form-table td:first-child{min-width:150px}.form-entries{overflow-x:auto}.form-status{font-size:12px;font-weight:600}.operation-welcome{max-width:540px;margin:30px auto}.form-grid textarea{min-height:54px}.web-copy{margin-top:16px}@media(max-width:700px){.form-grid,.form-labels{grid-template-columns:1fr}.form-grid .wide{grid-column:auto}}
 .grade-toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:12px 0}.grade-toolbar select,.grade-toolbar input{width:auto;max-width:100%}.grade-steps{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0;color:var(--muted)}.grade-steps [aria-current]{font-weight:700;color:var(--text)}.grade-classes{display:flex;gap:16px;flex-wrap:wrap;margin:16px 0}.grade-classes input{width:auto}.grade-issue{padding:16px;border:1px solid var(--border);border-radius:8px;margin:12px 0}.grade-response{padding:12px;border-bottom:1px solid var(--border)}.grade-preview{overflow:auto;max-height:65vh;margin:16px 0}.grade-preview th{position:sticky;top:0;background:var(--surface)}.grade-toolbar code{overflow-wrap:anywhere;max-width:80%}
 </style></head><body>
 <div class="busy-line" id="busyLine" hidden></div>
@@ -237,7 +238,8 @@ const steps = [
  {id:'prepare',title:'シートを準備',subtitle:'新規作成・JSONの再利用'},
  {id:'classes',title:'クラスと生徒',subtitle:'対象の選択・名簿の取得'},
  {id:'forms',title:'フォームを準備',subtitle:'ひな形・クラス別に作成'},
- {id:'sources',title:'回答先と通知先',subtitle:'接続・クラスの対応表'},
+ {id:'columns',title:'評価・コメント列',subtitle:'回答タブを選んで列を追加'},
+ {id:'sources',title:'回答先と通知先',subtitle:'通知の確認・クラスの対応表'},
  {id:'fields',title:'列と項目',subtitle:'列の役割・評価の変換'},
  {id:'template',title:'メッセージ',subtitle:'本文と差し込み'},
  {id:'publish',title:'資料を投稿',subtitle:'Classroomに配布・受付管理'},
@@ -251,6 +253,7 @@ const copy = value => JSON.parse(JSON.stringify(value));
 function progressFor(id) { return ((state.data&&state.data.progress)||[]).find(item=>item.id===id)||{id,state:'pending',detail:'未確認'}; }
 function automationReady() { return !!state.data&&!state.data.recoveryRequired&&!state.data.configParseError&&state.data.ready!==false&&requiredSteps.every(id=>progressFor(id).state==='complete'); }
 function visibleProgress(id){
+  if(id==='columns'){const records=(state.forms&&state.forms.records||[]).filter(r=>r.kind==='form'),pending=records.some(r=>r.columnSetup),configured=records.filter(r=>configuredColumnHeaders(r).length),headers=[...new Set(configured.flatMap(configuredColumnHeaders))];return {id,state:pending?'attention':configured.length?'complete':'pending',detail:pending?'列の設定を再開してください':configured.length?'列を設定済み：'+configured.length+' / '+records.length+'件。設定済みの列：'+headers.join('、'):'必要な評価・コメント列を、フォーム作成後に追加します。既存の列と値は保持します。'};}
  if(['forms','publish'].includes(id)&&state.formsError&&showsFormData())return {id,state:'attention',detail:'最新情報を取得できません。手順を開いて再取得してください。'};
  if(id==='forms'||id==='publish')return !state.formsStale&&state.forms&&state.forms.setupProgress&&state.forms.setupProgress[id]||progressFor(id);
  if(!['classes','sources'].includes(id))return progressFor(id);
@@ -260,7 +263,7 @@ function visibleProgress(id){
 function dirtySections() { return Object.keys(state.drafts); }
 function sectionBase(section) {
  const c=state.data&&state.data.config||{};
- if(section==='sources') return {formSources:(c.formSources||[]).map(s=>parseSourceLine(formatSourceLine(s))),formSheetNamePrefix:c.formSheetNamePrefix||[],reminderTo:c.reminderTo||[]};
+ if(section==='sources') return {formSources:(c.formSources||[]).map(s=>parseSourceLine(formatSourceLine(s))),formSheetNamePrefix:c.formSheetNamePrefix||[],reminderTo:c.reminderTo||[],reminderOptOutConfirmed:c.reminderOptOutConfirmed===true};
  if(section==='fields') return {emailHeader:c.emailHeader||'',studentNameHeader:c.studentNameHeader||'',formStatusHeader:c.formStatusHeader||'',scoreSourceHeader:c.scoreSourceHeader||'',replyBodyHeader:c.replyBodyHeader||'',fields:c.fields||[],gradeScale:Array.isArray(c.gradeScale)?c.gradeScale:[{from:'5',to:'A'},{from:'4',to:'B+'},{from:'3',to:'B'},{from:'2',to:'B-'},{from:'1',to:'C'}]};
  if(section==='template') return {messageTemplate:c.messageTemplate||''};
  if(section==='automation') return state.automation&&state.automation.schedule||{importHour:5,deliveryHour:8,reminderHour:16,reminderEnabled:false};
@@ -278,6 +281,44 @@ function setBusy(busy) {
  document.querySelectorAll('button,input,select,textarea').forEach(el=>{if(el.closest('dialog'))return; if(busy){el.dataset.wasDisabled=String(el.disabled);el.disabled=true;}else if('wasDisabled'in el.dataset){el.disabled=el.dataset.wasDisabled==='true';delete el.dataset.wasDisabled;}});
 }
 function rpc(method,...args) { return new Promise((resolve,reject)=>{google.script.run.withSuccessHandler(resolve).withFailureHandler(reject)[method](...args);}); }
+// 本文だけを更新する。入力欄の再描画や保存・送信は行わない。
+const templatePreview={timer:null,running:null,pending:null,sequence:0,resultKey:null,error:'',composing:false};
+function templatePreviewPayload(){return Object.assign({},state.data.config,draftValue('fields'),draftValue('template'));}
+function templatePreviewActive(){return state.panel==='setup'&&state.step==='template'&&!!$('previewText');}
+function updateTemplatePreview(){
+ const text=$('previewText'),statusText=$('previewStatus'),warnings=$('previewWarnings');
+ if(!text)return;
+ text.textContent=state.preview?(state.preview.text||'本文は空です。'):templatePreview.error?'プレビューを更新できませんでした。':'仕上がりを更新しています…';
+ text.classList.toggle('preview-empty',!state.preview||!state.preview.text);
+ if(statusText)statusText.textContent=templatePreview.error|| (state.preview?'入力に合わせて自動更新します。':'プレビューを更新中…');
+ if(warnings){warnings.textContent=state.preview?(state.preview.warnings||[]).join('\n'):'';warnings.hidden=!warnings.textContent;}
+}
+function cancelTemplatePreview(){
+ clearTimeout(templatePreview.timer);templatePreview.timer=null;templatePreview.pending=null;templatePreview.sequence++;
+ templatePreview.resultKey=null;templatePreview.error='';templatePreview.composing=false;state.preview=null;
+}
+function scheduleTemplatePreview(immediate=false){
+ if(!templatePreviewActive()||templatePreview.composing)return;
+ const payload=templatePreviewPayload(),key=stableJson(payload);
+ if(!immediate&&(templatePreview.resultKey===key&&state.preview||templatePreview.pending&&templatePreview.pending.key===key||templatePreview.running&&templatePreview.running.key===key&&templatePreview.running.sequence===templatePreview.sequence)) {updateTemplatePreview();return;}
+ clearTimeout(templatePreview.timer);
+ const job={payload,key,sequence:++templatePreview.sequence,ready:immediate};
+ templatePreview.pending=job;templatePreview.resultKey=null;templatePreview.error='';state.preview=null;updateTemplatePreview();
+ if(immediate)return runTemplatePreview();
+ templatePreview.timer=setTimeout(()=>{templatePreview.timer=null;job.ready=true;runTemplatePreview();},350);
+}
+async function runTemplatePreview(){
+ const job=templatePreview.pending;
+ if(templatePreview.running||!job||!job.ready||!templatePreviewActive())return;
+ templatePreview.pending=null;templatePreview.running=job;
+ const isCurrent=()=>job.sequence===templatePreview.sequence&&templatePreviewActive()&&!templatePreview.composing&&stableJson(templatePreviewPayload())===job.key;
+ try{
+  const result=await rpc('previewReplyTemplate',job.payload);
+  if(isCurrent()){state.preview=result;templatePreview.resultKey=job.key;templatePreview.error='';updateTemplatePreview();}
+ }catch(error){
+  if(isCurrent()){state.preview=null;templatePreview.error='プレビューを更新できませんでした：'+(error.message||String(error))+'。「プレビューを更新」で再試行できます。';updateTemplatePreview();}
+ }finally{templatePreview.running=null;if(templatePreview.pending&&templatePreview.pending.ready)runTemplatePreview();}
+}
 function offerSettingsDownload(result,container){
  if(state.downloadUrl)URL.revokeObjectURL(state.downloadUrl);
  const url=URL.createObjectURL(new Blob([result.json],{type:'application/json;charset=utf-8'})),a=document.createElement('a');
@@ -330,9 +371,29 @@ function formItem(id,label,value,help) {
  return '<div class="form-item'+(id==='formSources'?' full-width':'')+'">'+helpLabel(id,label,help)+'<textarea id="'+id+'" rows="'+rows+'">'+esc(value)+'</textarea></div>';
 }
 function saveFooter(section) { return '<div class="form-footer">'+button('この手順を保存','data-save="'+section+'"',true)+helpButton('設定の保存','未完成でも保存できます。')+button('入力を戻す','data-discard="'+section+'"')+'</div>'; }
-function headerInput(id,label,value,help) { return '<div>'+helpLabel(id,label,help)+'<input id="'+id+'" list="headerOptions" value="'+esc(value)+'" placeholder="列名を入力、または候補から選択"></div>'; }
-function headerOptions() { return '<datalist id="headerOptions">'+state.headers.map(h=>'<option value="'+esc(h)+'"></option>').join('')+'</datalist>'; }
+function headerInput(id,label,value,help) { return '<div>'+helpLabel(id,label,help)+'<select id="'+id+'">'+headerOptions(value)+'</select></div>'; }
+function headerOptions(value) {
+ const reserved=['管理',state.data&&state.data.config&&state.data.config.formStatusHeader||'送信状態'];
+ const headers=Array.from(new Set([value].concat(state.headers||[]).filter(h=>typeof h==='string'&&h&&!reserved.includes(h))));
+ return '<option value="">列を選択</option>'+headers.map(h=>'<option value="'+esc(h)+'"'+(h===value?' selected':'')+'>'+esc(h)+'</option>').join('');
+}
+
+/** 候補取得の結果を反映するときも、編集中の列選択と変換ルールを保持する。 */
+function refreshHeadersInBackground(force=false){
+ if(state.headersLoadingPromise)return state.headersLoadingPromise;
+ if(!state.data || (!force&&state.headersRevision===state.data.revision))return Promise.resolve();
+ const revision=state.data.revision;state.headersLoading=true;state.headersError='';
+ state.headersLoadingPromise=Promise.resolve(state.formsLoadingPromise).then(()=>rpc('fetchHeadersFromSources')).then(result=>{
+  if(state.data.revision!==revision)return;
+  state.headers=result.headers||[];state.headersRevision=revision;state.headersError=(result.warnings||[]).join('\n');
+ }).catch(error=>{state.headersError=String(error.message||error);}).finally(()=>{
+  state.headersLoading=false;state.headersLoadingPromise=null;
+  if(state.panel==='setup'&&state.step==='fields'){readCurrent();render();}
+ });
+ return state.headersLoadingPromise;
+}
 function render() {
+ capturePublishDetails();
  if(activeHelp)hideHelp();
  if(!state.data)return;
  document.querySelectorAll('[data-panel]').forEach(b=>{if(b.dataset.panel===state.panel)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
@@ -346,13 +407,15 @@ function render() {
  if(state.data.recoveryRequired||state.data.configParseError) $('content').insertAdjacentHTML('afterbegin','<div class="notice" role="alert"><strong>設定の復旧が必要です</strong><p>'+esc((state.data.warnings||[]).join('\n')||'直前の保存を完全に復旧できませんでした。内部設定と設定JSONを確認してください。')+'</p><p>自動実行の停止は「自動実行を設定」から行えます。</p></div>');
  updateDirtyStatus();
  if(state.busy)document.querySelectorAll('#content button,#content input,#content select,#content textarea,#stepNav button').forEach(el=>{el.dataset.wasDisabled=String(el.disabled);el.disabled=true;});
+ if(templatePreviewActive())scheduleTemplatePreview();else cancelTemplatePreview();
 }
 function renderStep(id) {
  if(id==='prepare')return '<div class="actions prepare-actions">'+button('必要なシートを準備','data-action="initialize"',true)+button('前の設定を再利用(JSON)','data-panel="settings"')+'</div>';
- if(id==='classes')return '<div class="card"><div class="stats">'+stat('クラス',count('classes'))+stat('選択中',count('selectedClasses'))+stat('生徒',count('students'))+'</div>'+actionRow('1　クラス一覧を取得','','classes','取得・更新')+'<div class="action-row"><div><h3>2　対象クラスを選択</h3><p>シートの「同期対象(1)」に 1 を入力</p></div>'+sheetButton('classes','クラス一覧を開く')+'</div>'+actionRow('3　選んだクラスの生徒を取得',progressFor('students').detail||'','students','生徒を取得・更新')+'<div class="actions">'+sheetButton('students','生徒一覧を確認')+button('選択状態を更新','data-command="refresh"')+'</div></div>';
+ if(id==='classes')return '<div class="card"><div class="stats">'+stat('クラス',count('classes'))+stat('選択中',count('selectedClasses'))+stat('生徒',count('students'))+'</div>'+actionRow('1　クラス一覧を取得','取得時にクラス名の数字順で整列します。','classes','取得・更新')+'<div class="action-row"><div><h3>2　対象クラスを選択</h3><p>シートの「同期対象(1)」に 1 を入力</p></div>'+sheetButton('classes','クラス一覧を開く')+'</div>'+actionRow('3　選んだクラスの生徒を取得',progressFor('students').detail||'','students','生徒を取得・更新')+'<p class="help">生徒はクラス別・出席番号順（空欄は名前順）で整列します。転退学者は生徒一覧の「除外(1)」に 1 を入力してください。再取得後も除外を保持し、送信・名前補完・成績出力の対象から外します。行を削除しただけの場合は、Classroomに登録が残っていると再取得で戻ります。</p><div class="actions">'+sheetButton('students','生徒一覧を確認')+button('選択状態を更新','data-command="refresh"')+'</div><p class="help">並べ替えは各シート上で行ってください。手編集後は「選択状態を更新」で管理画面へ反映します。生徒の再取得時はNoを連番で振り直します。</p></div>';
  if(id==='forms')return renderForms('prepare');
+ if(id==='columns')return renderResponseColumns();
  if(id==='publish')return renderForms('publish');
- if(id==='sources'){const c=draftValue(id);return '<div class="card"><div class="help-label"><label>フォーム回答スプレッドシートのURL</label>'+helpButton('フォーム回答スプレッドシートのURL','新規作成した回答先は自動登録済み。既存フォームを使う場合は回答先を入力')+'</div>'+sourceEntries('formSources',c.formSources.map(formatSourceLine),'URL',true)+'<div class="grid two source-grid"><div>'+formItem('formSheetNamePrefix','対象シート名の先頭文字',c.formSheetNamePrefix.join('\n'),'複数は1行ずつ')+'</div><div><label>担当者の通知先メールアドレス</label>'+sourceEntries('reminderTo',c.reminderTo,'メールアドレス',false)+'</div></div>'+saveFooter(id)+'</div>'+renderMapping();}
+ if(id==='sources'){const c=draftValue(id),hasRecipients=c.reminderTo.some(v=>v.trim());return '<div class="card"><p class="help">フォームの回答先は、この運用スプレッドシートへ自動接続します。</p><div class="help-label"><label>未採点リマインダー/エラーの通知先メールアドレス</label>'+helpButton('未採点リマインダー/エラーの通知先メールアドレス','未採点・未送信・エラーの件数を担当者へメールで知らせる通知先です。生徒へのClassroom返却先には使いません。自動通知するには「自動実行」でリマインダーを有効にしてください。登録は任意です。利用しない場合は下の確認にチェックして保存してください。')+'</div>'+sourceEntries('reminderTo',c.reminderTo,'メールアドレス',false)+'<label class="check-line"><input type="checkbox" id="reminderOptOutConfirmed"'+(c.reminderOptOutConfirmed&&!hasRecipients?' checked':'')+(hasRecipients?' disabled':'')+'> メール通知を利用しないことを確認しました</label><p class="help">通知先を登録するか、利用しないことを確認してから「この手順を保存」を押してください。</p>'+saveFooter(id)+'</div>'+renderMapping();}
  if(id==='fields')return renderFields();
  if(id==='template')return renderTemplate();
  return renderAutomation()+renderDiagnostics();
@@ -363,12 +426,12 @@ function sourceEntries(key,values,label,multiline){
 }
 function renderMapping(){
  const needed=!!state.data.mappingNeeded,hasRows=count('mappings')>0,c=state.data.config||{},sourceReady=(c.formSources||[]).length&&(c.formSheetNamePrefix||[]).length;
- return '<details class="card"'+(needed?' open':'')+'><summary>回答シートとクラスの対応表 '+(needed?(progressFor('mapping').state==='complete'?'<span class="tag complete">設定済み</span>':'<span class="tag attention">設定が必要</span>'):hasRows?'<span class="tag">'+count('mappings')+'行</span>':'（必要な場合のみ）')+helpButton('回答シートとクラスの対応表','同じ生徒が複数クラスにいる場合などに、回答ごとの送信先を指定します。')+'</summary>'+(sourceReady?'<div class="actions">'+button('対応表を作成・更新','data-action="mapping"')+sheetButton('mapping','対応表を開く')+'</div>'+helpButton('対応表の編集','対応表でクラス名を選び、状態を更新してください（courseIdは自動）。'):'<p class="help">先にフォームURLと対象シート名の先頭文字を保存してください。</p><div class="actions">'+button('フォームを登録する','data-command="mapping-sources"')+'</div>')+'</details>';
+ return '<details class="card"'+(needed?' open':'')+'><summary>回答シートとクラスの対応表 '+(needed?(progressFor('mapping').state==='complete'?'<span class="tag complete">設定済み</span>':'<span class="tag attention">設定が必要</span>'):hasRows?'<span class="tag">'+count('mappings')+'行</span>':'（必要な場合のみ）')+helpButton('回答シートとクラスの対応表','同じ生徒が複数クラスにいる場合などに、回答ごとの送信先を指定します。')+'</summary>'+(sourceReady?'<div class="actions">'+button('対応表を作成・更新','data-action="mapping"')+sheetButton('mapping','対応表を開く')+'</div>'+helpButton('対応表の編集','対応表でクラス名を選び、状態を更新してください（courseIdは自動）。'):'<p class="help">先にフォームを準備して、回答先を接続してください。</p><div class="actions">'+button('フォームを準備する','data-step="forms"')+'</div>')+'</details>';
 }
 function sheetHelp(){return '<p class="help">この画面を移動してシートを編集できます。閉じた場合は「自動送信システム」メニューから開き直し、「状態を更新」してください。</p>';}
 function renderFields(){
- const c=draftValue('fields');
- return '<div class="card">'+helpHeading('列の役割','列名は候補から選択・直接入力できます。')+'<div class="actions">'+button('回答シートから列名候補を取得','data-command="headers"')+'<span class="help">'+state.headers.length+'件の候補</span></div><hr class="divider"><div class="grid two">'+headerInput('emailHeader','生徒メールの列',c.emailHeader,'回答者を名簿と照合します。')+headerInput('studentNameHeader','生徒名の列',c.studentNameHeader,'取り込んだ回答の名前表示に使います。')+headerInput('formStatusHeader','処理状態を書き戻す列',c.formStatusHeader,'回答シートに処理済み・送信済みを記録します。')+headerInput('scoreSourceHeader','採点済みを判定する列',c.scoreSourceHeader,'空でない回答を取り込みます。下の項目にも追加します。')+headerInput('replyBodyHeader','送信シートの本文列名',c.replyBodyHeader,'生成した返信本文を保存する列の名前です。')+'</div>'+headerOptions()+'</div><div class="card">'+helpHeading('本文に取り込む項目','差し込み名は半角英数字・アンダースコア。評価は項目ごとに変換できます。')+'<div id="fieldsContainer">'+c.fields.map(fieldCard).join('')+(c.fields.length?'':'<p class="notice">項目はまだありません。「項目を追加」から始めてください。</p>')+'</div><div class="actions">'+button('＋ 項目を追加','data-command="add-field"')+'</div>'+renderGradeScale()+saveFooter('fields')+'</div>';
+  const c=draftValue('fields');
+  return '<div class="card">'+helpHeading('列の役割','回答シートにある列名をプルダウンから選択します。保存済みの列名も候補に残します。')+'<div class="actions">'+button('回答シートから列名候補を取得','data-command="headers"')+'<span class="help">'+(state.headersLoading?'列名候補を取得しています…':state.headers.length+'件の候補')+'</span></div>'+(state.headersError?'<p class="notice">'+esc(state.headersError)+'</p>':'')+'<hr class="divider"><p class="help">システム専用列：管理 / '+esc(c.formStatusHeader||'送信状態')+'（自動作成・列名変更不可）</p><div class="grid field-grid">'+headerInput('emailHeader','生徒メールの列',c.emailHeader,'回答者を名簿と照合します。')+headerInput('studentNameHeader','生徒名の列',c.studentNameHeader,'取り込んだ回答の名前表示に使います。')+headerInput('scoreSourceHeader','採点済みを判定する列',c.scoreSourceHeader,'空でない回答を取り込みます。下の項目にも追加します。')+'</div><p class="help">本文の保存列：'+esc(c.replyBodyHeader||'返信本文')+'（固定）</p></div><div class="card">'+helpHeading('各列のメッセージへの取り込みルール','メッセージ本文に差し込む項目を、ここで登録します。授業の日付や生徒の回答文など、回答シートの列を選んで追加できます。\n\n差し込み名は半角英数字・アンダースコア。値をそのまま使うか、項目ごとに変換するかを設定できます。')+'<p class="help">メッセージに使う列を選び、値をそのまま使うか、変換するかを設定します。</p><div id="fieldsContainer">'+c.fields.map(fieldCard).join('')+(c.fields.length?'':'<p class="notice">項目はまだありません。「項目を追加」から始めてください。</p>')+'</div><div class="actions">'+button('＋ 項目を追加','data-command="add-field"')+'</div>'+renderGradeScale()+saveFooter('fields')+'</div>';
 }
 function gradeExample(field){const scale=effectiveScale(field);return scale.length?scale[0].to:'元の評価値';}
 function effectiveScale(field){return field&&Array.isArray(field.gradeScale)?field.gradeScale:draftValue('fields').gradeScale;}
@@ -387,14 +450,14 @@ function renderFieldScale(field,index){
  return '<details class="field-scale" data-scale-details="'+index+'"'+(state.openGrades.includes(index)?' open':'')+'><summary>評価の変換：'+esc(scaleSummary(effectiveScale(field)))+(own?'':'（共通）')+'</summary><div class="actions">'+button(own?'共通の変換表を使う':'この項目専用に変更','data-scale-mode="'+index+'"')+'</div>'+(own?gradeRows(field.gradeScale,index)+'<div class="actions">'+button('＋ 変換を追加','data-add-field-grade="'+index+'"')+'</div>':''+helpButton('項目別の評価変換','下の共通の変換表を使います。専用に変更すると、項目ごとに編集できます。')+'')+'</details>';
 }
 function fieldCard(field,index){
- const input=(name,label,hint)=>'<div><label for="field-'+index+'-'+name+'">'+label+'</label><input id="field-'+index+'-'+name+'" data-field-prop="'+name+'" value="'+esc(field[name]||'')+'"'+(name==='sourceHeader'?' list="headerOptions"':'')+(hint?' placeholder="'+esc(hint)+'"':'')+'></div>';
+ const input=(name,label,hint)=>'<div><label for="field-'+index+'-'+name+'">'+label+'</label>'+(name==='sourceHeader'?'<select id="field-'+index+'-'+name+'" data-field-prop="'+name+'">'+headerOptions(field[name])+'</select>':'<input id="field-'+index+'-'+name+'" data-field-prop="'+name+'" value="'+esc(field[name]||'')+'"'+(hint?' placeholder="'+esc(hint)+'"':'')+'>')+'</div>';
  return '<div class="field-card" data-field-index="'+index+'" data-custom-grade-rendered="'+(field.type==='score_grade'&&Array.isArray(field.gradeScale))+'"><div class="field-heading"><h3>項目 '+(index+1)+'</h3>'+button('削除','data-remove-field="'+index+'" aria-label="項目'+(index+1)+'を削除"')+'</div><div class="grid field-grid">'+input('sourceHeader','回答シートの列名')+input('key','差し込み名','例：feedback')+'<div><label for="field-'+index+'-type">値の扱い</label><select id="field-'+index+'-type" data-field-prop="type">'+[['text','文字（そのまま）'],['date','日付'],['score_grade','評価（段階に変換）']].map(t=>'<option value="'+t[0]+'"'+((field.type||'text')===t[0]?' selected':'')+'>'+t[1]+'</option>').join('')+'</select></div></div>'+renderFieldScale(field,index)+'<details><summary>保存先の列名を指定する（任意）'+helpButton('保存先の列名','空欄なら回答シートと同じ列名を使います。')+'</summary><div class="grid two">'+(count('legacyPending')?input('evalHeader','旧評価データの列名（移行用）'):'')+input('sendHeader','送信シートの列名')+'</div></details></div>';
 }
 function tokenItems(){
  return [{key:'student_name',label:'生徒の名前',source:'生徒一覧・名前',example:'山田 はな'},{key:'class_name',label:'クラス名',source:'生徒一覧・クラス名',example:'1年A組'},{key:'course_id',label:'ClassroomのコースID',source:'生徒一覧・コースID',example:'123456789'},{key:'row_no',label:'送信の通し番号',source:'送信シート・No',example:'1'}].concat(draftValue('fields').fields.filter(f=>f.key).map(f=>({key:f.key,label:f.sendHeader||f.evalHeader||f.sourceHeader||'取り込み項目',source:'回答シート・'+f.sourceHeader,example:f.type==='date'?'2026/04/01':f.type==='score_grade'?gradeExample(f):'確認用の値'})));
 }
 function renderTemplate(){
- return '<div class="grid two template-grid"><div class="card">'+helpLabel('messageTemplate','生徒に送る本文','候補から {student_name} などを挿入できます。値が空の項目は対応する行が省略されます。')+'<textarea id="messageTemplate" class="template-box" rows="8" placeholder="ここに本文を入力してください">'+esc(draftValue('template').messageTemplate)+'</textarea><div class="actions">'+button('架空の値でプレビュー','data-command="preview"')+'</div></div><div class="card">'+helpHeading('差し込み候補','候補を押すと、本文のカーソル位置に挿入します。')+'<div class="token-list">'+tokenItems().map(t=> '<div class="token-row"><button type="button" class="token" data-token="'+esc(t.key)+'"><strong>{'+esc(t.key)+'}</strong><span>'+esc(t.label)+'</span></button>'+helpButton(t.label,'差し込み名：{'+t.key+'}\n取得元：'+t.source+'\n例：'+t.example)+'</div>').join('')+'</div></div></div><div class="card"><h3>仕上がりの確認 <span class="tag">架空のデータ・送信しません</span></h3><pre class="preview'+(state.preview?'':' preview-empty')+'" id="previewText">'+esc(state.preview?state.preview.text:'「架空の値でプレビュー」を押すと、実際の本文生成処理で仕上がりを確認できます。')+'</pre>'+(state.preview&&(state.preview.warnings||[]).length?'<p class="help">'+esc(state.preview.warnings.join('\n'))+'</p>':'')+saveFooter('template')+'</div>';
+ return '<div class="grid two template-grid"><div class="card">'+helpLabel('messageTemplate','生徒に送る本文','候補から {student_name} などを挿入できます。値が空の項目は対応する行が省略されます。')+'<textarea id="messageTemplate" class="template-box" rows="8" placeholder="ここに本文を入力してください">'+esc(draftValue('template').messageTemplate)+'</textarea><div class="actions">'+'<span class="help">入力に合わせて仕上がりを自動更新します。</span>'+button('プレビューを更新','data-command="preview"')+'</div></div><div class="card">'+helpHeading('差し込み候補','候補を押すと、本文のカーソル位置に挿入します。')+'<div class="token-list">'+tokenItems().map(t=> '<div class="token-row"><button type="button" class="token" data-token="'+esc(t.key)+'"><strong>{'+esc(t.key)+'}</strong><span>'+esc(t.label)+'</span></button>'+helpButton(t.label,'差し込み名：{'+t.key+'}\n取得元：'+t.source+'\n例：'+t.example)+'</div>').join('')+'</div></div></div><div class="card"><h3>仕上がりの確認 <span class="tag">架空のデータ・送信しません</span></h3><pre class="preview'+(state.preview?'':' preview-empty')+'" id="previewText">'+esc(state.preview?state.preview.text:'仕上がりを更新しています…')+'</pre><p class="help" id="previewStatus" role="status" aria-live="polite">入力に合わせて自動更新します。</p><p class="help" id="previewWarnings" hidden></p>'+saveFooter('template')+'</div>';
 }
 function hourSelect(id,label,value){return '<div><label for="'+id+'">'+label+'</label><select id="'+id+'">'+Array.from({length:24},(_,i)=>'<option value="'+i+'"'+(Number(value)===i?' selected':'')+'>'+String(i).padStart(2,'0')+':00–'+String(i).padStart(2,'0')+':59</option>').join('')+'</select></div>';}
 function renderAutomation(){
@@ -456,12 +519,18 @@ function renderManual(){return '<div class="card"><div class="stats">'+stat('送
 
 
 function readCurrent(){
+ capturePublishDetails();
+ state.formOperations=state.formOperations||{};
+ document.querySelectorAll('[data-form-operation]').forEach(el=>{state.formOperations[el.dataset.formOperation]=el.value;});
+  readMaterialSettingsDrafts();
+ readFormSettingsDraft();
  readScheduleDrafts();
  if(state.panel==='setup'&&state.step==='forms'){readFormDraft();return;}
+ if(state.panel==='setup'&&state.step==='columns'){readColumnDraft();return;}
  if(state.panel!=='setup'||!state.data)return;
  const id=state.step,val=key=>$(key).value;
- if(id==='sources'){const entries=key=>Array.from(document.querySelectorAll('[data-source-entry="'+key+'"]')).flatMap(el=>lines(el.value));putDraft(id,{formSources:entries('formSources').map(parseSourceLine),formSheetNamePrefix:lines(val('formSheetNamePrefix')),reminderTo:entries('reminderTo')});}
- if(id==='fields'){const p={};['emailHeader','studentNameHeader','formStatusHeader','scoreSourceHeader','replyBodyHeader'].forEach(key=>p[key]=val(key).trim());p.fields=Array.from(document.querySelectorAll('[data-field-index]')).map(row=>{const old=draftValue('fields').fields[Number(row.dataset.fieldIndex)]||{},f={evalHeader:old.evalHeader||''};if(Array.isArray(old.gradeScale))f.gradeScale=copy(old.gradeScale);row.querySelectorAll('[data-field-prop]').forEach(el=>f[el.dataset.fieldProp]=el.value.trim());if(f.type==='score_grade'&&row.dataset.customGradeRendered==='true'&&Array.isArray(f.gradeScale))f.gradeScale=Array.from(row.querySelectorAll('[data-field-grade]')).map(r=>({from:r.querySelector('[data-grade-prop="from"]').value.trim(),to:r.querySelector('[data-grade-prop="to"]').value.trim()}));return f;});p.gradeScale=Array.from(document.querySelectorAll('[data-grade-index]')).map(row=>({from:row.querySelector('[data-grade-prop="from"]').value.trim(),to:row.querySelector('[data-grade-prop="to"]').value.trim()}));putDraft(id,p);}
+ if(id==='sources'){const c=draftValue(id),reminderTo=Array.from(document.querySelectorAll('[data-source-entry="reminderTo"]')).flatMap(el=>lines(el.value)),optOut=$('reminderOptOutConfirmed');if(reminderTo.length)optOut.checked=false;optOut.disabled=!!reminderTo.length;c.reminderTo=reminderTo;c.reminderOptOutConfirmed=!reminderTo.length&&optOut.checked;putDraft(id,c);}
+  if(id==='fields'){const base=sectionBase('fields'),p={formStatusHeader:base.formStatusHeader,replyBodyHeader:base.replyBodyHeader||'返信本文'};['emailHeader','studentNameHeader','scoreSourceHeader'].forEach(key=>p[key]=val(key).trim());p.fields=Array.from(document.querySelectorAll('[data-field-index]')).map(row=>{const old=draftValue('fields').fields[Number(row.dataset.fieldIndex)]||{},f={evalHeader:old.evalHeader||''};if(Array.isArray(old.gradeScale))f.gradeScale=copy(old.gradeScale);row.querySelectorAll('[data-field-prop]').forEach(el=>f[el.dataset.fieldProp]=el.value.trim());if(f.type==='score_grade'&&row.dataset.customGradeRendered==='true'&&Array.isArray(f.gradeScale))f.gradeScale=Array.from(row.querySelectorAll('[data-field-grade]')).map(r=>({from:r.querySelector('[data-grade-prop="from"]').value.trim(),to:r.querySelector('[data-grade-prop="to"]').value.trim()}));return f;});p.gradeScale=Array.from(document.querySelectorAll('[data-grade-index]')).map(row=>({from:row.querySelector('[data-grade-prop="from"]').value.trim(),to:row.querySelector('[data-grade-prop="to"]').value.trim()}));putDraft(id,p);}
  if(id==='template')putDraft(id,{messageTemplate:val('messageTemplate')});
  if(id==='automation')putDraft(id,{importHour:Number(val('importHour')),deliveryHour:Number(val('deliveryHour')),reminderHour:Number(val('reminderHour')),reminderEnabled:$('reminderEnabled').checked});
  updateDirtyStatus();
@@ -484,9 +553,10 @@ async function refresh(initial){
   state.panel='setup';state.step='automation';render();throw results[0].reason;
  }
  acceptData(results[0].value);
- if(initial){state.panel=['setup','maintenance','manual'].includes(state.data.initialPanel)?state.data.initialPanel:'setup';state.step=(steps.find(s=>visibleProgress(s.id).state!=='complete')||steps[steps.length-1]).id;}
+  if(initial){state.panel=['setup','maintenance','manual'].includes(state.data.initialPanel)?state.data.initialPanel:'setup';state.step=(steps.find(s=>s.id!=='columns'&&visibleProgress(s.id).state!=='complete')||steps[steps.length-1]).id;}
  render();
  if(showsFormData())await refreshFormsInBackground();
+ if(state.panel==='setup'&&state.step==='fields')await refreshHeadersInBackground();
  if(results[1].status==='rejected')throw results[1].reason;
 }
 async function saveSection(section){
@@ -548,15 +618,15 @@ async function inspectFile(file,kind='auto'){if(!file)return;state.profile=null;
 async function applyProfile(){if(!state.profile)return;readCurrent();if(!requireSaved())return;const profile=state.profile;const choices={};if(profile.kind?.startsWith('grade-'))document.querySelectorAll('[data-grade-conflict]').forEach(e=>choices[e.dataset.gradeConflict]=e.value);if(!await confirmAction('読み込んだ設定を適用する',profileSummary(profile.inspection),'適用する'))return;await task(async()=>{const result=profile.kind?.startsWith('grade-')?await rpc('applyConfigurationFile',profile.kind,profile.json,profile.revision,choices):await rpc('applyConfigurationFile',profile.kind||'settings',profile.json,profile.revision);if(profile.kind?.startsWith('grade-')){gradeUI.loaded=false;await gradeLoad();}const imported=JSON.parse(profile.json),management=profile.kind==='bundle'?imported.management:profile.kind==='settings'?imported:null;if(management?.templateFormUrl&&state.formDraft&&(!state.formDraft.templateId||state.formDraft.templateId===state.forms?.defaults?.templateUrl))state.formDraft.templateId=management.templateFormUrl;state.profile=null;state.preview=null;status(result.message||'設定を適用しました。','success');try{await refresh(false);}catch(error){status('設定は適用しましたが、画面の更新に失敗しました。「状態を更新」で再取得してください。\n'+String(error.message||error),'error');}});}
 async function command(name,exportKind=state.exportKind){
  if(name==='save-all'){await saveAllSettings();return;}
- if(name==='settings-back'){const previous=state.returnPanel||{panel:'setup',step:'prepare'};state.panel=previous.panel;state.step=previous.step;render();if(showsFormData())refreshFormsInBackground();return;}
+ if(name==='settings-back'){const previous=state.returnPanel||{panel:'setup',step:'prepare'};state.panel=previous.panel;state.step=previous.step;render();if(showsFormData())refreshFormsInBackground();else if(state.panel==='setup'&&state.step==='fields')refreshHeadersInBackground();return;}
  if(name==='mapping-sources'){state.panel='setup';state.step='sources';render();return;}
  if(name==='diagnose'){await runDiagnostics();return;}
  if(name==='add-grade'){readCurrent();const c=draftValue('fields');c.gradeScale.push({from:'',to:''});state.commonGradeOpen=true;putDraft('fields',c);render();$('grade-'+(c.gradeScale.length-1)+'-from').focus();return;}
  if(name==='close'){readCurrent();if(dirtySections().length&&!await confirmAction('未保存の入力があります','画面を閉じると、未保存の入力は失われます。\n保存する場合はキャンセルして、各手順の保存ボタンを押してください。','保存せず閉じる'))return;status('このブラウザーのタブを閉じてください。');return;}
  if(name==='refresh'){readCurrent();await task(async()=>{await refresh(false);status(dirtySections().length?'状態を更新しました。未保存の入力は保持しています。外部で設定が変わった場合、保存時に競合をお知らせします。':'最新の状態を読み込みました。','success');});return;}
- if(name==='headers'){readCurrent();if(state.drafts.sources){status('列名候補は保存済みの参照元から取得します。先に「フォームと通知先」を保存してください。','error');return;}await task(async()=>{const result=await rpc('fetchHeadersFromSources');state.headers=result.headers||[];render();status(state.headers.length+'件の列名候補を取得しました。'+((result.warnings||[]).length?'\n'+result.warnings.join('\n'):''));});return;}
+ if(name==='headers'){readCurrent();if(state.drafts.sources){status('列名候補は保存済みの参照元から取得します。先に「回答先と通知先」を保存してください。','error');return;}await task(async()=>{await refreshHeadersInBackground(true);status(state.headers.length+'件の列名候補を取得しました。'+(state.headersError?'\n'+state.headersError:''),state.headersError?'error':'success');});return;}
  if(name==='add-field'){readCurrent();const c=draftValue('fields');c.fields.push({key:'',sourceHeader:'',evalHeader:'',sendHeader:'',type:'text',gradeScale:[]});putDraft('fields',c);render();$('field-'+(c.fields.length-1)+'-sourceHeader').focus();return;}
- if(name==='preview'){readCurrent();const payload=Object.assign({},state.data.config,draftValue('fields'),draftValue('template'));await task(async()=>{state.preview=await rpc('previewReplyTemplate',payload);render();status('架空の値で本文を生成しました。実際の生徒への送信は行っていません。','success');});return;}
+ if(name==='preview'){readCurrent();await scheduleTemplatePreview(true);return;}
  if(name==='automation-start'||name==='automation-stop'){await configureSchedule(name==='automation-stop');return;}
  if(name==='export'){readCurrent();if(!requireSaved())return;const include={templateFormUrl:$('includeTemplateFormUrl')?.checked===true,reminderTo:$('includeReminderTo')?.checked===true};await task(async()=>{const result=await rpc('exportConfigurationFile',exportKind,include);status('設定ファイルを書き出しました。自動で保存されない場合はリンクから保存してください。','success');offerSettingsDownload(result,$('statusRegion'));});return;}
  if(name==='apply-profile'){await applyProfile();return;}
@@ -567,8 +637,8 @@ async function handleClick(event){
  if(b.dataset.gradeAction){await task(()=>gradeAction(b.dataset.gradeAction,b));return;}
  if(b.dataset.helpTitle!==undefined){event.preventDefault();if(activeHelp===b&&helpPinned)hideHelp();else{showHelp(b);helpPinned=true;}return;}
  if(b.dataset.formCommand){await formCommand(b.dataset.formCommand,b.dataset.record);return;}
- if(b.dataset.panel){if(state.panel==='grades'&&gradeUI.loaded){gradeReadInputs();await gradePersist();}readCurrent();if(b.dataset.panel==='settings'&&state.panel!=='settings')state.returnPanel={panel:state.panel,step:state.step};state.panel=b.dataset.panel;if(state.panel==='grades'&&!gradeUI.loaded){await task(()=>gradeLoad());}render();$('content').scrollTop=0;$('content').focus({preventScroll:true});if(showsFormData())refreshFormsInBackground();}
- else if(b.dataset.step){readCurrent();state.panel='setup';state.step=b.dataset.step;render();$('content').scrollTop=0;$('content').focus({preventScroll:true});if(showsFormData())refreshFormsInBackground();}
+ if(b.dataset.panel){if(state.panel==='grades'&&gradeUI.loaded){gradeReadInputs();await gradePersist();}readCurrent();if(b.dataset.panel==='settings'&&state.panel!=='settings')state.returnPanel={panel:state.panel,step:state.step};state.panel=b.dataset.panel;if(state.panel==='grades'&&!gradeUI.loaded){await task(()=>gradeLoad());}render();$('content').scrollTop=0;$('content').focus({preventScroll:true});if(showsFormData())refreshFormsInBackground();else if(state.panel==='setup'&&state.step==='fields')refreshHeadersInBackground();}
+ else if(b.dataset.step){readCurrent();state.panel='setup';state.step=b.dataset.step;render();$('content').scrollTop=0;$('content').focus({preventScroll:true});if(showsFormData())refreshFormsInBackground();else if(state.step==='fields')refreshHeadersInBackground();}
  else if(b.dataset.save)await saveSection(b.dataset.save);
  else if(b.dataset.discard){const section=b.dataset.discard;if(state.drafts[section]&&await confirmAction('この手順の入力を戻す','未保存の「'+steps.find(s=>s.id===section).title+'」の入力を破棄し、最後に読み込んだ設定に戻します。','入力を戻す')){delete state.drafts[section];render();status('この手順の入力を戻しました。');}}
  else if(b.dataset.action)await runAction(b.dataset.action);
@@ -580,7 +650,7 @@ async function handleClick(event){
  else if(b.dataset.addFieldGrade!==undefined){readCurrent();const c=draftValue('fields'),i=Number(b.dataset.addFieldGrade);c.fields[i].gradeScale.push({from:'',to:''});state.openGrades=[i];putDraft('fields',c);render();$('field-grade-'+i+'-'+(c.fields[i].gradeScale.length-1)+'-from').focus();}
  else if(b.dataset.removeFieldGrade!==undefined){readCurrent();const c=draftValue('fields'),i=Number(b.dataset.removeFieldGrade);c.fields[i].gradeScale.splice(Number(b.dataset.gradeRow),1);state.openGrades=[i];putDraft('fields',c);render();}
  else if(b.dataset.removeGrade!==undefined){readCurrent();const c=draftValue('fields');c.gradeScale.splice(Number(b.dataset.removeGrade),1);putDraft('fields',c);render();}
- else if(b.dataset.token){const area=$('messageTemplate'),start=area.selectionStart,end=area.selectionEnd,token='{'+b.dataset.token+'}';area.setRangeText(token,start,end,'end');area.focus();readCurrent();state.preview=null;}
+ else if(b.dataset.token){const area=$('messageTemplate'),start=area.selectionStart,end=area.selectionEnd,token='{'+b.dataset.token+'}';area.setRangeText(token,start,end,'end');area.focus();readCurrent();scheduleTemplatePreview();}
  else if(b.dataset.command)await command(b.dataset.command,b.dataset.exportKind||state.exportKind);
 }
 function renderWebWelcome(){
@@ -590,7 +660,36 @@ function renderWebWelcome(){
 }
 function defaultFormDraft(){
  const d=state.forms&&state.forms.defaults||{};
- return {templateId:d.templateUrl||'',folderId:'',titlePattern:'{class_label} 授業の振り返り',materialTitlePattern:'{class_label} 授業の振り返り',description:'',prefix:'フォーム回答',emailHeader:d.emailHeader||'メールアドレス',nameHeader:d.nameHeader||'名前',statusHeader:d.statusHeader||'送信状態',domains:'',emails:'',additionalColumns:[],labels:{}};
+ const records=(state.forms&&state.forms.records||[]).filter(r=>r.kind==='form'&&r.input&&!r.settingsUpdate),latest=records.slice().sort((a,b)=>String(b.updatedAt||'').localeCompare(String(a.updatedAt||'')))[0],saved=latest&&latest.input||{};
+ const labels=copy(saved.labels||{});records.filter(r=>latest&&r.jobId===latest.jobId).forEach(r=>{if(r.courseId&&r.label)labels[r.courseId]=r.label;});
+ return {templateId:d.templateUrl||saved.templateId||'',folderId:saved.folderId||'',titlePattern:saved.titlePattern||'{class_label} 授業の振り返り',materialTitlePattern:saved.materialTitlePattern||'{class_label} 授業の振り返り',description:saved.description||'',prefix:saved.prefix||'フォーム回答',emailHeader:saved.emailHeader||d.emailHeader||'メールアドレス',nameHeader:saved.nameHeader||d.nameHeader||'名前',statusHeader:d.statusHeader||'送信状態',domains:(saved.policy&&saved.policy.domains||[]).join(', '),emails:(saved.policy&&saved.policy.emails||[]).join(', '),additionalColumns:[],labels:labels,verifiedEmailConfirmed:false};
+}
+function editableFormSettingsRecord(r){return r.kind==='form'&&r.input&&r.input.policy&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate&&!r.columnSetup&&!r.settingsUpdate;}
+function startFormSettingsEdit(r){
+ const records=state.forms.records.filter(editableFormSettingsRecord),labels={};records.forEach(record=>{labels[record.courseId]=record.label||record.className;});
+ labels[r.courseId]=r.label||r.className;
+ const values={titlePattern:r.input.titlePattern,materialTitlePattern:r.input.materialTitlePattern,description:r.input.description||'',domains:(r.input.policy.domains||[]).join('\n'),emails:(r.input.policy.emails||[]).join('\n'),labels:labels};
+ state.formSettingsEdit={sourceId:r.id,sourceLabel:r.label||r.className,base:copy(values),values:copy(values),recordIds:[r.id],targets:records.map(record=>({id:record.id,revision:record.revision,courseId:record.courseId,label:record.label||record.className})),fixed:copy(r.input)};
+}
+function readFormSettingsDraft(){
+ const edit=state.formSettingsEdit;if(!edit)return;
+ ['titlePattern','materialTitlePattern','description','domains','emails'].forEach(k=>{const el=$('edit-'+k);if(el)edit.values[k]=el.value;});
+ const targets=Array.from(document.querySelectorAll('[data-form-settings-target]'));if(targets.length)edit.recordIds=targets.filter(el=>el.checked).map(el=>el.dataset.formSettingsTarget);
+ document.querySelectorAll('[data-form-settings-label]').forEach(el=>{edit.values.labels[el.dataset.formSettingsLabel]=el.value;});
+}
+function formSettingsPatch(){
+ const edit=state.formSettingsEdit,patch={};if(!edit)return patch;
+ ['titlePattern','materialTitlePattern','description','domains','emails'].forEach(k=>{if(String(edit.values[k]||'').trim()!==String(edit.base[k]||'').trim())patch[k]=String(edit.values[k]||'').trim();});
+ const labels={};edit.targets.filter(t=>edit.recordIds.includes(t.id)).forEach(t=>{if(edit.values.labels[t.courseId]!==edit.base.labels[t.courseId])labels[t.courseId]=edit.values.labels[t.courseId];});if(Object.keys(labels).length)patch.labels=labels;
+ return patch;
+}
+function renderFormSettingsEditor(){
+ const edit=state.formSettingsEdit;if(!edit)return '';
+ const v=edit.values,field=(key,label,textarea)=>'<div'+(textarea?' class="wide"':'')+'><label for="edit-'+key+'">'+esc(label)+'</label>'+(textarea?'<textarea rows="2" id="edit-'+key+'">'+esc(v[key])+'</textarea>':'<input id="edit-'+key+'" value="'+esc(v[key])+'">')+'</div>';
+ const targets=edit.targets.map(t=>'<label class="check-line"><input type="checkbox" data-form-settings-target="'+esc(t.id)+'"'+(edit.recordIds.includes(t.id)?' checked':'')+'>'+esc(t.label)+'</label>').join('');
+ const courses=new Set(),labels=edit.targets.filter(t=>{if(courses.has(t.courseId))return false;courses.add(t.courseId);return true;}).map(t=>'<div><label for="edit-label-'+esc(t.courseId)+'">'+esc(t.label)+'の短い表記</label><input id="edit-label-'+esc(t.courseId)+'" data-form-settings-label="'+esc(t.courseId)+'" value="'+esc(v.labels[t.courseId])+'"></div>').join('');
+ const fixed=edit.fixed;
+ return '<section class="card" id="formSettingsEditor"><h3>設定を編集：'+esc(edit.sourceLabel)+'</h3><p class="help">保存済み設定を読み込みました。変更した項目だけを、選択したフォームへ反映します。各クラスの変更していない設定は保持します。</p><div class="form-grid">'+field('titlePattern','フォーム名（{class_label} は短い表記）')+field('domains','回答許可ドメイン（@なし）',true)+field('emails','個別に許可するメール',true)+'</div><details><summary>クラスの短い表記を編集</summary><p class="help">フォーム名と資料タイトルへ反映します。回答タブ名は返却履歴を保持するため変更しません。</p><div class="form-labels">'+labels+'</div></details><details><summary>ひな形・保存先・回答列の設定</summary><p class="help">ひな形：'+esc(fixed.templateId)+'<br>保存先：'+esc(fixed.folderId)+'<br>メール列：'+esc(fixed.emailHeader)+' ／ 名前列：'+esc(fixed.nameHeader)+'</p><p class="help">これらは作成時の設定です。設問はひな形を編集して「ひな形から更新」、評価・コメント列は専用の手順で追加できます。</p></details><h4>変更を適用するフォーム</h4>'+targets+'<p class="help">投稿タイトルと投稿文は「資料を投稿」で保存してください。公開状態・予約日時・回答・採点結果は保持します。回答許可先を変更する場合は受付を一時停止し、完了後に元の状態へ戻します。</p><div class="actions">'+button('変更内容を確認して保存','data-form-command="save-settings"',true)+button('編集を取り消す','data-form-command="cancel-settings"')+'</div></section>';
 }
 function readFormDraft(){
  readScheduleDrafts();
@@ -599,18 +698,102 @@ function readFormDraft(){
  const draft=state.formDraft||defaultFormDraft();
  const emailCheck=$('form-verifiedEmailConfirmed');
  if(emailCheck){if(draft.templateId!==$('form-templateId').value)emailCheck.checked=false;draft.verifiedEmailConfirmed=emailCheck.checked===true;}
- ['templateId','folderId','titlePattern','materialTitlePattern','description','prefix','emailHeader','nameHeader','statusHeader','domains','emails'].forEach(k=>{const el=$('form-'+k);if(el)draft[k]=el.value;});
+  ['templateId','folderId','titlePattern','materialTitlePattern','description','prefix','emailHeader','nameHeader','domains','emails'].forEach(k=>{const el=$('form-'+k);if(el)draft[k]=el.value;});
+  draft.statusHeader=state.forms&&state.forms.defaults&&state.forms.defaults.statusHeader||'送信状態';
  document.querySelectorAll('[data-class-label]').forEach(el=>draft.labels[el.dataset.classLabel]=el.value);
- draft.additionalColumns=Array.from(document.querySelectorAll('[data-extra-column]')).map(row=>({header:row.querySelector('[data-extra-header]').value,choices:row.querySelector('[data-extra-choices]').value}));
+  draft.additionalColumns=[];
  state.formDraft=draft;
 }
 function formInput(key,label,draft,wide,textarea){return '<div'+(wide?' class="wide"':'')+'><label for="form-'+key+'">'+esc(label)+'</label>'+(textarea?'<textarea rows="2" id="form-'+key+'">'+esc(draft[key])+'</textarea>':'<input id="form-'+key+'" value="'+esc(draft[key])+'">')+'</div>';}
 function templateFormInput(draft){
  const match=String(draft.templateId||'').trim().match(/^(?:https:\/\/docs\.google\.com\/forms\/(?:u\/\d+\/)?d\/)?([\w-]{15,})(?:\/edit(?:[?#].*)?)?$/);
  const link=match?'<a target="_blank" rel="noopener noreferrer" href="https://docs.google.com/forms/d/'+esc(match[1])+'/edit">ひな形を編集</a>':'';
- return '<div class="wide">'+helpLabel('form-templateId','ひな形フォームURL','このスプレッドシートと同じフォルダに、必須の「授業の日付」を入れたひな形を作成し、URLを自動入力します。その他の設問を追加し、メール収集はフォーム側で必ず「確認済み」に設定してください。')+'<input id="form-templateId" value="'+esc(draft.templateId)+'"><div class="actions">'+button('ひな形フォームを新規作成','data-form-command="create-template"')+link+'</div><label><input type="checkbox" id="form-verifiedEmailConfirmed"'+(draft.verifiedEmailConfirmed?' checked':'')+'>ひな形の「設定 → 回答 → メールアドレスを収集する」を「確認済み」に設定した</label>'+helpButton('メール収集の確認','メール収集の有効・無効は自動確認します。収集方式は自動判定できないため、フォーム画面で確認してください。')+'</div>';
+ const reload=(state.forms&&state.forms.records||[]).some(r=>r.kind==='form'&&r.input)?button('保存済み設定を読み込む','data-form-command="load-creation-settings"'):'';
+ return '<div class="wide">'+helpLabel('form-templateId','ひな形フォームURL','このスプレッドシートと同じフォルダに、必須の「授業の日付」を入れたひな形を作成し、URLを自動入力します。その他の設問を追加し、メール収集はフォーム側で必ず「確認済み」に設定してください。')+'<input id="form-templateId" value="'+esc(draft.templateId)+'"><div class="actions">'+button('ひな形フォームを新規作成','data-form-command="create-template"')+reload+link+'</div><label><input type="checkbox" id="form-verifiedEmailConfirmed"'+(draft.verifiedEmailConfirmed?' checked':'')+'>ひな形の「設定 → 回答 → メールアドレスを収集する」を「確認済み」に設定した</label>'+helpButton('メール収集の確認','メール収集の有効・無効は自動確認します。収集方式は自動判定できないため、フォーム画面で確認してください。')+'</div>';
 }
 function formRecordButton(label,action,r){return button(label,'data-form-command="'+action+'" data-record="'+esc(r.id)+'"');}
+// 投稿文面はフォーム作成の下書きとは別に保持する。保存前の値で投稿しない。
+function materialSettingsDraft(r){
+ state.materialDrafts=state.materialDrafts||{};
+ if(!state.materialDrafts[r.id]){
+  const base={materialTitlePattern:r.input&&r.input.materialTitlePattern||r.input&&r.input.titlePattern||'{class_label} 授業の振り返り',description:r.input&&r.input.description||''};
+  state.materialDrafts[r.id]={...base,base:copy(base),revision:r.revision};
+ }
+ return state.materialDrafts[r.id];
+}
+function materialSettingsDirty(r){
+ const d=state.materialDrafts&&state.materialDrafts[r.id];
+ return !!d&&(d.materialTitlePattern!==d.base.materialTitlePattern||d.description!==d.base.description);
+}
+function materialSettingsReady(r){return r.materialSettingsSaved!==false&&!materialSettingsDirty(r);}
+function readMaterialSettingsDrafts(){
+ if(typeof document==='undefined')return;
+ document.querySelectorAll('[data-material-field]').forEach(el=>{
+  const r=state.forms&&state.forms.records.find(r=>r.id===el.dataset.record);
+  if(r)materialSettingsDraft(r)[el.dataset.materialField]=el.value;
+ });
+ document.querySelectorAll('[data-batch-material-field]').forEach(el=>{
+  if(['materialTitlePattern','description'].includes(el.dataset.batchMaterialField))batchMaterialSettingsDraft()[el.dataset.batchMaterialField]=el.value;
+ });
+}
+function batchMaterialSettingsTargets(){return (state.forms&&state.forms.records||[]).filter(editableFormSettingsRecord).reverse();}
+function batchMaterialSettingsDraft(){
+ if(!state.batchMaterialDraft){
+  const targets=batchMaterialSettingsTargets(),first=targets[0],common=targets.find(r=>r.materialSettingsBaseline),d=common?common.materialSettingsBaseline:first?materialSettingsDraft(first):{materialTitlePattern:'{class_label} 授業の振り返り',description:''};
+  state.batchMaterialDraft={materialTitlePattern:d.materialTitlePattern,description:d.description};
+ }
+ if(!state.batchMaterialBaseline)state.batchMaterialBaseline=copy(state.batchMaterialDraft);
+ return state.batchMaterialDraft;
+}
+// 一括欄の編集中の文面ではなく、最後に登録した共通文面と比較する。
+function individualMaterialSettings(r){
+ batchMaterialSettingsDraft();const d=materialSettingsDraft(r),base=r.materialSettingsBaseline||state.batchMaterialBaseline;
+ return d.materialTitlePattern.trim()!==base.materialTitlePattern.trim()||d.description.trim()!==base.description.trim();
+}
+function capturePublishDetails(){
+ if(typeof document==='undefined')return;
+ state.publishDetails=state.publishDetails||{};
+ document.querySelectorAll('[data-publish-details]').forEach(el=>{state.publishDetails[el.id]=el.open;});
+}
+function publishDetailsAttributes(id,defaultOpen=false){
+ const saved=state.publishDetails||{},open=Object.prototype.hasOwnProperty.call(saved,id)?saved[id]:defaultOpen;
+ return ' id="'+esc(id)+'" data-publish-details'+(open?' open':'');
+}
+function renderBatchMaterialSettings(){
+ const d=batchMaterialSettingsDraft(),disabled=batchMaterialSettingsTargets().length?'':' disabled';
+ return '<section>'+helpHeading('クラスルーム投稿の一括登録','原則として、ここで投稿タイトル・投稿文をまとめて登録します。{class_label} には「フォームを準備」で指定した各クラスの読み方（「クラスの表記」の入力値）が入ります。例：読み方が「1A」なら「{class_label} 授業の振り返り」は「1A 授業の振り返り」になります。「各クラスに反映」で保存し、投稿済み・予約済みの資料にも反映します。個別の文面も置き換わるため、例外は反映後に個別登録してください。')+'<div class="form-grid"><div><label for="batch-materialTitlePattern">投稿タイトル</label><input id="batch-materialTitlePattern" data-batch-material-field="materialTitlePattern" value="'+esc(d.materialTitlePattern)+'"></div><div><label for="batch-description">投稿文</label><textarea rows="3" id="batch-description" data-batch-material-field="description">'+esc(d.description)+'</textarea></div></div><div class="actions">'+button('各クラスに反映','data-form-command="apply-batch-material-settings"'+disabled)+'</div></section>';
+}
+function materialPostButton(label,action,r){return button(label,'data-form-command="'+action+'" data-record="'+esc(r.id)+'" data-material-required="'+esc(r.id)+'"'+(!materialSettingsReady(r)?' disabled':''));}
+function requireMaterialSettings(records){
+ const pending=records.filter(r=>!materialSettingsReady(r));
+ if(!pending.length)return true;
+ status('先に一括設定の「各クラスに反映」、または個別登録の投稿タイトル・投稿文を保存してください：'+pending.map(r=>r.label||r.className||r.id).join('、'),'error');return false;
+}
+function updateMaterialSettingsControls(){
+ if(!state.forms)return;
+ document.querySelectorAll('[data-material-required]').forEach(el=>{
+  const targets=el.dataset.materialRequired==='batch'?batchPostTargets():state.forms.records.filter(r=>r.id===el.dataset.materialRequired);
+  el.disabled=state.busy||!targets.length||targets.some(r=>!materialSettingsReady(r));
+ });
+ document.querySelectorAll('[data-material-save-status]').forEach(el=>{
+  const r=state.forms.records.find(r=>r.id===el.dataset.materialSaveStatus);
+  if(r)el.textContent=materialSettingsReady(r)?'保存済み':'未保存：保存してから投稿してください。';
+ });
+ document.querySelectorAll('[data-form-operation]').forEach(el=>{
+  const r=state.forms.records.find(r=>r.id===el.dataset.formOperation);if(!r)return;
+  Array.from(el.options).forEach(option=>{option.disabled=option.value==='publish'&&!materialSettingsReady(r);});
+  const execute=$('execute-operation-'+r.id);if(execute)execute.disabled=state.busy||!el.value||el.value==='publish'&&!materialSettingsReady(r);
+ });
+ document.querySelectorAll('[data-individual-material]').forEach(el=>{
+  const r=state.forms.records.find(r=>r.id===el.dataset.individualMaterial);if(r)el.hidden=!individualMaterialSettings(r);
+ });
+}
+function registrationLabel(r){return ['published','scheduled'].includes(r.stage)?'反映':'保存';}
+function renderMaterialSettings(r){
+ if(!editableFormSettingsRecord(r))return '';
+ const d=materialSettingsDraft(r),field=(key,label,textarea)=>'<div><label for="material-'+esc(r.id)+'-'+key+'">'+label+'</label>'+(textarea?'<textarea rows="3"':'<input')+' id="material-'+esc(r.id)+'-'+key+'" data-material-field="'+key+'" data-record="'+esc(r.id)+'"'+(textarea?'>'+esc(d[key])+'</textarea>':' value="'+esc(d[key])+'">')+'</div>';
+ return '<details'+publishDetailsAttributes('materialSettings-'+r.id)+'><summary>投稿タイトル・投稿文 <span class="individual-marker" data-individual-material="'+esc(r.id)+'"'+(!individualMaterialSettings(r)?' hidden':'')+'>個別設定あり</span>'+helpButton('投稿タイトル・投稿文','一括登録と異なる文面を、このクラスだけに設定できます。{class_label} には「フォームを準備」で指定したクラスの読み方が入ります。投稿済み・予約済みの資料にも反映します。投稿ID・公開状態・予約日時は保持します。「個別設定あり」は、一括欄の基準文面と異なる入力を示します。')+'</summary><div class="material-settings">'+field('materialTitlePattern','投稿タイトル')+field('description','投稿文',true)+'<div class="actions">'+formRecordButton(registrationLabel(r),'save-material-settings',r)+'</div><p class="help" data-material-save-status="'+esc(r.id)+'">'+(materialSettingsReady(r)?'保存済み':'未保存：保存してから投稿してください。')+'</p></div></details>';
+}
 function scheduleInputToIso(value){
  if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value||''))throw Error('日本時間の日時を入力してください。');
  const time=new Date(value+':00+09:00');
@@ -635,15 +818,37 @@ function acceptScheduleResult(id,action,record){
  delete (state.scheduleDrafts||{})[key];const el=$('schedule-'+key);if(el){el.value=value;el.dataset.scheduleSaved=value;}
 }
 function renderScheduleControls(r){
- if(r.kind!=='form'||r.formUpdate||!['registered','published','scheduled','draft','deleted','publish_review','schedule_review'].includes(r.stage))return '';
+ if(r.kind!=='form'||r.formUpdate||r.settingsUpdate||r.columnSetup||!['registered','published','scheduled','draft','deleted','publish_review','schedule_review'].includes(r.stage))return '';
  let html='';
- if(['registered','deleted','draft','scheduled'].includes(r.stage))html+='<details id="materialSchedule-'+esc(r.id)+'"><summary>資料の投稿予約</summary>'+scheduleInput('publish:'+r.id,'資料公開日時',r.scheduledTime)+'<div class="actions">'+formRecordButton(r.stage==='scheduled'?'予約日時を変更':'日時を指定して予約',r.stage==='scheduled'?'reschedule':'schedule',r)+(r.stage==='scheduled'?formRecordButton('予約を取り消す','cancel-schedule',r):'')+'</div>'+helpButton('資料の投稿予約','予約登録時にフォーム受付を開始します。予約取消は資料を下書きに戻し、フォーム受付は変更しません。')+'</details>';
- html+='<details id="formClose-'+esc(r.id)+'"><summary>フォームの受付終了予約</summary>'+scheduleInput('close:'+r.id,'受付終了日時',r.closesAt)+'<div class="actions">'+formRecordButton('終了日時を設定','set-close',r)+(r.closesAt?formRecordButton('終了予約を取り消す','cancel-close',r):'')+'</div>'+helpButton('フォームの受付終了予約','約5分間隔で期限を確認します。回答・採点・返却は保持します。予約の変更・取消だけでは受付を再開しません。')+'</details>';
+ if(['registered','deleted','draft','scheduled'].includes(r.stage))html+='<details'+publishDetailsAttributes('materialSchedule-'+r.id)+'><summary>資料の投稿予約'+helpButton('資料の投稿予約','予約登録時にフォーム受付を開始します。予約取消は個別操作から行います。取消後は資料を下書きに戻し、フォーム受付は変更しません。')+'</summary><div class="schedule-row"><div>'+scheduleInput('publish:'+r.id,'資料公開日時',r.scheduledTime)+'</div>'+materialPostButton(registrationLabel(r),r.stage==='scheduled'?'reschedule':'schedule',r)+'</div></details>';
+ html+='<details'+publishDetailsAttributes('formClose-'+r.id)+'><summary>フォームの受付終了予約'+helpButton('フォームの受付終了予約','約5分間隔で期限を確認します。回答・採点・返却は保持します。予約の変更・取消だけでは受付を再開しません。取消は個別操作から行います。')+'</summary><div class="schedule-row"><div>'+scheduleInput('close:'+r.id,'受付終了日時',r.closesAt)+'</div>'+formRecordButton(registrationLabel(r),'set-close',r)+'</div></details>';
  return html;
 }
+function batchPostTargets(){return state.forms.records.filter(r=>r.kind==='form'&&['registered','draft'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate&&!r.columnSetup);}
 function renderBatchSchedules(){
- const timer=state.forms.scheduleTimer;
- return '<details class="card" id="batchSchedules"><summary>複数クラスの日時をまとめて指定</summary>'+scheduleInput('batch:publish','未投稿の資料の公開日時')+'<div class="actions">'+button('未投稿の資料をまとめて予約','data-form-command="schedule-all"')+'</div>'+scheduleInput('batch:close','準備済みフォームの受付終了日時')+'<div class="actions">'+button('受付終了日時をまとめて設定','data-form-command="set-close-all"')+'</div>'+helpButton('複数クラスの日時指定','実行前に対象クラスと日時を確認します。予約済み資料の日時変更は各クラスから操作してください。')+'</details>'+(timer?'<p class="'+(timer.registered&&!timer.healthy?'notice':'help')+'">'+esc(timer.message)+(timer.registered&&!timer.healthy?' '+button('タイマーを修復','data-form-command="repair-timer"'):'')+'</p>':'');
+ const timer=state.forms.scheduleTimer,targets=batchPostTargets(),disabled=!targets.length||targets.some(r=>!materialSettingsReady(r))?' disabled':'';
+ return '<details class="card"'+publishDetailsAttributes('batchSchedules',true)+'><summary>一括設定</summary>'+renderBatchMaterialSettings()+'<section>'+helpHeading('公開予約/受付終了日時の一括登録','日時は日本時間です。実行前に対象クラスと日時を確認します。公開予約は未投稿の資料、受付終了は準備済みフォームが対象です。予約済み資料の日時変更は個別登録から行います。')+'<div class="schedule-row"><div>'+scheduleInput('batch:publish','未投稿の資料の公開日時')+'</div>'+button('保存','data-form-command="schedule-all" data-material-required="batch"'+disabled)+'</div><div class="schedule-row"><div>'+scheduleInput('batch:close','準備済みフォームの受付終了日時')+'</div>'+button('保存','data-form-command="set-close-all"')+'</div></section><div class="actions batch-post">'+button('一括投稿（今すぐ・'+targets.length+'クラス）','data-form-command="publish-all" data-material-required="batch"'+disabled,true)+helpButton('一括投稿','保存済みの文面で、未投稿の資料を今すぐ投稿します。予約済み・投稿済み・削除済みの資料は対象外です。対象クラスと文面は実行前に確認できます。')+'</div></details>'+(timer?'<p class="'+(timer.registered&&!timer.healthy?'notice':'help')+'">'+esc(timer.message)+(timer.registered&&!timer.healthy?' '+button('タイマーを修復','data-form-command="repair-timer"'):'')+'</p>':'');
+}
+function individualOperations(r){
+ const options=[],add=(value,label)=>options.push({value,label});
+ if(r.settingsUpdate){add('resume-settings','設定の更新を再開');add('close','回答受付を停止');}
+ else if(r.formUpdate){add('resume-update','更新を再開');add('close','回答受付を停止');}
+ else if(!r.columnSetup){
+  if(['pending','creating','created','linking','linked'].includes(r.stage))add('prepare-form','フォームを準備');
+  if(['registered','deleted','draft'].includes(r.stage))add('publish',r.stage==='deleted'?'資料を再投稿':'資料を投稿');
+  if(['registered','published','scheduled','draft','deleted'].includes(r.stage)){add('open','回答受付を開始');add('close','回答受付を停止');add('update-form','ひな形から更新');}
+  if(['publish_review','schedule_review','delete_review'].includes(r.stage))add('close','回答受付を停止');
+  if(r.stage==='scheduled')add('cancel-schedule','資料の予約を取消');
+  if(r.closesAt&&['registered','published','scheduled','draft','deleted','publish_review','schedule_review'].includes(r.stage))add('cancel-close','受付終了予約を取消');
+ }
+ if(['publish_review','schedule_review','delete_review'].includes(r.stage)||r.materialId&&['scheduled','draft','published'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate)add('reconcile-post',['publish_review','schedule_review','delete_review'].includes(r.stage)?'投稿結果を照合':'投稿状態を確認');
+ if((r.materialId||r.postId)&&r.stage!=='deleted'&&!r.formUpdate&&!r.settingsUpdate&&!r.columnSetup)add('delete','投稿を削除');
+ if(editableFormSettingsRecord(r))add('reload-material-settings','保存済みの投稿文面を読み込む');
+ return options;
+}
+function renderIndividualOperations(r){
+ const options=individualOperations(r),saved=(state.formOperations||{})[r.id],value=options.some(o=>o.value===saved)?saved:'';
+ return '<div class="operation-row"><select id="form-operation-'+esc(r.id)+'" data-form-operation="'+esc(r.id)+'" aria-label="'+esc(r.label||r.id)+'の個別操作"><option value="">操作を選択</option>'+options.map(o=>'<option value="'+o.value+'"'+(value===o.value?' selected':'')+(o.value==='publish'&&!materialSettingsReady(r)?' disabled':'')+'>'+esc(o.label)+'</option>').join('')+'</select>'+button('実行','id="execute-operation-'+esc(r.id)+'" data-form-command="execute-operation" data-record="'+esc(r.id)+'"'+(!value||value==='publish'&&!materialSettingsReady(r)?' disabled':''))+'</div>';
 }
 function managedActionLabel(action){return {publish:'資料を投稿',schedule:'資料を予約',reschedule:'予約日時を変更','cancel-schedule':'資料の予約を取消','set-close':'受付終了日時を設定','cancel-close':'受付終了予約を取消',open:'回答受付を開始',close:'回答受付を停止',delete:'投稿を削除'}[action];}
 function managedActionSummary(preview,action){
@@ -662,17 +867,16 @@ function managedActionSummary(preview,action){
 function managedStage(stage){return {pending:'準備待ち',creating:'作成結果の確認待ち',created:'フォーム作成済み',linking:'回答先を設定中',linked:'列を準備中',registered:'配布準備完了',publish_review:'投稿結果の確認待ち',schedule_review:'予約変更結果の確認待ち',scheduled:'予約済み',draft:'資料は下書き',published:'投稿済み',delete_review:'削除結果の確認待ち',deleted:'投稿を削除済み'}[stage]||stage;}
 function renderForms(mode){
  mode=mode||'prepare';
- const notice=state.formsLoading?'<p class="notice" role="status">最新情報を取得中… '+(state.forms?'前回取得した内容を表示しています。':'')+'</p>':state.formsError?'<div class="notice" role="status">最新情報を取得できませんでした。'+esc(state.formsError)+(state.forms?' 前回取得した内容を表示しています。':'')+' '+button('再取得','data-form-command="refresh-list"')+'</div>':'';
+ let notice=state.formsLoading?'<p class="notice" role="status">最新情報を取得中… '+(state.forms?'前回取得した内容を表示しています。':'')+'</p>':state.formsError?'<div class="notice" role="status">最新情報を取得できませんでした。'+esc(state.formsError)+(state.forms?' 前回取得した内容を表示しています。':'')+' '+button('再取得','data-form-command="refresh-list"')+'</div>':'';
  if(!state.forms)return notice||'<p role="status">フォーム情報を取得しています…</p>';
- if(mode==='publish')return notice+helpHeading('資料の投稿と受付','Classroomの「授業」に資料を即時投稿、または日時を指定して予約します。新規投稿・予約登録時にフォーム受付を開始します。投稿状態は最終確認時の情報です。「投稿状態を確認」でClassroomと照合できます。')+renderBatchSchedules()+(state.forms.records.some(r=>r.kind==='form'&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate)?'<div class="actions">'+button('すべてのフォームを更新','data-form-command="update-all"')+'</div>':'')+renderFormRecords('publish');
+ if(mode==='prepare')notice+=renderFormSettingsEditor();
+ if(mode==='publish')return notice+helpHeading('資料の投稿と受付','一括設定で文面を登録してください。クラスごとの例外は個別登録、取消・受付の開始や停止・削除は個別操作から実行します。Classroomの「授業」に資料を即時投稿、または日時を指定して予約します。新規投稿・予約登録時にフォーム受付を開始します。投稿状態は最終確認時の情報です。「投稿状態を確認」でClassroomと照合できます。')+renderBatchSchedules()+(state.forms.records.some(r=>r.kind==='form'&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate)?'<div class="actions">'+button('すべてのフォームを更新','data-form-command="update-all"')+'</div>':'')+renderFormRecords('publish');
  const d=state.formDraft||defaultFormDraft(),classes=state.forms.classes||[];
- const input=templateFormInput(d)+formInput('folderId','保存先フォルダURL',d,true)+formInput('titlePattern','フォーム名（{class_label} は下の短い表記）',d)+formInput('materialTitlePattern','資料のタイトル（{class_label} を含める）',d)+formInput('description','資料に添えるメッセージ',d,true,true)+formInput('domains','回答を許可する学校ドメイン（@なし・例：school.example）',d)+formInput('emails','個別に許可するメール（個人テスト用など）',d);
- const columns=formInput('prefix','回答タブの先頭文字',d)+formInput('emailHeader','既存のメール列名',d)+formInput('nameHeader','名前を補完する列',d)+formInput('statusHeader','送信状態を記録する列',d);
- const extras=(d.additionalColumns||[]).map((c,i)=>'<div class="extra-column" data-extra-column="'+i+'"><div><label for="extra-header-'+i+'">追加する列名</label><input id="extra-header-'+i+'" data-extra-header value="'+esc(c.header)+'" placeholder="例：思考・判断"></div><details'+(c.choices&&c.choices.length?' open':'')+'><summary>入力用プルダウン（任意）</summary><label class="help" for="extra-choices-'+i+'">選択肢・カンマ区切り。空欄なら自由入力</label><input id="extra-choices-'+i+'" data-extra-choices value="'+esc(Array.isArray(c.choices)?c.choices.join(','):c.choices||'')+'" placeholder="例：1,2,3"></details><div class="actions">'+button('↑','data-form-command="column-up" data-record="'+i+'" aria-label="追加列'+(i+1)+'を上へ"'+(i===0?' disabled':''))+button('↓','data-form-command="column-down" data-record="'+i+'" aria-label="追加列'+(i+1)+'を下へ"'+(i===d.additionalColumns.length-1?' disabled':''))+button('削除','data-form-command="remove-column" data-record="'+i+'" aria-label="追加列'+(i+1)+'を削除"')+'</div></div>').join('');
- const completion=state.forms.defaults&&state.forms.defaults.scoreSourceHeader||'';
- const extraSettings='<div class="extra-columns"><div class="compact-heading">'+helpHeading('追加する列','採点・コメントなど必要な列だけ追加。「列と項目」にも登録します。')+button('＋ 列を追加','data-form-command="add-column"')+'</div>'+extras+(!extras?'<p class="muted">追加列なし。名前・送信状態の列だけ作成します。</p>':'')+'<div class="actions"><span class="help">採点済み判定：'+esc(completion||'未設定')+'</span>'+button('列と項目で設定','data-step="fields"')+'</div></div>';
+  const input=templateFormInput(d)+formInput('folderId','保存先フォルダURL',d,true)+formInput('titlePattern','フォーム名（{class_label} は下の短い表記）',d)+formInput('domains','回答を許可する学校ドメイン（@なし・例：school.example）',d)+formInput('emails','個別に許可するメール（個人テスト用など）',d);
+ const columns=formInput('emailHeader','既存のメール列名',d)+formInput('nameHeader','名前を補完する列',d);
+ const extraSettings='<p class="help">名前補完・管理・'+esc(d.statusHeader)+'の列は自動作成します。管理・送信状態の列名は変更できません。評価・コメント列は、作成後に次の手順で追加します。</p><div class="actions">'+button('評価・コメント列へ','data-step="columns"')+'</div>';
  const labels=classes.map(c=>'<div><label>'+esc(c.className)+'<input id="form-class-'+esc(c.courseId)+'" data-class-label="'+esc(c.courseId)+'" value="'+esc(d.labels[c.courseId]||c.className)+'" aria-label="'+esc(c.className)+'の短い表記"></label></div>').join('');
- return notice+'<div class="actions">'+button('既存のフォームを使う','data-step="sources"')+'</div>'+renderFormRecords('prepare')+'<section class="card"><details id="formCreateDetails"'+(state.formCreateOpen===true||(state.formCreateOpen==null&&!state.forms.records.some(r=>r.kind==='form'))?' open':'')+'><summary>ひな形からフォームを作成'+helpButton('ひな形からフォームを作成','ひな形は「確認済みメールを収集」に設定。作成時は非公開で準備します。')+'</summary><div class="form-grid">'+input+'</div><details><summary>回答タブと管理用の列</summary><div class="form-grid">'+columns+'</div></details>'+extraSettings+'<h3>クラスの表記</h3>'+(classes.length?'<div class="form-labels">'+labels+'</div>':'<p class="notice">'+esc(state.forms.classWarning||'対象クラスを選択してください。')+'</p>'+button('クラスを選択する','data-step="classes"'))+'<div class="actions">'+button('作成内容を確認','data-form-command="preview"'+(!classes.length?' disabled':''),true)+'</div></details></section>';
+ return notice+'<div class="actions">'+button('通知先と対応表へ','data-step="sources"')+'</div>'+renderFormRecords('prepare')+'<section class="card"><details id="formCreateDetails"'+(state.formCreateOpen===true||(state.formCreateOpen==null&&!state.forms.records.some(r=>r.kind==='form'))?' open':'')+'><summary>ひな形からフォームを作成'+helpButton('ひな形からフォームを作成','ひな形は「確認済みメールを収集」に設定。作成時は非公開で準備します。')+'</summary><div class="form-grid">'+input+'</div><details><summary>回答タブと管理用の列</summary><div class="form-grid">'+columns+'</div></details>'+extraSettings+'<h3>クラスの表記</h3>'+(classes.length?'<div class="form-labels">'+labels+'</div>':'<p class="notice">'+esc(state.forms.classWarning||'対象クラスを選択してください。')+'</p>'+button('クラスを選択する','data-step="classes"'))+'<div class="actions">'+button('作成内容を確認','data-form-command="preview"'+(!classes.length?' disabled':''),true)+'</div></details></section>';
 }
 function renderFormRecords(mode){
  const allRecords=state.forms.records,returns=allRecords.filter(r=>r.kind==='announcement').slice().reverse();
@@ -686,25 +890,43 @@ function renderFormRecords(mode){
    if(['pending','created','linking','linked'].includes(r.stage))actions+=formRecordButton('準備を続ける','prepare',r);
    if(r.stage==='creating')actions+=formRecordButton('作成結果を照合','reconcile-form',r);
   }
-  if(r.kind==='form'&&r.formUpdate){
+  if(r.kind==='form'&&r.settingsUpdate){
+   actions+=formRecordButton('設定の更新を再開','resume-settings',r)+formRecordButton('受付停止','close',r);
+  } else if(r.kind==='form'&&r.formUpdate){
    actions+=formRecordButton('更新を再開','resume-update',r)+formRecordButton('受付停止','close',r);
-  } else if(r.kind==='form'&&mode==='publish'){
-   if(['pending','creating','created','linking','linked'].includes(r.stage))actions+=button('フォームを準備','data-step="forms"');
-   if(['registered','deleted','draft'].includes(r.stage))actions+=formRecordButton(r.stage==='deleted'?'資料を再投稿':'資料を投稿','publish',r);
-   if(['registered','published','scheduled','draft','deleted'].includes(r.stage))actions+=formRecordButton('受付開始','open',r)+formRecordButton('受付停止','close',r);
-   if(['publish_review','schedule_review','delete_review'].includes(r.stage))actions+=formRecordButton('受付停止','close',r);
-   if(r.responseSheetId!=null)actions+=formRecordButton('名前を補完','names',r);
-   if(['registered','published','scheduled','draft','deleted'].includes(r.stage))actions+=formRecordButton('ひな形から更新','update-form',r);
   }
   if(mode!=='prepare'&&['publish_review','schedule_review','delete_review'].includes(r.stage))actions+=formRecordButton('投稿結果を照合','reconcile-post',r);
-  if(mode==='publish'&&r.materialId&&['scheduled','draft','published'].includes(r.stage)&&!r.formUpdate)actions+=formRecordButton('投稿状態を確認','reconcile-post',r);
-  if(mode!=='prepare'&&(r.materialId||r.postId)&&r.stage!=='deleted'&&!r.formUpdate)actions+=formRecordButton('投稿を削除','delete',r);
+  if(mode!=='prepare'&&(r.materialId||r.postId)&&r.stage!=='deleted'&&!r.formUpdate&&!r.settingsUpdate)actions+=formRecordButton('投稿を削除','delete',r);
   const links=(r.formEditUrl?'<a target="_blank" rel="noopener" href="'+esc(r.formEditUrl)+'">フォーム</a>':'')+(r.responseSheetId!=null?'<a target="_blank" rel="noopener" href="'+esc(state.forms.spreadsheetUrl+'#gid='+r.responseSheetId)+'">回答・採点</a>':'')+(r.postUrl?'<a target="_blank" rel="noopener" href="'+esc(r.postUrl)+'">投稿</a>':'');
+  if(mode==='prepare'&&editableFormSettingsRecord(r))actions=formRecordButton('設定を編集','edit-settings',r)+actions;
   const timing=(r.scheduledTime?'<small>資料公開予定：'+esc(scheduleDisplay(r.scheduledTime))+'</small>':'')+(r.closesAt?'<small>受付終了：'+esc(scheduleDisplay(r.closesAt))+' / '+esc({scheduled:'予約済み',closed:'停止確認済み',error:'停止失敗・再試行待ち'}[r.closeState]||'確認待ち')+'</small>':'')+(r.closeError?'<small class="notice">'+esc(r.closeError)+'</small>':'');
-  return '<tr><td><strong>'+esc(r.kind==='form'?r.label:r.title)+'</strong><small>'+esc(r.kind==='form'?r.materialTitle:'個別返却 '+(r.postedAt?new Date(r.postedAt).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):''))+'</small>'+links+'</td><td><span class="form-status">'+esc(r.formUpdate?'更新途中':managedStage(r.stage))+'</span><small>'+esc(r.lastError||'')+'</small>'+timing+(typeof r.accepting==='boolean'?'<small>最終確認時：回答受付'+(r.accepting?'中':'停止')+'</small>':'')+'</td><td><div class="actions">'+actions+'</div>'+(mode==='publish'?renderScheduleControls(r):'')+'</td></tr>';
+  return '<tr><td><strong>'+esc(r.kind==='form'?r.label:r.title)+'</strong><small>'+esc(r.kind==='form'?r.materialTitle:'個別返却 '+(r.postedAt?new Date(r.postedAt).toLocaleString('ja-JP',{timeZone:'Asia/Tokyo'}):''))+'</small>'+links+'</td><td><span class="form-status">'+esc(r.settingsUpdate?'設定の更新途中':r.formUpdate?'更新途中':managedStage(r.stage))+'</span><small>'+esc(r.lastError||'')+'</small>'+timing+(typeof r.accepting==='boolean'?'<small>最終確認時：回答受付'+(r.accepting?'中':'停止')+'</small>':'')+'</td>'+(mode==='publish'?'<td class="individual-registration">'+renderMaterialSettings(r)+renderScheduleControls(r)+'</td><td>'+renderIndividualOperations(r)+'</td>':'<td><div class="actions">'+actions+'</div></td>')+'</tr>';
  }).join('');
  const title=mode==='prepare'?'準備したフォーム':mode==='returns'?'個別返却の履歴':'配布するフォーム';
- return '<section class="card"><div class="section-head"><h3>'+title+'</h3><span>'+records.length+'件</span></div><div class="form-entries"><table class="form-table"><thead><tr><th>対象</th><th>状態</th><th>操作</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+(mode==='returns'&&total>50?'<div class="actions">'+button('前の50件','data-form-command="previous-page"'+(!state.formPage?' disabled':''))+'<span>返却 '+(state.formPage*50+1)+'〜'+Math.min(total,state.formPage*50+50)+' / '+total+'件</span>'+button('次の50件','data-form-command="next-page"'+((state.formPage+1)*50>=total?' disabled':''))+'</div>':'')+(!rows?'<p class="muted">'+(mode==='publish'?'turretで作成したフォームはありません。既存フォームの資料共有はClassroom側で確認してください。':'まだ作成履歴がありません。')+'</p>':'')+'</section>';
+ return '<section class="card"><div class="section-head"><h3>'+title+'</h3><span>'+records.length+'件</span></div><div class="form-entries"><table class="form-table"><thead><tr><th>対象</th><th>状態</th>'+(mode==='publish'?'<th>個別登録</th><th>個別操作</th>':'<th>操作</th>')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'+(mode==='returns'&&total>50?'<div class="actions">'+button('前の50件','data-form-command="previous-page"'+(!state.formPage?' disabled':''))+'<span>返却 '+(state.formPage*50+1)+'〜'+Math.min(total,state.formPage*50+50)+' / '+total+'件</span>'+button('次の50件','data-form-command="next-page"'+((state.formPage+1)*50>=total?' disabled':''))+'</div>':'')+(!rows?'<p class="muted">'+(mode==='publish'?'turretで作成したフォームはありません。既存フォームの資料共有はClassroom側で確認してください。':'まだ作成履歴がありません。')+'</p>':'')+'</section>';
+}
+function defaultColumnDraft(){return {recordIds:[],additionalColumns:[]};}
+function configuredColumnHeaders(record){
+ const input=record.input||{},headers=Array.isArray(input.additionalColumns)?input.additionalColumns.map(c=>c&&c.header):[input.gradeHeader,input.commentHeader];
+ return [...new Set(headers.filter(h=>typeof h==='string'&&h.trim()))];
+}
+function readColumnDraft(){
+ if(state.panel!=='setup'||state.step!=='columns')return;
+ if(!$('responseColumns'))return;
+ const draft=state.columnDraft||defaultColumnDraft();
+ draft.recordIds=Array.from(document.querySelectorAll('[data-column-target]')).filter(el=>el.checked).map(el=>el.dataset.columnTarget);
+ draft.additionalColumns=Array.from(document.querySelectorAll('[data-extra-column]')).map(row=>({header:row.querySelector('[data-extra-header]').value}));
+ state.columnDraft=draft;
+}
+function columnTargets(){return (state.forms&&state.forms.records||[]).filter(r=>r.kind==='form'&&r.responseSheetId!=null&&!r.formUpdate&&!r.columnSetup&&['registered','published','scheduled','draft','deleted'].includes(r.stage));}
+function renderResponseColumns(){
+ if(!state.forms)return '<p role="status">回答タブを取得しています…</p>';
+ const d=state.columnDraft||defaultColumnDraft(),targets=columnTargets();
+ const notice=state.formsError?'<p class="notice">'+esc(state.formsError)+' '+button('再取得','data-form-command="refresh-list"')+'</p>':state.formsLoading?'<p role="status">最新の回答タブを取得中…</p>':'';
+ const pending=state.forms.records.filter(r=>r.kind==='form'&&r.columnSetup).map(r=>'<p class="notice">'+esc(r.label)+'：列の設定が途中です。 '+formRecordButton('列の設定を再開','resume-columns',r)+'</p>').join('');
+ const selection=targets.map(r=>{const headers=configuredColumnHeaders(r);return '<label class="check-line"><input type="checkbox" data-column-target="'+esc(r.id)+'"'+(d.recordIds.includes(r.id)?' checked':'')+'>'+esc(r.sheetName||r.label)+'（'+(headers.length?'設定済み：'+esc(headers.join('、')):'未設定')+'）</label>';}).join('');
+ const extras=d.additionalColumns.map((c,i)=>'<div class="extra-column" data-extra-column="'+i+'"><div><label for="extra-header-'+i+'">追加する列名</label><input id="extra-header-'+i+'" data-extra-header value="'+esc(c.header)+'" placeholder="例：思考・判断"></div><div class="actions">'+button('↑','data-form-command="column-up" data-record="'+i+'" aria-label="追加列'+(i+1)+'を上へ"'+(i===0?' disabled':''))+button('↓','data-form-command="column-down" data-record="'+i+'" aria-label="追加列'+(i+1)+'を下へ"'+(i===d.additionalColumns.length-1?' disabled':''))+button('削除','data-form-command="remove-column" data-record="'+i+'" aria-label="追加列'+(i+1)+'を削除"')+'</div></div>').join('');
+ return notice+pending+'<section class="card" id="responseColumns">'+helpHeading('評価・コメント列を設定','turretで作成した回答タブを選び、必要な列を追加します。同名の既存列と回答・採点値・入力規則は保持します。新しい列は自由入力です。')+'<h3>対象の回答タブ</h3>'+selection+(targets.length?'<div class="actions">'+button('すべて選択','data-form-command="select-columns"')+button('選択を解除','data-form-command="clear-column-selection"')+'</div>':'<p class="help">先にフォームと回答先を準備してください。既存フォームの回答列はスプレッドシートで追加できます。</p>')+'<p class="help">管理・'+esc(state.forms.defaults&&state.forms.defaults.statusHeader||'送信状態')+'は自動作成するシステム専用列です。列名は変更できません。</p><div class="extra-columns"><div class="compact-heading">'+helpHeading('追加する列','新しい列は入力した順に追加します。既存列の削除・並べ替えは行いません。追加列はメッセージへの取り込みルールにも登録します。値はそのまま取り込み、必要に応じて「列と項目」で変換を設定できます。追加欄が空の場合は、選択した回答タブの設定済みの列を確認できます。')+button('＋ 列を追加','data-form-command="add-column"')+'</div>'+extras+'</div><div class="actions">'+button('列の設定内容を確認','data-form-command="preview-columns"'+(!targets.length?' disabled':''),true)+'</div><p class="help">採点済み判定：'+esc(state.forms.defaults&&state.forms.defaults.scoreSourceHeader||'未設定')+'</p><div class="actions">'+button('採点済み判定・取り込みルールを設定','data-step="fields"')+'</div></section>';
 }
 function renderOperationCopy(){return (state.bootstrap&&state.bootstrap.canCopyOperation?'<details id="operationCopyDetails" class="card web-copy"><summary>次の期間用に複製'+helpButton('次の期間用に複製','名簿を複製し、設定JSONを出力します。複製先でJSONを読み込み、Webデプロイと自動実行を設定してください。')+'</summary><label for="copyName">新しい運用名</label><input id="copyName"><label for="copyFolder">保存先フォルダURL</label><input id="copyFolder"><div class="actions">'+button('複製内容を確認','data-form-command="copy-operation"')+'</div></details>':'');}
 function renderReturnHistory(){
@@ -713,10 +935,13 @@ function renderReturnHistory(){
  return '<details id="formReturnDetails" class="card"><summary>個別返却の投稿を管理'+helpButton('個別返却の投稿管理','削除しても回答・採点・送信済み状態は保持され、再送しません。')+'</summary>'+notice+renderFormRecords('returns')+'</details>';
 }
 
-function showsFormData(){return state.panel==='maintenance'||state.panel==='setup'&&['forms','publish'].includes(state.step);}
+function showsFormData(){return state.panel==='maintenance'||state.panel==='setup'&&['forms','columns','publish'].includes(state.step);}
 function renderUpdatedForms(){
  if(!showsFormData())return;
+  readFormSettingsDraft();
+  readMaterialSettingsDrafts();
  readFormDraft();
+ readColumnDraft();
  const content=$('content'),scroll=content.scrollTop,active=document.activeElement;
  const focused=active&&active.id,selection=active&&typeof active.selectionStart==='number'?[active.selectionStart,active.selectionEnd]:null;
  const details=Array.from(content.querySelectorAll('details')).map(el=>({id:el.id,open:el.open}));
@@ -728,7 +953,15 @@ function renderUpdatedForms(){
  content.scrollTop=scroll;
 }
 function acceptFormConsoleData(data){
- state.forms=data;state.formsError='';state.formsStale=false;
+  readMaterialSettingsDrafts();
+  const clean=(state.forms&&state.forms.records||[]).filter(r=>!materialSettingsDirty(r)).map(r=>r.id);
+  clean.forEach(id=>{if(state.materialDrafts)delete state.materialDrafts[id];});
+  state.forms=data;state.formsError='';state.formsStale=false;
+  // 未編集の欄だけ最新値へ同期し、再描画時に古い表示を下書きとして拾わない。
+  if(typeof document!=='undefined')document.querySelectorAll('[data-material-field]').forEach(el=>{
+   const r=data.records.find(r=>r.id===el.dataset.record);
+   if(r&&clean.includes(r.id))el.value=materialSettingsDraft(r)[el.dataset.materialField];
+  });
  if(data.returnHistory)state.formPage=data.returnHistory.page;
 }
 function refreshFormsInBackground(){
@@ -741,29 +974,156 @@ function refreshFormsInBackground(){
 }
 async function reloadForms(){await refresh(false);}
 async function formCommand(action,id){
+ if(action==='execute-operation'){
+  readCurrent();const r=state.forms.records.find(r=>r.id===id),select=$('form-operation-'+id),selected=select&&select.value;
+  if(!r||!individualOperations(r).some(o=>o.value===selected)){status('現在の状態で実行できる操作を選択してください。','error');return;}
+  if(selected==='prepare-form'){state.step='forms';render();return;}
+  await formCommand(selected,id);return;
+ }
+ if(state.panel==='setup'&&state.step==='publish'&&['edit-settings','save-settings','cancel-settings'].includes(action))return;
+ if(action==='apply-batch-material-settings'){
+  readCurrent();if(!requireSaved())return;const allTargets=batchMaterialSettingsTargets();
+  if(!allTargets.length){status('投稿設定を編集できる対象がありません。','error');return;}
+  const changes=copy(batchMaterialSettingsDraft());changes.materialTitlePattern=changes.materialTitlePattern.trim();changes.description=changes.description.trim();
+  if(!changes.materialTitlePattern){status('投稿タイトルを入力してください。','error');return;}
+  const targets=allTargets.filter(r=>!materialSettingsReady(r)||r.input.materialTitlePattern!==changes.materialTitlePattern||(r.input.description||'')!==changes.description||r.materialSettingsBaseline?.materialTitlePattern!==changes.materialTitlePattern||r.materialSettingsBaseline?.description!==changes.description);
+  if(!targets.length){state.batchMaterialBaseline=copy(changes);render();status('すべてのクラスに登録済みです。','success');return;}
+  const targetVersions=JSON.stringify(allTargets.map(r=>[r.id,r.revision]));let preview;
+  await task(async()=>{
+   const plans=[];
+   for(let start=0;start<targets.length;start+=100){const part=await rpc('previewManagedFormSettings',{targets:targets.slice(start,start+100).map(r=>({id:r.id,revision:materialSettingsDraft(r).revision})),changes,saveMaterialSettings:true,registerCommonMaterial:true});plans.push(...part.targets);}
+   preview={targets:plans};
+  });if(!preview)return;
+  const summary=targets.map(r=>r.label||r.className||r.id).join('、')+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\n\n各クラスの投稿タイトル・投稿文を保存します。個別の文面も置き換わり、投稿済み・予約済みの資料にも反映します。';
+  if(!await confirmAction('クラスルーム投稿の一括登録',summary,'各クラスに反映'))return;
+  if(JSON.stringify(batchMaterialSettingsTargets().map(r=>[r.id,r.revision]))!==targetVersions){status('対象の状態が更新されました。内容を再確認して、もう一度反映してください。','error');return;}
+  await task(async()=>{
+   state.batchMaterialBaseline=copy(changes);
+   // 失敗したクラスの入力は残し、成功したクラスは再実行から除外する。
+   targets.forEach(r=>Object.assign(materialSettingsDraft(r),changes));
+   let done=0;const errors=[];
+   try{
+    for(const p of preview.targets){
+     try{const result=await rpc('runManagedFormSettings',p.id,changes,p.fingerprint,true,true);const index=state.forms.records.findIndex(r=>r.id===p.id);if(index>=0)state.forms.records[index]=result;delete state.materialDrafts[p.id];done++;}
+     catch(e){errors.push((targets.find(r=>r.id===p.id)?.label||p.id)+'：'+(e.message||e));}
+    }
+   }finally{render();await reloadForms();}
+   status('反映完了 '+done+'件'+(errors.length?'\n'+errors.join('\n'):''),errors.length?'error':'success');
+  });return;
+ }
+ if(action==='load-first-material-settings'){
+  readCurrent();const targets=batchMaterialSettingsTargets();
+  if(!targets.length){status('投稿設定を編集できる対象がありません。','error');return;}
+  const d=materialSettingsDraft(targets[0]);state.batchMaterialDraft={materialTitlePattern:d.materialTitlePattern,description:d.description};render();return;
+ }
+  if(action==='reload-material-settings'){
+   readMaterialSettingsDrafts();const r=state.forms.records.find(r=>r.id===id);if(!r)return;
+   if(materialSettingsDirty(r)&&!await confirmAction('投稿設定を読み直す','未保存の投稿タイトル・投稿文を、保存済みの内容に戻します。','読み込む'))return;
+   delete (state.materialDrafts||{})[id];render();return;
+  }
+  if(action==='save-material-settings'){
+   readCurrent();if(!requireSaved())return;
+   const r=state.forms.records.find(r=>r.id===id);if(!r||!editableFormSettingsRecord(r))return;
+   const d=materialSettingsDraft(r),changes={materialTitlePattern:d.materialTitlePattern,description:d.description};let preview;
+   await task(async()=>{preview=await rpc('previewManagedFormSettings',{targets:[{id,revision:d.revision}],changes,saveMaterialSettings:true});});if(!preview)return;
+   const summary=(r.label||r.className)+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\n\n投稿タイトルと投稿文を保存します。投稿済み・予約済みの資料にも反映します。';
+   if(!await confirmAction('投稿設定を保存',summary,'設定を保存'))return;
+   await task(async()=>{
+    try{
+     const result=await rpc('runManagedFormSettings',id,changes,preview.targets[0].fingerprint,true);
+     const index=state.forms.records.findIndex(r=>r.id===id);if(index>=0)state.forms.records[index]=result;
+     delete state.materialDrafts[id];
+     // 再取得前に保存結果を描画し、古い入力を下書きへ戻さない。
+     render();status('投稿設定を保存しました。','success');
+    }finally{await reloadForms();}
+   });return;
+  }
+ if(action==='load-creation-settings'){
+  readFormDraft();if(state.formDraft&&!await confirmAction('保存済み設定を新規作成欄へ読み込む','入力中の新規作成設定を、直近の保存済み設定に置き換えます。既存フォームは変更しません。','読み込む'))return;
+  state.formDraft=defaultFormDraft();state.formCreateOpen=true;render();return;
+ }
+ if(action==='edit-settings'){
+  readCurrent();const r=state.forms.records.find(r=>r.id===id);if(!r||!editableFormSettingsRecord(r))return;
+  if(state.formSettingsEdit&&Object.keys(formSettingsPatch()).length&&!await confirmAction('編集中の設定を置き換える','保存していないフォーム設定の編集を取り消し、選択したフォームの設定を読み込みます。','読み込む'))return;
+  startFormSettingsEdit(r);render();$('formSettingsEditor')?.scrollIntoView({block:'start'});$('edit-titlePattern')?.focus();return;
+ }
+ if(action==='cancel-settings'){
+  readFormSettingsDraft();if(Object.keys(formSettingsPatch()).length&&!await confirmAction('設定の編集を取り消す','保存していないフォーム設定の変更を取り消します。','取り消す'))return;
+  state.formSettingsEdit=null;render();return;
+ }
+ if(action==='save-settings'){
+  readCurrent();if(!requireSaved())return;
+  const edit=state.formSettingsEdit,changes=formSettingsPatch();if(!edit)return;
+  if(!edit.recordIds.length){status('適用するフォームを選択してください。','error');return;}
+  if(!Object.keys(changes).length){status('設定は変更されていません。');return;}
+  const raw={targets:edit.targets.filter(t=>edit.recordIds.includes(t.id)).map(t=>({id:t.id,revision:t.revision})),changes:changes};let preview;
+  await task(async()=>{preview=await rpc('previewManagedFormSettings',raw);});if(!preview)return;
+  const summary=preview.targets.map(t=>t.label+'\n'+(t.changes.join('\n')||'変更なし')).join('\n\n')+'\n\n選択したフォームの変更項目だけを反映します。回答タブ名・回答・採点・投稿ID・公開予約は保持します。回答許可先の変更中は受付を一時停止します。';
+  if(!await confirmAction('フォーム設定の変更を保存',summary,'保存する'))return;
+  await task(async()=>{
+   let done=0;const errors=[];
+   for(const t of preview.targets){try{if(t.changed)await rpc('runManagedFormSettings',t.id,changes,t.fingerprint);done++;edit.recordIds=edit.recordIds.filter(id=>id!==t.id);}catch(error){errors.push(t.label+'：'+(error.message||error));}}
+   if(!errors.length)state.formSettingsEdit=null;
+   await reloadForms();render();status('設定変更完了 '+done+'件'+(errors.length?'\n'+errors.join('\n')+'\n途中の設定は一覧の「設定の更新を再開」で続けられます。確認後の競合は編集を開き直してください。':''),errors.length?'error':'success');
+  });return;
+ }
+ if(action==='resume-settings'){
+  readCurrent();if(!requireSaved())return;const r=state.forms.records.find(r=>r.id===id);if(!r)return;
+  await task(async()=>{try{await rpc('resumeManagedFormSettings',r.id,r.revision);status('設定の更新が完了しました。','success');}finally{await reloadForms();}});return;
+ }
+ if(action==='select-columns'||action==='clear-column-selection'){
+  readColumnDraft();state.columnDraft=state.columnDraft||defaultColumnDraft();state.columnDraft.recordIds=action==='select-columns'?columnTargets().map(r=>r.id):[];render();return;
+ }
+ if(action==='resume-columns'){
+  readCurrent();if(!requireSaved())return;
+  const r=state.forms.records.find(r=>r.id===id);if(!r)return;
+  await task(async()=>{try{await rpc('resumeResponseColumns',r.id,r.revision);status('列の設定を完了しました。','success');}finally{await reloadForms();}});return;
+ }
+ if(action==='preview-columns'){
+  readCurrent();readColumnDraft();if(!requireSaved())return;
+  const draft=state.columnDraft||defaultColumnDraft(),raw={recordIds:copy(draft.recordIds),additionalColumns:draft.additionalColumns.map(c=>({header:c.header})),columnNamesOnly:true};let p;
+  await task(async()=>{
+   acceptFormConsoleData(await rpc('getFormConsoleData',{returnPage:state.formPage||0}));
+   if(!raw.additionalColumns.length){
+    render();
+    const targets=columnTargets();
+    if(!raw.recordIds.length||raw.recordIds.length>100||new Set(raw.recordIds).size!==raw.recordIds.length)throw new Error('対象の回答タブを1〜100件選択してください。');
+    const summary=raw.recordIds.map(id=>{
+     const record=targets.find(r=>r.id===id);if(!record)throw new Error('対象の回答タブが更新されました。選択し直してください。');
+     const headers=configuredColumnHeaders(record);return (record.sheetName||record.label)+'：'+(headers.length?'設定済み：'+headers.join('、'):'未設定');
+    });
+    status(summary.join('\n')+'\n列を追加する場合は「＋ 列を追加」から列名を入力してください。');return;
+   }
+   p=await rpc('previewResponseColumns',raw,state.forms.configRevision);
+  });if(!p)return;
+  const summary=p.targets.map(t=>t.sheetName+'：新規追加 '+(t.added.join('、')||'なし（既存列を利用）')).join('\n')+'\n設定する列：'+p.additionalColumns.map(c=>c.header).join('、')+'\n\n回答・採点値と既存列の入力規則は保持します。同名列は再利用し、新しい列は自由入力にします。管理・送信状態は右端に配置します。採点済み判定は既存設定を保持します。';
+  if(!await confirmAction('評価・コメント列を設定',summary,'設定する'))return;
+  await task(async()=>{try{const result=await rpc('applyResponseColumns',raw,p.configRevision,p.fingerprint);status('列の設定完了 '+result.completed+'件'+(result.errors.length?'\n'+result.errors.map(e=>e.label+'：'+e.message).join('\n')+'\n途中の設定は「列の設定を再開」で続けられます。':''),result.errors.length?'error':'success');}finally{await reloadForms();}});return;
+ }
  if(action==='repair-timer'){
   if(!await confirmAction('受付終了タイマーを修復','約5分間隔の受付終了確認を復旧します。日次返却の設定は変更しません。','修復する'))return;
   await task(async()=>{try{const result=await rpc('repairFormScheduleTimer');status(result.message,result.healthy?'success':'error');}finally{await reloadForms();}});return;
  }
- if(['schedule-all','set-close-all'].includes(action)){
+ if(['publish-all','schedule-all','set-close-all'].includes(action)){
   readCurrent();if(!requireSaved())return;
-  const material=action==='schedule-all',kind=material?'schedule':'set-close',key=material?'batch:publish':'batch:close';
-  const options=material?{scheduledTime:scheduleInputToIso((state.scheduleDrafts||{})[key])}:{closesAt:scheduleInputToIso((state.scheduleDrafts||{})[key])};
-  const targets=state.forms.records.filter(r=>r.kind==='form'&&!r.formUpdate&&(material?['registered','draft']:['registered','published','scheduled','draft','deleted']).includes(r.stage)&&(material||Date.parse(r.closesAt)!==Date.parse(options.closesAt)));
+  const immediate=action==='publish-all',material=action!=='set-close-all',kind=immediate?'publish':material?'schedule':'set-close',key=material?'batch:publish':'batch:close';
+  const options=immediate?{}:material?{scheduledTime:scheduleInputToIso((state.scheduleDrafts||{})[key])}:{closesAt:scheduleInputToIso((state.scheduleDrafts||{})[key])};
+  const targets=material?batchPostTargets():state.forms.records.filter(r=>r.kind==='form'&&!r.formUpdate&&!r.settingsUpdate&&!r.columnSetup&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&Date.parse(r.closesAt)!==Date.parse(options.closesAt));
+   if(material&&!requireMaterialSettings(targets))return;
   if(!targets.length){status('操作対象のフォームがありません。');return;}
   const previews=[],errors=[];
   await task(async()=>{for(const r of targets){try{previews.push({record:r,preview:await rpc('previewManagedFormAction',r.id,kind,options)});}catch(e){errors.push((r.label||r.id)+'：'+(e.message||e));}}});
   if(!previews.length){status(errors.join('\n'),'error');return;}
   if(!await confirmAction(managedActionLabel(kind),previews.map(p=>managedActionSummary(p.preview,kind)).join('\n\n')+(errors.length?'\n\n対象外：\n'+errors.join('\n'):''),'確認済み・実行する'))return;
-  await task(async()=>{let done=0;for(const p of previews){try{const result=await rpc('runManagedFormAction',p.record.id,kind,p.preview.fingerprint,!!p.preview.emailNotice,options);done++;acceptScheduleResult(p.record.id,kind,result);}catch(e){errors.push((p.record.label||p.record.id)+'：'+(e.message||e));}}await reloadForms();status('完了 '+done+'件'+(errors.length?'\n'+errors.join('\n'):''),errors.length?'error':'success');});return;
+  await task(async()=>{let done=0;try{for(const p of previews){try{const result=await rpc('runManagedFormAction',p.record.id,kind,p.preview.fingerprint,!!p.preview.emailNotice,options);if(result.id===p.record.id){const index=state.forms.records.findIndex(r=>r.id===result.id);if(index>=0)state.forms.records[index]=result;}done++;acceptScheduleResult(p.record.id,kind,result);}catch(e){errors.push((p.record.label||p.record.id)+'：'+(e.message||e));}}}finally{render();await reloadForms();}status('完了 '+done+'件'+(errors.length?'\n'+errors.join('\n'):''),errors.length?'error':'success');});return;
  }
  if(action==='column-up'||action==='column-down'){
-  readFormDraft();const columns=state.formDraft.additionalColumns,index=Number(id),to=index+(action==='column-up'?-1:1);
+  readColumnDraft();state.columnDraft=state.columnDraft||defaultColumnDraft();const columns=state.columnDraft.additionalColumns,index=Number(id),to=index+(action==='column-up'?-1:1);
   if(!Number.isInteger(index)||index<0||index>=columns.length||to<0||to>=columns.length)return;
   columns.splice(to,0,columns.splice(index,1)[0]);render();return;
  }
  if(action==='update-form'||action==='update-all'){
-  const targets=state.forms.records.filter(r=>r.kind==='form'&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate&&(action==='update-all'||r.id===id));
+  const targets=state.forms.records.filter(r=>r.kind==='form'&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate&&(action==='update-all'||r.id===id));
   const previews=[];let ready=false;
   await task(async()=>{for(const r of targets)previews.push(await rpc('previewManagedFormUpdate',r.id));ready=true;});
   if(!ready||!previews.length)return;
@@ -790,9 +1150,9 @@ async function formCommand(action,id){
  }
  if(action==='refresh-list'){refreshFormsInBackground();return;}
  if(action==='add-column'||action==='remove-column'){
-  readFormDraft();state.formDraft=state.formDraft||defaultFormDraft();
-  const columns=state.formDraft.additionalColumns;
-  if(action==='add-column'){if(columns.length>=50){status('追加列は50列以内にしてください。','error');return;}columns.push({header:'',choices:''});}
+  readColumnDraft();state.columnDraft=state.columnDraft||defaultColumnDraft();
+  const columns=state.columnDraft.additionalColumns;
+  if(action==='add-column'){if(columns.length>=50){status('追加列は50列以内にしてください。','error');return;}columns.push({header:''});}
   else {const index=Number(id);if(!Number.isInteger(index)||index<0||index>=columns.length)return;columns.splice(index,1);}
   render();if(action==='add-column')$('extra-header-'+(columns.length-1)).focus();return;
  }
@@ -817,18 +1177,19 @@ async function formCommand(action,id){
   await task(async()=>{const r=await rpc('createNextOperation',name,folder,preview.fingerprint);status('複製しました。設定JSONを保存し、新しい運用の管理画面で読み込んでください。');$('statusRegion').insertAdjacentHTML('beforeend',' <a class="sheet-open" target="_blank" rel="noopener" href="'+esc(r.url)+'">新しい運用を開く</a>');offerSettingsDownload(r.settingsProfile,$('statusRegion'));});return;
  }
  if(action==='preview'){
-  const raw=copy(state.formDraft||defaultFormDraft());let plan;
+   const raw=copy(state.formDraft||defaultFormDraft());raw.deferMaterialSettings=true;raw.additionalColumns=[];raw.statusHeader=state.forms&&state.forms.defaults&&state.forms.defaults.statusHeader||'送信状態';let plan;
   await task(async()=>{acceptFormConsoleData(await rpc('getFormConsoleData',{returnPage:state.formPage||0}));plan=await rpc('previewFormSetup',raw,state.forms.configRevision);});if(!plan)return;
-  const added=(plan.input.additionalColumns||[]).map(c=>c.header+(c.choices.length?' ['+c.choices.join(', ')+']':'')).join('、');
-  const summary=plan.targets.map(t=>t.className+' → '+t.title+' / '+t.sheetName).join('\n')+'\n追加列：'+(added||'なし')+'（名前・送信状態は別途作成）\n採点済み判定は既存設定を保持します。\n\n非公開のフォームと回答タブを準備します。資料投稿は別操作です。';
+  const summary=plan.targets.map(t=>t.className+' → '+t.title+' / '+t.sheetName).join('\n')+'\n名前・管理・'+raw.statusHeader+'は自動作成します。\n評価・コメント列は次の「評価・コメント列」で設定します。\n\n非公開のフォームと回答タブを準備します。資料投稿は別操作です。';
   if(!await confirmAction('フォームを準備する',summary,'準備する'))return;
-  await task(async()=>{const records=await rpc('beginFormSetup',raw,plan.configRevision,plan.fingerprint);let failures=[];for(const r of records){status(r.label+' を準備しています…');try{await rpc('prepareFormTarget',r.id,r.revision);}catch(e){failures.push(r.label+': '+(e.message||e));}}await reloadForms();status(failures.length?failures.join('\n'):'フォームを準備しました。内容を確認して資料を投稿してください。',failures.length?'error':'success');});return;
+  await task(async()=>{const records=await rpc('beginFormSetup',raw,plan.configRevision,plan.fingerprint);let failures=[];for(const r of records){status(r.label+' を準備しています…');try{await rpc('prepareFormTarget',r.id,r.revision);}catch(e){failures.push(r.label+': '+(e.message||e));}}await reloadForms();status(failures.length?failures.join('\n'):'フォームと回答先を準備しました。次の「評価・コメント列」で必要な列を設定してください。',failures.length?'error':'success');});return;
  }
- const r=state.forms.records.find(item=>item.id===id);if(!r)return;
- if(['prepare','reconcile-form','reconcile-post','names'].includes(action)){
-  const method={prepare:'prepareFormTarget','reconcile-form':'reconcileManagedForm','reconcile-post':'reconcileManagedPost',names:'refreshManagedNames'}[action];
-  await task(async()=>{try{const result=await rpc(method,id,r.revision);status(action==='names'?'補完 '+result.updated+'件・未照合 '+result.unmatched+'件':'処理結果を更新しました。','success');}finally{await reloadForms();}});return;
+  const r=state.forms.records.find(item=>item.id===id);if(!r)return;
+  if(['publish','schedule','reschedule'].includes(action)&&!requireMaterialSettings([r]))return;
+ if(['prepare','reconcile-form','reconcile-post'].includes(action)){
+  const method={prepare:'prepareFormTarget','reconcile-form':'reconcileManagedForm','reconcile-post':'reconcileManagedPost'}[action];
+  await task(async()=>{try{await rpc(method,id,r.revision);status('処理結果を更新しました。','success');}finally{await reloadForms();}});return;
  }
+ if(!managedActionLabel(action))return;
  const options={};
  if(['schedule','reschedule'].includes(action))options.scheduledTime=scheduleInputToIso(scheduleDraftValue('publish:'+id,r.scheduledTime));
  if(action==='set-close')options.closesAt=scheduleInputToIso(scheduleDraftValue('close:'+id,r.closesAt));
@@ -873,7 +1234,7 @@ function renderGrades(){
  const g=gradeUI,p=g.profile,b=p.base,classes=gradeSelectedClasses();if(!classes.some(c=>c.id===g.course))g.course=classes[0]?.id||'';
  let html='<div class="card"><h2>成績出力</h2><p>クラスごとのCSVを直接出力します。未回答は空欄です。元の回答・採点・返却判断は変更しません。</p><div class="grade-toolbar">'+gradeSelect('gradePreset',[{value:'',label:'プリセットを選択'}].concat(g.store.value.presets.map(x=>({value:x.id,label:x.name}))),g.preset)+gradeButton('呼び出す','load-preset')+'<input id="gradePresetName" aria-label="プリセット名" placeholder="プリセット名" value="'+esc(g.store.value.presets.find(x=>x.id===g.preset)?.name||'')+'">'+gradeButton('保存','save-preset')+gradeButton('別名保存','save-as')+gradeButton('削除','delete-preset')+'</div><label class="check-line"><input type="checkbox" id="gradeRemember"'+(g.remember?' checked':'')+'>対象クラス・期間もプリセットに含める</label><div class="grade-toolbar">'+gradeButton('下書きを保存','save-draft')+gradeButton('保存済みを再読み込み','reload')+'<span id="gradeDraftStatus">'+(g.dirty?'下書き保存待ち':'下書き保存済み')+'</span></div><details><summary>成績出力設定のJSON入出力</summary><div class="grade-toolbar">'+gradeSelect('gradeJsonKind',gradeKinds.map(x=>({value:x.kind,label:x.title})),'grade-all')+gradeButton('JSONを書き出す','export-json')+'<label>JSONを読み込む<input type="file" accept=".json,application/json" data-profile-kind="auto"></label></div>'+(state.profile?'<pre>'+esc(profileSummary(state.profile.inspection))+'</pre>'+renderGradeConflicts()+button('確認した設定を適用','data-command="apply-profile"'):'')+'</details></div>';
  html+='<nav class="grade-steps" aria-label="出力の手順">'+['対象','列と並び順','ICSの対応','日付の確認','重複の確認','プレビュー'].map((name,i)=>'<span'+(g.step===i+1?' aria-current="step"':'')+'>'+(i+1)+'. '+name+'</span>').join('')+'</nav><div class="card">';
- if(g.step===1){html+='<h3>対象クラス・期間</h3><p>既定は全クラス・全期間です。各クラスの生徒一覧全員を含めます。</p>'+gradeButton('全クラス・全期間','all')+'<div class="grade-classes">'+g.data.classes.map(c=>'<label><input type="checkbox" data-grade-class="'+esc(c.id)+'"'+(!b.classIds.length||b.classIds.includes(c.id)?' checked':'')+'>'+esc(c.name)+'（'+c.students.length+'人）</label>').join('')+'</div><div class="grid two"><label>開始日（空欄は制限なし）<input id="gradeStart" type="date" value="'+esc(b.start)+'"></label><label>終了日（空欄は制限なし）<input id="gradeEnd" type="date" value="'+esc(b.end)+'"></label></div>';}
+ if(g.step===1){html+='<h3>対象クラス・期間</h3><p>既定は全クラス・全期間です。生徒一覧の除外(1)が空欄の生徒を含めます。</p>'+gradeButton('全クラス・全期間','all')+'<div class="grade-classes">'+g.data.classes.map(c=>'<label><input type="checkbox" data-grade-class="'+esc(c.id)+'"'+(!b.classIds.length||b.classIds.includes(c.id)?' checked':'')+'>'+esc(c.name)+'（'+c.students.length+'人）</label>').join('')+'</div><div class="grid two"><label>開始日（空欄は制限なし）<input id="gradeStart" type="date" value="'+esc(b.start)+'"></label><label>終了日（空欄は制限なし）<input id="gradeEnd" type="date" value="'+esc(b.end)+'"></label></div>';}
  if(g.step===2){const options=[{value:'',label:'列を選択'}].concat(g.data.headers.map(h=>({value:h,label:h})));html+='<h3>列と並び順</h3><p>選択した評価列の値を、そのまま授業日ごとに並べます。</p><div class="grid two"><label>授業日の列'+gradeSelect('gradeDateHeader',options,b.dateHeader)+'</label><label>成績として出す列'+gradeSelect('gradeValueHeader',options,b.valueHeader)+'</label></div><label>生徒の並び順'+gradeSelect('gradeSort',[{value:'name',label:'名前の昇順（数字順に対応）'},{value:'number',label:'出席番号の昇順（空欄は末尾）'},{value:'roster',label:'生徒一覧の掲載順'}],b.sort)+'</label><h4>先頭列（上から順番）</h4>'+b.leading.map((h,i)=>'<div class="grade-toolbar">'+gradeSelect('gradeLeading'+i,gradeOptions(),h,'data-grade-leading="'+i+'"')+gradeButton('↑','up','data-index="'+i+'"')+gradeButton('↓','down','data-index="'+i+'"')+gradeButton('削除','remove-column','data-index="'+i+'"')+'</div>').join('')+gradeButton('列を追加','add-column');}
  if(g.step===3){const titles=[...new Set(p.calendar.map(e=>e.title))].sort();html+='<h3>ICSとクラスの対応</h3><p>ICSは任意です。読み込まなくても出力できます。現在の保存日程：'+p.calendar.length+'件</p><label>ICSファイル<input id="gradeIcs" type="file" accept=".ics,text/calendar"></label><p class="help">個別予定の日本時間・UTCに対応。繰り返し指定は個別予定に展開して書き出してください。</p><table><thead><tr><th>クラス</th><th>対応する授業名</th></tr></thead><tbody>'+classes.map((c,i)=>'<tr><td>'+esc(c.name)+'</td><td>'+gradeSelect('gradeMap'+i,[{value:'',label:'ICSを使わない'}].concat(titles.map(t=>({value:t,label:t}))),b.mapping[c.id]||'','data-grade-mapping="'+esc(c.id)+'"')+'</td></tr>').join('')+'</tbody></table>';}
  if(g.step>=4){html+='<div class="grade-toolbar"><label>確認するクラス'+gradeSelect('gradeCourse',classes.map(c=>({value:c.id,label:c.name})),g.course)+'</label>'+gradeButton('最新データで再確認','analyze')+'</div>';
@@ -934,10 +1295,12 @@ async function gradeChange(event){const e=event.target;if(state.panel!=='grades'
 function boot(){
  initHelp();
  document.addEventListener('click',event=>{handleClick(event).catch(error=>status(error.message||String(error),'error'));});
- document.addEventListener('input',event=>{if(event.target.closest('#content')){readCurrent();if(state.step==='template'){state.preview=null;const preview=$('previewText');if(preview)preview.textContent='本文を変更しました。もう一度プレビューしてください。';}}});
- document.addEventListener('change',event=>{gradeChange(event).catch(error=>status(error.message,'error'));if(event.target.dataset.profileKind)inspectFile(event.target.files[0],event.target.dataset.profileKind);else if(event.target.id==='configurationExportKind'){state.exportKind=event.target.value;render();}else if(event.target.id==='includeTemplateFormUrl')state.includeTemplateFormUrl=event.target.checked;else if(event.target.id==='includeReminderTo')state.includeReminderTo=event.target.checked;else if(event.target.closest('#content')){readCurrent();if(event.target.dataset.fieldProp==='type')render();}});
+ document.addEventListener('input',event=>{if(event.target.closest('#content')){readCurrent();updateMaterialSettingsControls();if(event.target.id==='messageTemplate'&&!event.isComposing)scheduleTemplatePreview();}});
+ document.addEventListener('compositionstart',event=>{if(event.target.id==='messageTemplate'){cancelTemplatePreview();templatePreview.composing=true;updateTemplatePreview();}});
+ document.addEventListener('compositionend',event=>{if(event.target.id==='messageTemplate'){templatePreview.composing=false;readCurrent();scheduleTemplatePreview();}});
+ document.addEventListener('change',event=>{gradeChange(event).catch(error=>status(error.message,'error'));if(event.target.dataset.profileKind)inspectFile(event.target.files[0],event.target.dataset.profileKind);else if(event.target.id==='configurationExportKind'){state.exportKind=event.target.value;render();}else if(event.target.id==='includeTemplateFormUrl')state.includeTemplateFormUrl=event.target.checked;else if(event.target.id==='includeReminderTo')state.includeReminderTo=event.target.checked;else if(event.target.closest('#content')){readCurrent();updateMaterialSettingsControls();if(event.target.dataset.fieldProp==='type')render();}});
  $('confirmCheck').addEventListener('change',()=>{$('confirmAccept').disabled=!$('confirmCheck').checked;});
- window.addEventListener('beforeunload',event=>{if(dirtySections().length||gradeUI.dirty){event.preventDefault();event.returnValue='';}});
+ window.addEventListener('beforeunload',event=>{readFormSettingsDraft();readMaterialSettingsDrafts();if(dirtySections().length||gradeUI.dirty||Object.keys(formSettingsPatch()).length||(state.forms&&state.forms.records||[]).some(materialSettingsDirty)){event.preventDefault();event.returnValue='';}});
  task(async()=>{state.bootstrap=await rpc('getWebConsoleBootstrap');[['scoringScreenLink',state.bootstrap.scoringUrl],['operationScreenLink',state.bootstrap.url]].forEach(([id,url])=>{const a=$(id);if(a&&url){a.href=url;a.hidden=false;}});if(state.bootstrap.connected){await refresh(true);}else renderWebWelcome();});
 }
 boot();
