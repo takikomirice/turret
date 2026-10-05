@@ -14,7 +14,7 @@ function model(){
 test('publishing groups common settings above two individual columns with compact controls',()=>{
  const c=model(),html=vm.runInContext("renderForms('publish')",c);
  assert.match(html,/<details[^>]*id="batchSchedules"[^>]* open/);
- for(const label of ['一括設定','クラスルーム投稿の一括登録','公開予約/受付終了日時の一括登録','各クラスに反映','一括投稿（今すぐ・2クラス）','個別登録','個別操作'])assert.ok(html.includes(label),label);
+ for(const label of ['一括設定','クラスルーム投稿の一括登録','公開日時/受付終了日時の一括登録','各クラスに反映','一括投稿（2クラス）','個別登録','個別操作'])assert.ok(html.includes(label),label);
  assert.doesNotMatch(html,/一番上のクラスから読み込む|各クラスの入力欄に反映|data-form-command="reload-material-settings"/);
  assert.match(html,/data-help-body="[^"]*フォームを準備[^"]*読み方/);
  assert.match(html,/<summary>投稿タイトル・投稿文/);assert.match(html,/class="schedule-row"/);
@@ -29,7 +29,7 @@ test('registration buttons use save before posting and apply after posting or sc
   const html=vm.runInContext('renderMaterialSettings(state.forms.records[0])+renderScheduleControls(state.forms.records[0])',c);
   const label=['scheduled','published'].includes(stage)?'反映':'保存';
   assert.match(html,new RegExp('data-form-command="save-material-settings"[^>]*>'+label+'<'));
-  assert.match(html,new RegExp('data-form-command="set-close"[^>]*>'+label+'<'));
+  assert.match(html,/data-form-command="save-close-date"[^>]*>保存</);
  }
 });
 test('common text is previewed once and saved to all editable forms',async()=>{

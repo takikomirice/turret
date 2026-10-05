@@ -25,8 +25,8 @@ test('posting fields live in the publishing step and saving unchanged defaults u
  html=vm.runInContext("renderForms('publish')",c);assert.match(html,/<option value="publish">/);
 });
 test('unsaved edits block immediate, scheduled and batch publishing but preserve deadline operations',async()=>{
- const c=environment(true);vm.runInContext("materialSettingsDraft(state.forms.records[0]).description='入力中';state.scheduleDrafts={'batch:publish':'2026-10-02T10:00','close:a':'2026-10-02T12:00'};",c);
- for(const action of ['publish','schedule','schedule-all'])await vm.runInContext(`formCommand('${action}','a')`,c);
+ const c=environment(true);vm.runInContext("materialSettingsDraft(state.forms.records[0]).description='入力中';state.scheduleDrafts={'batch:publish':'2027-10-02T10:00'};state.forms.records[0].publishingSettings={scheduledTime:'',closesAt:'2027-10-02T03:00:00Z'};",c);
+ for(const action of ['publish','schedule','publish-all'])await vm.runInContext(`formCommand('${action}','a')`,c);
  assert.equal(vm.runInContext('calls.length',c),0);assert.match(vm.runInContext('messages.at(-1)',c),/保存/);
  await vm.runInContext("formCommand('set-close','a')",c);assert.equal(vm.runInContext("calls.some(c=>c[0]==='runManagedFormAction')",c),true);
 });

@@ -8,7 +8,7 @@ function environment(saved=false){
  c.document={getElementById:()=>null,querySelectorAll:()=>[]};
  vm.runInContext(`state.panel='setup';state.step='publish';state.forms={classes:[],defaults:{},records:[{id:'a',kind:'form',stage:'registered',revision:'r1',label:'1A',courseId:'100',materialTitle:'1A 資料',materialSettingsSaved:${saved},input:{titlePattern:'{class_label} フォーム',materialTitlePattern:'{class_label} 資料',description:'保存済み本文',policy:{domains:['example.com'],emails:[]}}}]};
  let calls=[],messages=[];task=async fn=>fn();requireSaved=()=>true;confirmAction=async()=>true;render=()=>{};reloadForms=async()=>{};status=message=>messages.push(message);
- rpc=async(method,...args)=>{calls.push([method,...args]);if(method==='previewManagedFormSettings')return {targets:args[0].targets.map(t=>({...t,label:t.id,changed:true,changes:[],fingerprint:'fp'}))};if(method==='runManagedFormSettings'){const r=state.forms.records.find(r=>r.id===args[0]);return {...r,materialSettingsSaved:true,...(args[4]?{materialSettingsBaseline:copy(args[1])}:{}),revision:r.id+'2',input:{...r.input,...args[1]}};}return {fingerprint:'fp'};};`,c);return c;
+ rpc=async(method,...args)=>{calls.push([method,...args]);if(method==='previewManagedFormSettings')return {targets:args[0].targets.map(t=>({...t,label:t.id,changed:true,changes:[],fingerprint:'fp'}))};if(method==='runManagedFormSettings'){const r=state.forms.records.find(r=>r.id===args[0]);return {...r,materialSettingsSaved:true,...(args[4]?{materialSettingsBaseline:copy(args[1])}:{}),revision:r.id+'2',input:{...r.input,...args[1]}};}if(method==='saveManagedPublishingSettings')return {records:args[0].map(t=>({...state.forms.records.find(r=>r.id===t.id),publishingSettings:{...publishingSettings(state.forms.records.find(r=>r.id===t.id)),...args[1]},revision:t.id+'dates'}))};return {fingerprint:'fp'};};`,c);return c;
 }
 
 test('topic select has a blank default and uses first-course candidates without inserting HTML',()=>{
@@ -44,8 +44,8 @@ test('bulk registration button precedes bulk posting and saves text, publish dat
  const html=vm.runInContext('renderBatchSchedules()',c);assert.ok(html.includes('一括登録'));assert.ok(html.indexOf('一括登録</button>')<html.indexOf('一括投稿（'));
  await vm.runInContext("formCommand('register-all')",c);
  assert.equal(vm.runInContext('state.forms.records[0].input.description',c),'本文');
- assert.equal(vm.runInContext('state.forms.records[0].scheduledTime',c),'2027-10-02T01:00:00.000Z');
- assert.equal(vm.runInContext('state.forms.records[0].closesAt',c),'2027-10-03T01:00:00.000Z');
+ assert.equal(vm.runInContext('state.forms.records[0].publishingSettings.scheduledTime',c),'2027-10-02T01:00:00.000Z');
+ assert.equal(vm.runInContext('state.forms.records[0].publishingSettings.closesAt',c),'2027-10-03T01:00:00.000Z');
 });
 test('bulk registration rejects invalid or reversed dates before any writes',async()=>{
  const c=environment();vm.runInContext(`state.scheduleDrafts={'batch:publish':'2027-10-03T10:00','batch:close':'2027-10-02T10:00'};`,c);
@@ -91,21 +91,22 @@ test('two bulk clicks during confirmation cannot execute the registration twice'
  vm.runInContext('confirmResolve(true)',c);await pending;
  assert.equal(vm.runInContext('calls.filter(c=>c[0]==="runManagedFormSettings").length',c),1);
 });
-test('bulk scheduling confirmation explicitly checks verified email and early form access',async()=>{
+test('bulk registration confirmation describes settings without requesting publication confirmation',async()=>{
  const c=environment();vm.runInContext(`state.scheduleDrafts={'batch:publish':'2027-10-02T10:00'};let summaries=[];confirmAction=async(title,summary)=>{summaries.push(summary);return false;};`,c);
  await vm.runInContext("formCommand('register-all')",c);
  const summary=vm.runInContext('summaries[0]',c);
- assert.match(summary,/メールアドレスを収集する.*確認済み/);
- assert.match(summary,/収集方式の自動判定はできません/);
- assert.match(summary,/公開前でもURLを知る許可済みユーザーは回答できます/);
+ assert.match(summary,/個別設定へ保存/);assert.doesNotMatch(summary,/確認済み.*実行|公開前でもURL/);
+ assert.equal(vm.runInContext('calls.some(c=>c[0].startsWith("run")||c[0]==="saveManagedPublishingSettings")',c),false);
 });
-test('bulk extends an old deadline before scheduling a later valid publication',async()=>{
- const c=environment(true);vm.runInContext(`state.forms.records[0].closesAt='2027-10-03T01:00:00Z';state.scheduleDrafts={'batch:publish':'2027-10-05T10:00','batch:close':'2027-10-06T10:00'};const oldRpc=rpc;rpc=async(method,...args)=>{const r=state.forms.records[0];if(method==='previewManagedFormAction'&&args[1]==='schedule'&&Date.parse(args[2].scheduledTime)>=Date.parse(r.closesAt))throw Error('公開予定は受付終了より前');if(method==='runManagedFormAction'){calls.push([method,...args]);return {...r,...args[4],stage:args[1]==='schedule'?'scheduled':r.stage};}return oldRpc(method,...args);};`,c);
+test('bulk registration saves both replacement dates together without changing an active deadline',async()=>{
+ const c=environment(true);vm.runInContext(`state.forms.records[0].closesAt='2027-10-03T01:00:00Z';state.scheduleDrafts={'batch:publish':'2027-10-05T10:00','batch:close':'2027-10-06T10:00'};`,c);
  await vm.runInContext("formCommand('register-all')",c);
- assert.equal(vm.runInContext('state.forms.records[0].scheduledTime',c),'2027-10-05T01:00:00.000Z');
- assert.equal(vm.runInContext('state.forms.records[0].closesAt',c),'2027-10-06T01:00:00.000Z');
- assert.equal(vm.runInContext('calls.filter(c=>c[0]==="runManagedFormAction")[0][2]',c),'set-close');
+ assert.equal(vm.runInContext('state.forms.records[0].publishingSettings.scheduledTime',c),'2027-10-05T01:00:00.000Z');
+ assert.equal(vm.runInContext('state.forms.records[0].publishingSettings.closesAt',c),'2027-10-06T01:00:00.000Z');
+ assert.equal(vm.runInContext('state.forms.records[0].closesAt',c),'2027-10-03T01:00:00Z');
+ assert.equal(vm.runInContext('calls.some(c=>c[0]==="runManagedFormAction")',c),false);
 });
+
 test('registering an individually changed topic updates the durable common-topic baseline',async()=>{
  const c=environment(true);vm.runInContext(`const r=state.forms.records[0];r.input.topicName='新';r.materialSettingsBaseline={materialTitlePattern:r.input.materialTitlePattern,description:r.input.description,topicName:'旧'};state.batchMaterialDraft={...r.materialSettingsBaseline,topicName:'新',topicChange:true};`,c);
  await vm.runInContext("formCommand('apply-batch-material-settings')",c);

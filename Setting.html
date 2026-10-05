@@ -792,6 +792,10 @@ function missingMaterialTopicsSummary(preview){
  const missing=Array.from(new Map((preview.targets||[]).filter(p=>p.missingTopic).map(p=>[p.missingTopic.courseId,p.missingTopic])).values());
  return missing.length?'\n\n同名トピックがないクラス：\n'+missing.map(t=>(t.className||t.courseId)+'：'+t.name).join('\n')+'\n上記のクラスに同名トピックを作成して反映します。':'';
 }
+function remoteMaterialDifferencesSummary(preview){
+ const differences=(preview.targets||[]).flatMap(p=>(p.changes||[]).filter(text=>text.startsWith('Classroom の資料')).map(text=>(p.label||p.id)+'：'+text));
+ return differences.length?'\n\nClassroom側の文面の差分：\n'+differences.join('\n'):'';
+}
 function batchMaterialSaveStatus(){
  const d=batchMaterialSettingsDraft(),targets=batchMaterialSettingsTargets();
  return targets.length&&d.topicChange!==true&&targets.every(r=>r.materialSettingsSaved!==false&&['materialTitlePattern','description'].every(k=>(r.input&&r.input[k]||'')===(d[k]||'')))?'保存済み':'未保存';
@@ -814,7 +818,7 @@ function updateMaterialSettingsControls(){
  });
  document.querySelectorAll('[data-material-required]').forEach(el=>{
   const targets=el.dataset.materialRequired==='batch'?batchPostTargets():state.forms.records.filter(r=>r.id===el.dataset.materialRequired);
-  el.disabled=state.busy||!targets.length||targets.some(r=>!materialSettingsReady(r));
+  el.disabled=state.busy||!targets.length||targets.some(r=>!materialSettingsReady(r)||publishingDatesDirty(r));
  });
  document.querySelectorAll('[data-batch-material-save-status]').forEach(el=>{el.textContent=batchMaterialSaveStatus()+'：このボタンは投稿タイトル・投稿文・トピックだけを保存します。';});
  document.querySelectorAll('[data-material-save-status]').forEach(el=>{
@@ -864,30 +868,65 @@ function updateScheduleInputPreview(input){
 }
 function readScheduleDrafts(){
  state.scheduleDrafts=state.scheduleDrafts||{};
- document.querySelectorAll('[data-schedule-key]').forEach(el=>{if(!el.dataset.scheduleKey)return;if(el.value===el.dataset.scheduleSaved)delete state.scheduleDrafts[el.dataset.scheduleKey];else state.scheduleDrafts[el.dataset.scheduleKey]=el.value;});
+ state.scheduleDraftRevisions=state.scheduleDraftRevisions||{};
+ document.querySelectorAll('[data-schedule-key]').forEach(el=>{
+  const key=el.dataset.scheduleKey;if(!key)return;
+  if(el.value===el.dataset.scheduleSaved){delete state.scheduleDrafts[key];delete state.scheduleDraftRevisions[key];}
+  else{state.scheduleDrafts[key]=el.value;const r=state.forms?.records.find(r=>key==='publish:'+r.id||key==='close:'+r.id);if(r&&!state.scheduleDraftRevisions[key])state.scheduleDraftRevisions[key]=r.revision;}
+ });
 }
 function scheduleInput(key,label,saved){
  const draft=state.scheduleDrafts||{},value=Object.prototype.hasOwnProperty.call(draft,key)?draft[key]:scheduleIsoToInput(saved);
  return '<label for="schedule-'+esc(key)+'">'+esc(label)+'（日本時間）</label><input type="datetime-local" id="schedule-'+esc(key)+'" data-schedule-key="'+esc(key)+'" data-schedule-saved="'+esc(scheduleIsoToInput(saved))+'" value="'+esc(value)+'" aria-describedby="schedule-preview-'+esc(key)+'"><p class="help" id="schedule-preview-'+esc(key)+'" aria-live="polite" aria-atomic="true">'+esc(scheduleInputPreview(value))+'</p>';
 }
 function scheduleDraftValue(key,saved){const drafts=state.scheduleDrafts||{};return Object.prototype.hasOwnProperty.call(drafts,key)?drafts[key]:scheduleIsoToInput(saved);}
+function publishingSettings(r){return r.publishingSettings||{scheduledTime:r.scheduledTime||'',closesAt:r.closesAt||''};}
+function publishingDatesDirty(r){const s=publishingSettings(r);return ['publish','close'].some(k=>scheduleDraftValue(k+':'+r.id,s[k==='publish'?'scheduledTime':'closesAt'])!==scheduleIsoToInput(s[k==='publish'?'scheduledTime':'closesAt']));}
+function validatePublishingDates(targets,changes){
+ Object.values(changes).forEach(value=>{if(value&&Date.parse(value)<=Date.now())throw Error('未来の日時を入力してください。');});
+ targets.forEach(r=>{const s={...publishingSettings(r),...changes};if(s.scheduledTime&&s.closesAt&&Date.parse(s.closesAt)<=Date.parse(s.scheduledTime))throw Error((r.label||r.id)+'：受付終了日時は資料の公開予定より後にしてください。');});
+}
+function acceptPublishingRecord(record){
+ const index=state.forms.records.findIndex(r=>r.id===record.id);if(index<0)return;
+ const previous=state.forms.records[index];
+ for(const prefix of ['publish:','close:']){const key=prefix+record.id;if(state.scheduleDraftRevisions?.[key]===previous.revision)state.scheduleDraftRevisions[key]=record.revision;}
+ state.forms.records[index]=record;
+}
+async function savePublishingDates(targets,changes,individual=false){
+ if(!Object.keys(changes).length)return true;
+ validatePublishingDates(targets,changes);let completed=false;
+ await task(async()=>{
+  try{
+   for(let start=0;start<targets.length;start+=100){
+    const prefix=Object.keys(changes)[0]==='scheduledTime'?'publish:':'close:';
+    const result=await rpc('saveManagedPublishingSettings',targets.slice(start,start+100).map(r=>({id:r.id,revision:individual&&state.scheduleDraftRevisions?.[prefix+r.id]||r.revision})),changes);
+    for(const saved of result.records){acceptPublishingRecord(saved);
+     for(const field of Object.keys(changes)){const key=(field==='scheduledTime'?'publish:':'close:')+saved.id;delete (state.scheduleDrafts||{})[key];delete (state.scheduleDraftRevisions||{})[key];}
+    }
+   }
+   completed=true;render();status('日時を各クラスの個別設定に保存しました。','success');
+  }finally{await reloadForms();}
+ });return completed;
+}
 function acceptScheduleResult(id,action,record){
  const material=['publish','schedule','reschedule','cancel-schedule'].includes(action),deadline=['set-close','cancel-close'].includes(action);
  if(!material&&!deadline)return;
  const key=(material?'publish:':'close:')+id,value=scheduleIsoToInput(record[material?'scheduledTime':'closesAt']);
  delete (state.scheduleDrafts||{})[key];const el=$('schedule-'+key);if(el){el.value=value;el.dataset.scheduleSaved=value;updateScheduleInputPreview(el);}
+ delete (state.scheduleDraftRevisions||{})[key];
 }
 function renderScheduleControls(r){
  if(r.kind!=='form'||r.formUpdate||r.settingsUpdate||r.columnSetup||!['registered','published','scheduled','draft','deleted','publish_review','schedule_review'].includes(r.stage))return '';
  let html='';
- if(['registered','deleted','draft','scheduled'].includes(r.stage))html+='<details'+publishDetailsAttributes('materialSchedule-'+r.id)+'><summary>資料の投稿予約'+helpButton('資料の投稿予約','予約登録時にフォーム受付を開始します。予約取消は個別操作から行います。取消後は資料を下書きに戻し、フォーム受付は変更しません。')+'</summary><div class="schedule-row"><div>'+scheduleInput('publish:'+r.id,'資料公開日時',r.scheduledTime)+'</div>'+materialPostButton(registrationLabel(r),r.stage==='scheduled'?'reschedule':'schedule',r)+'</div></details>';
- html+='<details'+publishDetailsAttributes('formClose-'+r.id)+'><summary>フォームの受付終了予約'+helpButton('フォームの受付終了予約','約5分間隔で期限を確認します。回答・採点・返却は保持します。予約の変更・取消だけでは受付を再開しません。取消は個別操作から行います。')+'</summary><div class="schedule-row"><div>'+scheduleInput('close:'+r.id,'受付終了日時',r.closesAt)+'</div>'+formRecordButton(registrationLabel(r),'set-close',r)+'</div></details>';
- return html;
+ const s=publishingSettings(r);
+ if(['registered','deleted','draft','scheduled'].includes(r.stage))html+='<details'+publishDetailsAttributes('materialSchedule-'+r.id)+'><summary>資料の公開日時'+helpButton('資料の公開日時','保存は個別設定の登録だけです。未投稿の資料は「資料を投稿」で予約を実行します。予約済み資料の変更は個別操作の「資料の予約日時を反映」で実行します。空欄は即時投稿です。')+'</summary><div class="schedule-row"><div>'+scheduleInput('publish:'+r.id,'資料公開日時',s.scheduledTime)+'</div>'+formRecordButton('保存','save-publish-date',r)+'</div></details>';
+ html+='<details'+publishDetailsAttributes('formClose-'+r.id)+'><summary>フォームの受付終了日時'+helpButton('フォームの受付終了日時','保存では終了タイマーを有効にしません。未投稿の資料は投稿時に有効にします。投稿済み・予約済みフォームでは個別操作の「受付終了日時を反映」で実行します。約5分間隔で期限を確認します。')+'</summary><div class="schedule-row"><div>'+scheduleInput('close:'+r.id,'受付終了日時',s.closesAt)+'</div>'+formRecordButton('保存','save-close-date',r)+'</div></details>';
+ return html+'<div class="actions">'+formRecordButton('保存済みの日時を読み直す','reload-publishing-dates',r)+'</div>';
 }
 function batchPostTargets(){return state.forms.records.filter(r=>r.kind==='form'&&['registered','draft'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate&&!r.columnSetup);}
 function renderBatchSchedules(){
- const timer=state.forms.scheduleTimer,targets=batchPostTargets(),disabled=!targets.length||targets.some(r=>!materialSettingsReady(r))?' disabled':'';
- return '<details class="card"'+publishDetailsAttributes('batchSchedules',true)+'><summary>一括設定</summary>'+renderBatchMaterialSettings()+'<section>'+helpHeading('公開予約/受付終了日時の一括登録','日時は日本時間です。実行前に対象クラスと日時を確認します。公開予約は未投稿の資料、受付終了は準備済みフォームが対象です。予約済み資料の日時変更は個別登録から行います。')+'<div class="schedule-row"><div>'+scheduleInput('batch:publish','未投稿の資料の公開日時')+'</div>'+button('保存','data-form-command="schedule-all" data-material-required="batch"'+disabled)+'</div><div class="schedule-row"><div>'+scheduleInput('batch:close','準備済みフォームの受付終了日時')+'</div>'+button('保存','data-form-command="set-close-all"')+'</div></section><p class="help">各日時の「保存」はその日時だけを登録します。一括登録は文面・トピックと入力済みの2つの日時をまとめて登録します。日時の空欄は変更しません。</p><div class="actions batch-post">'+button('一括登録','data-form-command="register-all"'+(!batchMaterialSettingsTargets().length?' disabled':''))+button('一括投稿（今すぐ・'+targets.length+'クラス）','data-form-command="publish-all" data-material-required="batch"'+disabled,true)+helpButton('一括投稿','保存済みの文面で、未投稿の資料を今すぐ投稿します。予約済み・投稿済み・削除済みの資料は対象外です。対象クラスと文面は実行前に確認できます。')+'</div></details>'+(timer?'<p class="'+(timer.registered&&!timer.healthy?'notice':'help')+'">'+esc(timer.message)+(timer.registered&&!timer.healthy?' '+button('タイマーを修復','data-form-command="repair-timer"'):'')+'</p>':'');
+ const timer=state.forms.scheduleTimer,targets=batchPostTargets(),disabled=!targets.length||targets.some(r=>!materialSettingsReady(r)||publishingDatesDirty(r))?' disabled':'';
+ return '<details class="card"'+publishDetailsAttributes('batchSchedules',true)+'><summary>一括設定</summary>'+renderBatchMaterialSettings()+'<section>'+helpHeading('公開日時/受付終了日時の一括登録','日時は日本時間です。「保存」は下の各クラスの個別設定へ日時を登録します。投稿・受付開始・終了タイマーの有効化は行いません。稼働中の予約を変更する場合は保存後に個別操作から反映してください。')+'<div class="schedule-row"><div>'+scheduleInput('batch:publish','資料の公開日時')+'</div>'+button('保存','data-form-command="schedule-all"')+'</div><div class="schedule-row"><div>'+scheduleInput('batch:close','フォームの受付終了日時')+'</div>'+button('保存','data-form-command="set-close-all"')+'</div></section><p class="help">各日時の「保存」はその日時だけを登録します。一括登録は文面・トピックと入力済みの2つの日時を各クラスへ反映します。日時の空欄は変更しません。個別欄を空欄にして保存すると日時を解除できます。</p><div class="actions batch-post">'+button('一括登録','data-form-command="register-all"'+(!batchMaterialSettingsTargets().length?' disabled':''))+button('一括投稿（'+targets.length+'クラス）','data-form-command="publish-all" data-material-required="batch"'+disabled,true)+helpButton('一括投稿','各クラスの保存済み設定で投稿します。公開日時があれば予約投稿、空欄なら即時投稿です。受付終了日時も投稿時に有効にします。予約済み・投稿済み・削除済みの資料は対象外です。')+'</div></details>'+(timer?'<p class="'+(timer.registered&&!timer.healthy?'notice':'help')+'">'+esc(timer.message)+(timer.registered&&!timer.healthy?' '+button('タイマーを修復','data-form-command="repair-timer"'):'')+'</p>':'');
 }
 function individualOperations(r){
  const options=[],add=(value,label)=>options.push({value,label});
@@ -898,7 +937,9 @@ function individualOperations(r){
   if(['registered','deleted','draft'].includes(r.stage))add('publish',r.stage==='deleted'?'資料を再投稿':'資料を投稿');
   if(['registered','published','scheduled','draft','deleted'].includes(r.stage)){add('open','回答受付を開始');add('close','回答受付を停止');add('update-form','ひな形から更新');}
   if(['publish_review','schedule_review','delete_review'].includes(r.stage))add('close','回答受付を停止');
-  if(r.stage==='scheduled')add('cancel-schedule','資料の予約を取消');
+   if(r.stage==='scheduled')add('cancel-schedule','資料の予約を取消');
+   if(r.stage==='scheduled'&&publishingSettings(r).scheduledTime)add('reschedule','資料の予約日時を反映');
+   if(['registered','published','scheduled','draft','deleted'].includes(r.stage)&&publishingSettings(r).closesAt)add('set-close','受付終了日時を反映');
   if(r.closesAt&&['registered','published','scheduled','draft','deleted','publish_review','schedule_review'].includes(r.stage))add('cancel-close','受付終了予約を取消');
  }
  if(['publish_review','schedule_review','delete_review'].includes(r.stage)||r.materialId&&['scheduled','draft','published'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate)add('reconcile-post',['publish_review','schedule_review','delete_review'].includes(r.stage)?'投稿結果を照合':'投稿状態を確認');
@@ -917,7 +958,7 @@ function managedActionSummary(preview,action){
  if(preview.closesAt)summary+='\n受付終了：'+scheduleDisplay(preview.closesAt);
  if(typeof preview.accepting==='boolean')summary+='\n現在のフォーム：'+(preview.accepting?'受付中':'受付停止');
  if(['schedule','reschedule'].includes(action))summary+='\n資料の公開だけを予約します。新規予約時にフォーム受付を開始するため、公開前でもURLを知る許可済みユーザーは回答できます。';
- if(action==='set-close')summary+='\n約5分間隔で期限を確認し、受付を停止します。実行時刻は遅れる場合があります。';
+ if(action==='set-close'||['publish','schedule'].includes(action)&&preview.closesAt)summary+='\n約5分間隔で期限を確認し、受付を停止します。実行時刻は遅れる場合があります。';
  if(action==='cancel-schedule')summary+='\n資料を下書きとして保持します。フォーム受付と受付終了予約は変更しません。';
  if(action==='cancel-close')summary+='\n受付終了の予約だけを取り消します。資料の公開予定は変更せず、フォーム受付も自動再開しません。';
  if(preview.emailNotice)summary+='\n\n'+preview.emailNotice;
@@ -930,7 +971,7 @@ function renderForms(mode){
  let notice=state.formsLoading?'<p class="notice" role="status">最新情報を取得中… '+(state.forms?'前回取得した内容を表示しています。':'')+'</p>':state.formsError?'<div class="notice" role="status">最新情報を取得できませんでした。'+esc(state.formsError)+(state.forms?' 前回取得した内容を表示しています。':'')+' '+button('再取得','data-form-command="refresh-list"')+'</div>':'';
  if(!state.forms)return notice||'<p role="status">フォーム情報を取得しています…</p>';
  if(mode==='prepare')notice+=renderFormSettingsEditor();
- if(mode==='publish')return notice+helpHeading('資料の投稿と受付','一括設定で文面を登録してください。クラスごとの例外は個別登録、取消・受付の開始や停止・削除は個別操作から実行します。Classroomの「授業」に資料を即時投稿、または日時を指定して予約します。新規投稿・予約登録時にフォーム受付を開始します。投稿状態は最終確認時の情報です。「投稿状態を確認」でClassroomと照合できます。')+renderBatchSchedules()+(state.forms.records.some(r=>r.kind==='form'&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate)?'<div class="actions">'+button('すべてのフォームを更新','data-form-command="update-all"')+'</div>':'')+renderFormRecords('publish');
+ if(mode==='publish')return notice+helpHeading('資料の投稿と受付','一括設定で文面を登録してください。クラスごとの例外は個別登録、取消・受付の開始や停止・削除は個別操作から実行します。Classroomの「授業」に資料を即時投稿、または日時を指定して予約します。日時の保存では投稿や受付開始を行いません。投稿の実行時にフォーム受付を開始し、保存済みの受付終了日時を有効にします。投稿状態は最終確認時の情報です。「投稿状態を確認」でClassroomと照合できます。')+renderBatchSchedules()+(state.forms.records.some(r=>r.kind==='form'&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate)?'<div class="actions">'+button('すべてのフォームを更新','data-form-command="update-all"')+'</div>':'')+renderFormRecords('publish');
  const d=state.formDraft||defaultFormDraft(),classes=state.forms.classes||[];
   const input=templateFormInput(d)+formInput('folderId','保存先フォルダURL',d,true)+formInput('titlePattern','フォーム名（{class_label} は下の短い表記）',d)+formInput('domains','回答を許可する学校ドメイン（@なし・例：school.example）',d)+formInput('emails','個別に許可するメール（個人テスト用など）',d);
  const columns=formInput('emailHeader','既存のメール列名',d)+formInput('nameHeader','名前を補完する列',d);
@@ -1048,21 +1089,41 @@ async function registerAllPublishingSettings(){
  }catch(error){status(error.message,'error');return;}
  const targetIds=batchMaterialSettingsTargets().map(r=>r.id),labels=batchMaterialSettingsTargets().map(r=>r.label||r.className||r.id).join('、');
  if(!targetIds.length){status('登録できる対象がありません。','error');return;}
- const closeFirst=scheduledTime&&closesAt&&batchPostTargets().some(r=>r.closesAt&&Date.parse(r.closesAt)<=Date.parse(scheduledTime));
- const summary='対象：'+labels+'\n未投稿の資料の公開日時：'+(scheduledTime?scheduleDisplay(scheduledTime):'変更しない')+'\n準備済みフォームの受付終了日時：'+(closesAt?scheduleDisplay(closesAt):'変更しない')+(scheduledTime?'\n各フォームの「設定 → 回答 → メールアドレスを収集する」が「確認済み」になっていることを確認してください。収集方式の自動判定はできません。\n資料の公開だけを予約します。新規予約時にフォーム受付を開始するため、公開前でもURLを知る許可済みユーザーは回答できます。':'')+(closesAt?'\n約5分間隔で期限を確認し、受付を停止します。実行時刻は遅れる場合があります。':'')+'\n文面・トピック、'+(closeFirst?'受付終了予約、公開予約':'公開予約、受付終了予約')+'の順に登録します。公開予約は未投稿の資料のみが対象で、フォーム受付を開始します。途中で失敗した場合、成功済みの登録は保持され、残りは実行しません。';
+ const changes={...(scheduledTime?{scheduledTime}:{}),...(closesAt?{closesAt}:{})};
+ try{validatePublishingDates(batchMaterialSettingsTargets(),changes);}catch(error){status(error.message,'error');return;}
+ const summary='対象：'+labels+'\n資料の公開日時：'+(scheduledTime?scheduleDisplay(scheduledTime):'変更しない')+'\nフォームの受付終了日時：'+(closesAt?scheduleDisplay(closesAt):'変更しない')+'\n文面・トピックと入力済みの日時を各クラスの個別設定へ保存します。日時の登録では投稿・受付開始・終了タイマーの有効化を行いません。途中で失敗した場合、成功済みの登録は保持されます。';
  state.registrationPending=true;
  try{
   if(!await formCommand('apply-batch-material-settings',null,{summary}))return;
-  const dates=[...(scheduledTime?[{action:'schedule-all',options:{scheduledTime}}]:[]),...(closesAt?[{action:'set-close-all',options:{closesAt}}]:[])];
-  if(closeFirst)dates.reverse();
-  for(const date of dates)if(!await formCommand(date.action,null,{targetIds,options:date.options}))return;
+   const targets=state.forms.records.filter(r=>targetIds.includes(r.id));
+   if(targets.length!==targetIds.length){status('対象クラスが変わりました。状態を更新してください。','error');return;}
+   if(!await savePublishingDates(targets,changes))return;
   status('一括登録が完了しました。','success');
  }finally{state.registrationPending=false;}
 }
 async function formCommand(action,id,registration){
  if(state.registrationPending&&!registration)return;
  if(action==='reload-topics'){readCurrent();await task(async()=>{await refreshMaterialTopics();render();});return;}
- if(action==='register-all'){await registerAllPublishingSettings();return;}
+  if(action==='register-all'){await registerAllPublishingSettings();return;}
+  if(action==='reload-publishing-dates'){
+   readCurrent();const r=state.forms.records.find(r=>r.id===id);if(!r)return;
+   if(publishingDatesDirty(r)&&!await confirmAction('保存済みの日時を読み直す','このクラスの入力中の日時を、保存済みの日時に戻します。','読み直す'))return;
+   for(const prefix of ['publish:','close:']){delete (state.scheduleDrafts||{})[prefix+id];delete (state.scheduleDraftRevisions||{})[prefix+id];}render();return;
+  }
+  if(['schedule-all','set-close-all','save-publish-date','save-close-date'].includes(action)){
+   readCurrent();if(!requireSaved())return;
+   const batch=action.endsWith('-all'),publish=['schedule-all','save-publish-date'].includes(action),field=publish?'scheduledTime':'closesAt';
+   const targets=batch?batchMaterialSettingsTargets():state.forms.records.filter(r=>r.id===id&&editableFormSettingsRecord(r));
+   if(!targets.length){status('日時を登録できる対象がありません。','error');return;}
+   const saved=batch?'':publishingSettings(targets[0])[field],raw=scheduleDraftValue(batch?(publish?'batch:publish':'batch:close'):(publish?'publish:':'close:')+id,saved);
+   if(batch&&!raw){status('一括登録する日時を入力してください。空欄は変更しません。','error');return;}
+   const changes={[field]:raw?scheduleInputToIso(raw):''};validatePublishingDates(targets,changes);
+   const versions=JSON.stringify(targets.map(r=>[r.id,r.revision]));
+   if(!await confirmAction('日時を保存',targets.map(r=>r.label||r.id).join('、')+'\n'+(publish?'資料の公開日時：':'受付終了日時：')+scheduleDisplay(changes[field])+'\n各クラスの個別設定へ保存します。投稿・受付開始・終了タイマーの有効化は行いません。','保存'))return;
+   const current=batch?batchMaterialSettingsTargets():state.forms.records.filter(r=>r.id===id&&editableFormSettingsRecord(r));
+   if(JSON.stringify(current.map(r=>[r.id,r.revision]))!==versions){status('対象の状態が更新されました。再確認してください。','error');return;}
+   return await savePublishingDates(targets,changes,!batch);
+  }
  if(action==='execute-operation'){
   readCurrent();const r=state.forms.records.find(r=>r.id===id),select=$('form-operation-'+id),selected=select&&select.value;
   if(!r||!individualOperations(r).some(o=>o.value===selected)){status('現在の状態で実行できる操作を選択してください。','error');return;}
@@ -1076,7 +1137,7 @@ async function formCommand(action,id,registration){
   const changes=materialSettingsChanges(batchMaterialSettingsDraft());changes.materialTitlePattern=changes.materialTitlePattern.trim();changes.description=changes.description.trim();
   if(!changes.materialTitlePattern){status('投稿タイトルを入力してください。','error');return;}
   const topicKey=JSON.stringify(changes),topicProgress=state.batchMaterialTopicProgress;
-  const targets=allTargets.filter(r=>!materialSettingsReady(r)||changes.topicChange===true&&!(topicProgress&&topicProgress.key===topicKey&&topicProgress.completed[r.id]===r.revision)||r.input.materialTitlePattern!==changes.materialTitlePattern||(r.input.description||'')!==changes.description||r.materialSettingsBaseline?.materialTitlePattern!==changes.materialTitlePattern||r.materialSettingsBaseline?.description!==changes.description);
+  const targets=allTargets.filter(r=>!materialSettingsReady(r)||(r.materialId&&r.stage!=='deleted'||changes.topicChange===true)&&!(topicProgress&&topicProgress.key===topicKey&&topicProgress.completed[r.id]===r.revision)||r.input.materialTitlePattern!==changes.materialTitlePattern||(r.input.description||'')!==changes.description||r.materialSettingsBaseline?.materialTitlePattern!==changes.materialTitlePattern||r.materialSettingsBaseline?.description!==changes.description);
   const pending=topicProgress&&topicProgress.key===topicKey&&(state.forms.records||[]).filter(r=>topicProgress.targets.includes(r.id)&&r.settingsUpdate);
   if(pending&&pending.length){status('更新が途中のクラスで「設定の更新を再開」を完了してください：'+pending.map(r=>r.label||r.className||r.id).join('、'),'error');return false;}
   if(!targets.length){
@@ -1087,7 +1148,7 @@ async function formCommand(action,id,registration){
    for(let start=0;start<targets.length;start+=100){const part=await rpc('previewManagedFormSettings',{targets:targets.slice(start,start+100).map(r=>({id:r.id,revision:materialSettingsDraft(r).revision})),changes,saveMaterialSettings:true,registerCommonMaterial:true});plans.push(...part.targets);}
    preview={targets:plans};
   });if(!preview)return;
-  const summary=targets.map(r=>r.label||r.className||r.id).join('、')+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+(registration?'\n\n'+registration.summary:'')+'\n\n各クラスの投稿タイトル・投稿文・トピックを保存します。個別の文面も置き換わり、投稿済み・予約済みの資料にも反映します。';
+  const summary=targets.map(r=>r.label||r.className||r.id).join('、')+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+remoteMaterialDifferencesSummary(preview)+(registration?'\n\n'+registration.summary:'')+'\n\n各クラスの投稿タイトル・投稿文・トピックを保存します。個別の文面も置き換わり、投稿済み・予約済みの資料にも反映します。';
   if(!await confirmAction(registration?'一括登録':'クラスルーム投稿の一括登録',summary,registration?'一括登録':'各クラスに反映'))return;
   if(JSON.stringify(batchMaterialSettingsTargets().map(r=>[r.id,r.revision]))!==targetVersions){status('対象の状態が更新されました。内容を再確認して、もう一度反映してください。','error');return;}
   let completed=false;
@@ -1099,7 +1160,7 @@ async function formCommand(action,id,registration){
    let done=0;const errors=[];
    try{
     for(const p of preview.targets){
-     try{const result=await rpc('runManagedFormSettings',p.id,changes,p.fingerprint,true,true,!!p.missingTopic);const index=state.forms.records.findIndex(r=>r.id===p.id);if(index>=0)state.forms.records[index]=result;delete state.materialDrafts[p.id];if(changes.topicChange===true)state.batchMaterialTopicProgress.completed[p.id]=result.revision;done++;}
+      try{const result=await rpc('runManagedFormSettings',p.id,changes,p.fingerprint,true,true,!!p.missingTopic);acceptPublishingRecord(result);delete state.materialDrafts[p.id];if(changes.topicChange===true)state.batchMaterialTopicProgress.completed[p.id]=result.revision;done++;}
      catch(e){errors.push((targets.find(r=>r.id===p.id)?.label||p.id)+'：'+(e.message||e));}
     }
    }finally{if(!errors.length){batchMaterialSettingsDraft().topicChange=false;delete state.batchMaterialTopicProgress;}render();await reloadForms();}
@@ -1122,12 +1183,12 @@ async function formCommand(action,id,registration){
    const r=state.forms.records.find(r=>r.id===id);if(!r||!editableFormSettingsRecord(r))return;
    const d=materialSettingsDraft(r),changes=materialSettingsChanges(d);let preview;
    await task(async()=>{preview=await rpc('previewManagedFormSettings',{targets:[{id,revision:d.revision}],changes,saveMaterialSettings:true});});if(!preview)return;
-   const summary=(r.label||r.className)+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+'\n\n投稿タイトル・投稿文・トピックを保存します。投稿済み・予約済みの資料にも反映します。';
+   const summary=(r.label||r.className)+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+remoteMaterialDifferencesSummary(preview)+'\n\n投稿タイトル・投稿文・トピックを保存します。投稿済み・予約済みの資料にも反映します。';
    if(!await confirmAction('投稿設定を保存',summary,'設定を保存'))return;
    await task(async()=>{
     try{
      const result=await rpc('runManagedFormSettings',id,changes,preview.targets[0].fingerprint,true,false,!!preview.targets[0].missingTopic);
-     const index=state.forms.records.findIndex(r=>r.id===id);if(index>=0)state.forms.records[index]=result;
+      acceptPublishingRecord(result);
      delete state.materialDrafts[id];
      // 再取得前に保存結果を描画し、古い入力を下書きへ戻さない。
      render();status('投稿設定を保存しました。','success');
@@ -1201,20 +1262,18 @@ async function formCommand(action,id,registration){
   if(!await confirmAction('受付終了タイマーを修復','約5分間隔の受付終了確認を復旧します。日次返却の設定は変更しません。','修復する'))return;
   await task(async()=>{try{const result=await rpc('repairFormScheduleTimer');status(result.message,result.healthy?'success':'error');}finally{await reloadForms();}});return;
  }
- if(['publish-all','schedule-all','set-close-all'].includes(action)){
-  readCurrent();if(!requireSaved())return;
-  const immediate=action==='publish-all',material=action!=='set-close-all',kind=immediate?'publish':material?'schedule':'set-close',key=material?'batch:publish':'batch:close';
-  const options=registration?registration.options:immediate?{}:material?{scheduledTime:scheduleInputToIso((state.scheduleDrafts||{})[key])}:{closesAt:scheduleInputToIso((state.scheduleDrafts||{})[key])};
-  const targets=material?batchPostTargets():state.forms.records.filter(r=>r.kind==='form'&&!r.formUpdate&&!r.settingsUpdate&&!r.columnSetup&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&Date.parse(r.closesAt)!==Date.parse(options.closesAt));
-   if(material&&!requireMaterialSettings(targets))return;
-  if(!targets.length){status('操作対象のフォームがありません。');return !!registration;}
-  const previews=[],errors=[];
-  if(registration&&targets.some(r=>!registration.targetIds.includes(r.id))){status('対象クラスが変わりました。もう一度確認してください。','error');return false;}
-  await task(async()=>{for(const r of targets){try{previews.push({record:r,preview:await rpc('previewManagedFormAction',r.id,kind,options)});}catch(e){errors.push((r.label||r.id)+'：'+(e.message||e));}}});
-  if(!previews.length){status(errors.join('\n'),'error');return;}
-  if(!registration&&!await confirmAction(managedActionLabel(kind),previews.map(p=>managedActionSummary(p.preview,kind)).join('\n\n')+(errors.length?'\n\n対象外：\n'+errors.join('\n'):''),'確認済み・実行する'))return;
-  let completed=false;
-  await task(async()=>{let done=0;try{for(const p of previews){try{const result=await rpc('runManagedFormAction',p.record.id,kind,p.preview.fingerprint,!!p.preview.emailNotice,options);if(result.id===p.record.id){const index=state.forms.records.findIndex(r=>r.id===result.id);if(index>=0)state.forms.records[index]=result;}done++;acceptScheduleResult(p.record.id,kind,result);}catch(e){errors.push((p.record.label||p.record.id)+'：'+(e.message||e));}}}finally{render();await reloadForms();}completed=!errors.length;status('完了 '+done+'件'+(errors.length?'\n'+errors.join('\n'):''),errors.length?'error':'success');});return completed;
+  if(action==='publish-all'){
+   readCurrent();if(!requireSaved())return;
+   const targets=batchPostTargets();
+   if(!requireMaterialSettings(targets))return;
+   if(targets.some(publishingDatesDirty)){status('個別設定の日時を保存してから投稿してください。','error');return;}
+   if(!targets.length){status('操作対象のフォームがありません。');return !!registration;}
+   const previews=[],errors=[];
+   await task(async()=>{for(const r of targets){const s=publishingSettings(r),kind=s.scheduledTime?'schedule':'publish',options={...(s.scheduledTime?{scheduledTime:s.scheduledTime}:{}),...(s.closesAt||r.publishingSettings?{closesAt:s.closesAt}:{})};try{previews.push({record:r,kind,options,preview:await rpc('previewManagedFormAction',r.id,kind,options)});}catch(e){errors.push((r.label||r.id)+'：'+(e.message||e));}}});
+   if(!previews.length){status(errors.join('\n'),'error');return;}
+   if(!await confirmAction('一括投稿',previews.map(p=>managedActionSummary(p.preview,p.kind)).join('\n\n')+(errors.length?'\n\n対象外：\n'+errors.join('\n'):''),'確認済み・実行する'))return;
+   let completed=false;
+   await task(async()=>{let done=0;try{for(const p of previews){try{const result=await rpc('runManagedFormAction',p.record.id,p.kind,p.preview.fingerprint,!!p.preview.emailNotice,p.options);if(result.id===p.record.id){const index=state.forms.records.findIndex(r=>r.id===result.id);if(index>=0)state.forms.records[index]=result;}done++;acceptScheduleResult(p.record.id,p.kind,result);}catch(e){errors.push((p.record.label||p.record.id)+'：'+(e.message||e));}}}finally{render();await reloadForms();}completed=!errors.length;status('完了 '+done+'件'+(errors.length?'\n'+errors.join('\n'):''),errors.length?'error':'success');});return completed;
  }
  if(action==='column-up'||action==='column-down'){
   readColumnDraft();state.columnDraft=state.columnDraft||defaultColumnDraft();const columns=state.columnDraft.additionalColumns,index=Number(id),to=index+(action==='column-up'?-1:1);
@@ -1322,9 +1381,14 @@ async function formCommand(action,id,registration){
   await task(async()=>{try{const result=await rpc(method,id,r.revision);status(result.copyNotFound?result.lastError:'処理結果を更新しました。',result.copyNotFound?'error':'success');}finally{await reloadForms();}});return;
  }
  if(!managedActionLabel(action))return;
- const options={};
- if(['schedule','reschedule'].includes(action))options.scheduledTime=scheduleInputToIso(scheduleDraftValue('publish:'+id,r.scheduledTime));
- if(action==='set-close')options.closesAt=scheduleInputToIso(scheduleDraftValue('close:'+id,r.closesAt));
+  const options={},saved=publishingSettings(r);
+  if(['publish','schedule','reschedule','set-close'].includes(action)&&publishingDatesDirty(r)){status('個別設定の日時を保存してから実行してください。','error');return;}
+  if(action==='publish'){
+   if(saved.scheduledTime){action='schedule';options.scheduledTime=saved.scheduledTime;}
+   if(saved.closesAt||r.publishingSettings)options.closesAt=saved.closesAt;
+  }
+  if(['schedule','reschedule'].includes(action))options.scheduledTime=saved.scheduledTime;
+  if(action==='set-close')options.closesAt=saved.closesAt;
  let preview;await task(async()=>{preview=await rpc('previewManagedFormAction',id,action,options);});if(!preview)return;
  const label=managedActionLabel(action),summary=managedActionSummary(preview,action);
  if(!await confirmAction(label,summary,(preview.emailNotice?'確認済み・':'')+label+'する'))return;
@@ -1432,7 +1496,7 @@ function boot(){
  document.addEventListener('compositionend',event=>{if(event.target.id==='messageTemplate'){templatePreview.composing=false;readCurrent();scheduleTemplatePreview();}});
  document.addEventListener('change',event=>{gradeChange(event).catch(error=>status(error.message,'error'));if(event.target.dataset.profileKind)inspectFile(event.target.files[0],event.target.dataset.profileKind);else if(event.target.id==='configurationExportKind'){state.exportKind=event.target.value;render();}else if(event.target.id==='includeTemplateFormUrl')state.includeTemplateFormUrl=event.target.checked;else if(event.target.id==='includeReminderTo')state.includeReminderTo=event.target.checked;else if(event.target.closest('#content')){readCurrent();updateMaterialSettingsControls();updateScheduleInputPreview(event.target);if(event.target.dataset.fieldProp==='type')render();}});
  $('confirmCheck').addEventListener('change',()=>{$('confirmAccept').disabled=!$('confirmCheck').checked;});
- window.addEventListener('beforeunload',event=>{readFormSettingsDraft();readMaterialSettingsDrafts();if(dirtySections().length||gradeUI.dirty||Object.keys(formSettingsPatch()).length||(state.forms&&state.forms.records||[]).some(materialSettingsDirty)){event.preventDefault();event.returnValue='';}});
+ window.addEventListener('beforeunload',event=>{readFormSettingsDraft();readMaterialSettingsDrafts();readScheduleDrafts();if(dirtySections().length||gradeUI.dirty||Object.keys(formSettingsPatch()).length||(state.forms&&state.forms.records||[]).some(r=>materialSettingsDirty(r)||publishingDatesDirty(r))){event.preventDefault();event.returnValue='';}});
  task(async()=>{state.bootstrap=await rpc('getWebConsoleBootstrap');[['scoringScreenLink',state.bootstrap.scoringUrl],['operationScreenLink',state.bootstrap.url]].forEach(([id,url])=>{const a=$(id);if(a&&url){a.href=url;a.hidden=false;}});if(state.bootstrap.connected){await refresh(true);}else renderWebWelcome();});
 }
 boot();

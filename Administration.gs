@@ -1048,6 +1048,8 @@ function managedSettingsPlan_(r, changes) {
   result.formTitleChanged=result.title!==r.title;
   result.policyChanged=JSON.stringify(input.policy)!==JSON.stringify(r.input.policy);
   result.materialPatch={};
+  // 保存記録と同じ入力も、Classroom 側の現在値と照合する。
+  result.materialFields=keys.filter(function(k){return k==='materialTitlePattern'||k==='description';}).map(function(k){return k==='materialTitlePattern'?'title':'description';});
   if(topicChanged){result.topicChange=true;result.topic={courseId:String(r.courseId),name:input.topicName,topicId:'',missing:false};}
   if(result.materialTitle!==r.materialTitle)result.materialPatch.title=result.materialTitle;
   if(input.description!==r.input.description)result.materialPatch.description=input.description;
@@ -1081,10 +1083,18 @@ function managedSettingsSnapshot_(r, plan, context) {
     snapshot.permissions=publishedPermissions_(r.formId).map(managedCanonicalSnapshot_).sort(function(a,b){return JSON.stringify(a).localeCompare(JSON.stringify(b));});
     if(snapshot.permissions.some(function(p){return p.role!=='reader';}))throw new Error('回答者権限を安全に変更できません。フォーム画面で権限を確認してください。');
   }
-  if(r.materialId&&r.stage!=='deleted'&&Object.keys(plan.materialPatch).length){
+  const materialFields=Array.from(new Set(Object.keys(plan.materialPatch).concat(plan.materialFields||[])));
+  if(r.materialId&&r.stage!=='deleted'&&materialFields.length){
     const post=Classroom.Courses.CourseWorkMaterials.get(r.courseId,r.materialId);
     if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
-    snapshot.material={};Object.keys(plan.materialPatch).forEach(function(k){snapshot.material[k]=post[k]||'';});
+    snapshot.material={};materialFields.forEach(function(k){snapshot.material[k]=post[k]||'';});
+    (plan.materialFields||[]).forEach(function(k){
+      const desired=k==='title'?plan.materialTitle:plan.input.description;
+      if(snapshot.material[k]!==desired){
+        if(!Object.prototype.hasOwnProperty.call(plan.materialPatch,k))plan.changes.push((k==='title'?'Classroom の資料タイトル':'Classroom の資料本文')+'：'+(snapshot.material[k]||'（空欄）')+' → '+(desired||'（空欄）'));
+        plan.materialPatch[k]=desired;
+      }
+    });
     // ローカルに名前がなくても、実際に解除する手動トピックを確認画面に示す。
     if(plan.topic&&!plan.topic.name&&!r.input.topicName&&snapshot.material.topicId)plan.changes.push('トピック：Classroom トピックID '+snapshot.material.topicId+' → （空欄）');
   }
@@ -1180,7 +1190,7 @@ function resumeManagedFormSettingsUnlocked_(r) {
     ensureCopiedResponderPolicy_(Object.assign({},r,{input:plan.input}));
     validateResponderAccess_(publishedPermissions_(r.formId),policy,managedSettingsAccess_(r,policy,{}),true);
   }
-  if(before.material){
+  if(before.material&&Object.keys(plan.materialPatch).length){
     const service=Classroom.Courses.CourseWorkMaterials,post=service.get(r.courseId,r.materialId);
     if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
     Object.keys(plan.materialPatch).forEach(function(k){unchanged(post[k]||'',before.material[k],plan.materialPatch[k]);});
@@ -1810,6 +1820,37 @@ function managedFutureTime_(value) {
 
 function managedCloseIsDue_(record) { return !!record.closesAt && Date.parse(record.closesAt)<=Date.now(); }
 
+/** 保存済みの希望日時と、Classroom・終了タイマーで稼働中の日時を分ける。旧記録は従来の日時を引き継ぐ。 */
+function managedPublishingSettings_(record) {
+  return record.publishingSettings || {scheduledTime:record.scheduledTime||'',closesAt:record.closesAt||''};
+}
+
+/** 日時の登録では、投稿・フォーム受付・終了タイマーを操作しない。共通ロック中に一括保存する。 */
+function saveManagedPublishingSettings(targets, changes) {
+  return withAppLock_(function(){
+    if(!Array.isArray(targets)||!targets.length||targets.length>100||new Set(targets.map(function(t){return t&&t.id;})).size!==targets.length)throw new Error('対象を1〜100件指定してください。');
+    if(!changes||typeof changes!=='object'||Array.isArray(changes)||!Object.keys(changes).length||Object.keys(changes).some(function(k){return !['scheduledTime','closesAt'].includes(k);}))throw new Error('登録する日時の形式が不正です。');
+    const normalized={};Object.keys(changes).forEach(function(k){normalized[k]=changes[k]===''?'':managedFutureTime_(changes[k]);});
+    const records=getManagedRecords_(),updated=targets.map(function(t){
+      if(!t||!t.id||!t.revision)throw new Error('対象の更新情報がありません。状態を更新してください。');
+      const r=records.find(function(item){return item.id===t.id;});
+      if(!r)throw new Error('管理対象の記録がありません。');assertManagedOwner_(r);
+      if(r.revision!==t.revision)throw new Error('記録が更新されました。状態を更新してください。');
+      if(r.kind!=='form'||r.formUpdate||r.settingsUpdate||r.columnSetup||!['registered','published','scheduled','draft','deleted'].includes(r.stage))throw new Error('フォームの準備・更新・投稿結果の確認を完了してください。');
+      const settings=Object.assign({},managedPublishingSettings_(r),normalized);
+      if(settings.scheduledTime&&settings.closesAt&&Date.parse(settings.closesAt)<=Date.parse(settings.scheduledTime))throw new Error('受付終了日時は資料の公開予定より後にしてください。');
+      return Object.assign({},r,{publishingSettings:settings,revision:Utilities.getUuid(),updatedAt:new Date().toISOString()});
+    });
+    const byId=new Map(updated.map(function(r){return [r.id,r];})),rows=[];
+    records.forEach(function(r,i){const next=byId.get(r.id);if(!next)return;const json=JSON.stringify(next);if(json.length>40000)throw new Error('管理情報が大きすぎます。');rows.push({index:i,values:[next.kind,next.id,json]});});
+    const blocks=[];rows.forEach(function(row){const last=blocks[blocks.length-1];if(last&&last.index+last.values.length===row.index)last.values.push(row.values);else blocks.push({index:row.index,values:[row.values]});});
+    const sheet=managedSheet_(true);blocks.forEach(function(block){sheet.getRange(block.index+2,1,block.values.length,3).setValues(block.values);});SpreadsheetApp.flush();
+    const saved=sheet.getRange(2,1,records.length,3).getDisplayValues();
+    if(rows.some(function(row){return row.values.some(function(value,j){return value!==saved[row.index][j];});}))throw new Error('日時の保存結果を確認できません。状態を更新してください。');
+    return {records:updated};
+  });
+}
+
 function applyManagedMaterialState_(record, post) {
   if(!post||!post.id||!['DRAFT','PUBLISHED','DELETED'].includes(post.state))throw new Error('資料の状態を確認できません。投稿結果を照合してください。');
   if(record.materialId&&String(record.materialId)!==String(post.id))throw new Error('資料IDが一致しません。');
@@ -1827,7 +1868,12 @@ function previewManagedFormActionUnlocked_(id, action, options) {
   if(r.formUpdate&&action!=='close')throw new Error('フォームの更新が途中です。「更新を再開」を完了してください。');
   if(['schedule','reschedule'].includes(action)) {
     desired.scheduledTime=managedFutureTime_(options.scheduledTime);
-    if(r.closesAt&&Date.parse(desired.scheduledTime)>=Date.parse(r.closesAt))throw new Error('資料の公開予定は受付終了日時より前にしてください。');
+    const close=action==='schedule'&&Object.prototype.hasOwnProperty.call(options,'closesAt')?options.closesAt:r.closesAt;
+    if(close&&Date.parse(desired.scheduledTime)>=Date.parse(close))throw new Error('資料の公開予定は受付終了日時より前にしてください。');
+  }
+  if(['publish','schedule'].includes(action)&&Object.prototype.hasOwnProperty.call(options,'closesAt')) {
+    desired.closesAt=options.closesAt===''?'':managedFutureTime_(options.closesAt);
+    if(desired.closesAt&&desired.scheduledTime&&Date.parse(desired.closesAt)<=Date.parse(desired.scheduledTime))throw new Error('受付終了日時は資料の公開予定より後にしてください。');
   }
   if(['set-close','cancel-close'].includes(action)) {
     if(r.kind!=='form'||!['registered','published','scheduled','draft','deleted','publish_review','schedule_review'].includes(r.stage))throw new Error('フォームの準備を完了してください。');
@@ -1848,7 +1894,7 @@ function previewManagedFormActionUnlocked_(id, action, options) {
     if(['publish','schedule'].includes(action)&&!['registered','deleted','draft'].includes(r.stage))throw new Error('投稿済み・予約済み、または投稿結果の確認待ちです。投稿結果を照合してください。');
     if(['reschedule','cancel-schedule'].includes(action)&&!['scheduled','draft'].includes(r.stage))throw new Error('予約を変更できません。公開状態・投稿結果を照合してください。');
     if(action==='cancel-schedule'&&r.stage!=='scheduled')throw new Error('資料の予約がありません。');
-    if(['publish','schedule','open'].includes(action)&&managedCloseIsDue_(r))throw new Error('受付終了日時を過ぎています。終了予約を変更・取消してから受付を開始してください。');
+    if(['publish','schedule','open'].includes(action)&&managedCloseIsDue_(Object.assign({},r,Object.prototype.hasOwnProperty.call(desired,'closesAt')?{closesAt:desired.closesAt}:{})))throw new Error('受付終了日時を過ぎています。終了予約を変更・取消してから受付を開始してください。');
     const form=FormApp.openById(r.formId);
     snapshot={published:form.isPublished(),accepting:form.isAcceptingResponses()};
     if(['publish','schedule','reschedule','cancel-schedule'].includes(action)&&r.materialId&&r.stage!=='deleted') {
@@ -1863,7 +1909,7 @@ function previewManagedFormActionUnlocked_(id, action, options) {
   }else throw new Error('操作が不正です。');
   return {id:id,action:action,title:r.materialTitle||r.title||'',courseId:r.courseId,className:r.className||'',postId:managedPostId_(r)||'',
     description:action==='delete'?(snapshot.text||snapshot.description||''):(r.input&&r.input.description||''),
-    postedAt:snapshot.creationTime||r.postedAt||'',url:r.formUrl||'',scheduledTime:desired.scheduledTime||'',closesAt:desired.closesAt||r.closesAt||'',accepting:snapshot.accepting,
+    postedAt:snapshot.creationTime||r.postedAt||'',url:r.formUrl||'',scheduledTime:desired.scheduledTime||'',closesAt:Object.prototype.hasOwnProperty.call(desired,'closesAt')?desired.closesAt:r.closesAt||'',accepting:snapshot.accepting,
     emailNotice:['publish','schedule','reschedule','open'].includes(action)?'各フォームの「設定 → 回答 → メールアドレスを収集する」が「確認済み」になっていることを確認してください。収集方式の自動判定はできません。':'',
     fingerprint:adminDigest_(managedCanonicalSnapshot_([r,action,snapshot,desired]))};
 }
@@ -1878,15 +1924,20 @@ function runManagedFormAction(id, action, fingerprint, verifiedEmailConfirmed, o
       ['https://www.googleapis.com/auth/'+(r.kind==='announcement'?'classroom.announcements':'classroom.courseworkmaterials')]);
     if(action==='set-close') {
       ensureManagedFormScheduleTrigger_();r.closesAt=p.closesAt;r.closeState='scheduled';r.closeError='';delete r.closedAt;
+      if(r.publishingSettings)r.publishingSettings.closesAt=p.closesAt;
       return saveManagedRecord_(r);
     }
     if(action==='cancel-close') {
-      assertManagedFormScheduleOwner_();delete r.closesAt;r.closeState='cancelled';r.closeError='';return saveManagedRecord_(r);
+      assertManagedFormScheduleOwner_();delete r.closesAt;r.closeState='cancelled';r.closeError='';if(r.publishingSettings)r.publishingSettings.closesAt='';return saveManagedRecord_(r);
     }
     if(action==='delete') {
       r.stage='delete_review';saveManagedRecord_(r);
       managedPostService_(r).remove(r.courseId,managedPostId_(r));
       r.stage='deleted';r.deletedAt=new Date().toISOString();return saveManagedRecord_(r);
+    }
+    if(['publish','schedule'].includes(action)&&options&&Object.prototype.hasOwnProperty.call(options,'closesAt')) {
+      if(p.closesAt){ensureManagedFormScheduleTrigger_();r.closesAt=p.closesAt;r.closeState='scheduled';r.closeError='';delete r.closedAt;}
+      else if(r.closesAt){assertManagedFormScheduleOwner_();delete r.closesAt;r.closeState='cancelled';r.closeError='';}
     }
     const form=FormApp.openById(r.formId);
     if(action==='close'){form.setAcceptingResponses(false);r.accepting=form.isAcceptingResponses();if(r.formUpdate)r.formUpdate.accepting=false;if(r.settingsUpdate)r.settingsUpdate.accepting=false;return saveManagedRecord_(r);}
@@ -1909,7 +1960,7 @@ function runManagedFormAction(id, action, fingerprint, verifiedEmailConfirmed, o
     if(!post||!post.id)throw new Error('投稿IDを確認できません。Classroomの投稿結果を照合してください。');
     // 即時作成の従来の応答形式を維持する（ID とリンクだけで十分）。
     if(!changing&&action==='publish'&&!post.state)post.state='PUBLISHED';
-    applyManagedMaterialState_(r,post);r.accepting=form.isAcceptingResponses();return saveManagedRecord_(r);
+    applyManagedMaterialState_(r,post);if(action==='cancel-schedule'&&r.publishingSettings)r.publishingSettings.scheduledTime='';r.accepting=form.isAcceptingResponses();return saveManagedRecord_(r);
   });
 }
 
