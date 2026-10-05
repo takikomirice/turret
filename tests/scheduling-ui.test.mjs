@@ -93,8 +93,8 @@ test('publishing date summaries and delete confirmations include Japan weekdays'
 test('scheduled forms offer changing/cancelling and deadline controls with explicit local status',()=>{
  const c=model();vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'r1',kind:'form',stage:'scheduled',label:'クラス',materialId:'m1',scheduledTime:'2026-10-01T01:00:00Z',closesAt:'2026-10-02T03:00:00Z',closeState:'error',closeError:'接続失敗'}]};",c);
  const html=vm.runInContext("renderForms('publish')",c);
- assert.match(html,/予約済み/);assert.match(html,/2026-10-01T10:00/);assert.match(html,/data-form-command="reschedule"/);
- assert.match(html,/<option value="cancel-schedule">/);assert.match(html,/data-form-command="set-close"/);assert.match(html,/接続失敗/);
+ assert.match(html,/予約済み/);assert.match(html,/2026-10-01T10:00/);assert.match(html,/<option value="reschedule">/);
+ assert.match(html,/<option value="cancel-schedule">/);assert.match(html,/<option value="set-close">/);assert.match(html,/接続失敗/);
  assert.doesNotMatch(html,/data-form-command="publish" data-record="r1"/);
 });
 test('schedule drafts remain attached to their record across refreshes',()=>{
@@ -106,37 +106,41 @@ test('schedule drafts remain attached to their record across refreshes',()=>{
 test('batch scheduling retains successes and reports each failure without repeating successful records',async()=>{
  const c=model();c.document={getElementById:()=>null,querySelectorAll:()=>[]};
  vm.runInContext(`state.forms={records:[{id:'a',kind:'form',stage:'registered',label:'A'},{id:'b',kind:'form',stage:'registered',label:'B'}]};
- state.scheduleDrafts={'batch:publish':'2026-10-01T10:00'};let calls=[],messages=[];
+ state.forms.records.forEach(r=>r.publishingSettings={scheduledTime:'2027-10-01T01:00:00.000Z',closesAt:''});let calls=[],messages=[];
  readCurrent=()=>{};requireSaved=()=>true;task=async fn=>fn();confirmAction=async()=>true;reloadForms=async()=>{};status=(message)=>messages.push(message);
- rpc=async(method,id,action,...args)=>{calls.push([method,id,action,...args]);if(method==='previewManagedFormAction')return {fingerprint:'fp',title:id,className:id};if(id==='b')throw Error('拒否');state.forms.records[0].stage='scheduled';return {};};`,c);
- await vm.runInContext("formCommand('schedule-all')",c);
+ rpc=async(method,id,action,...args)=>{calls.push([method,id,action,...args]);if(method==='previewManagedFormAction')return {fingerprint:'fp',title:id,className:id};if(id==='b')throw Error('拒否');state.forms.records[0].stage='scheduled';return state.forms.records[0];};`,c);
+ await vm.runInContext("formCommand('publish-all')",c);
  assert.equal(vm.runInContext("calls.filter(c=>c[0]==='runManagedFormAction').length",c),2);
  assert.match(vm.runInContext('messages.at(-1)',c),/1件/);assert.match(vm.runInContext('messages.at(-1)',c),/B.*拒否/);
- assert.equal(vm.runInContext("calls.find(c=>c[0]==='runManagedFormAction')[5].scheduledTime",c),'2026-10-01T01:00:00.000Z');
- vm.runInContext('calls=[]',c);await vm.runInContext("formCommand('schedule-all')",c);
+ assert.equal(vm.runInContext("calls.find(c=>c[0]==='runManagedFormAction')[5].scheduledTime",c),'2027-10-01T01:00:00.000Z');
+ vm.runInContext('calls=[]',c);await vm.runInContext("formCommand('publish-all')",c);
  assert.equal(vm.runInContext("calls.some(c=>c[1]==='a')",c),false);
 });
 
-test('saving a deadline preserves an unrelated unsaved material date and rejects an explicitly blank deadline',async()=>{
+test('saving a deadline keeps an unrelated unsaved publication date and explicitly clears a saved deadline',async()=>{
  const c=model();c.document={getElementById:()=>null,querySelectorAll:()=>[]};
- vm.runInContext(`state.forms={records:[{id:'r',kind:'form',stage:'registered',closesAt:'2026-10-02T02:00:00Z'}]};
- state.scheduleDrafts={'publish:r':'2026-10-03T10:00','close:r':'2026-10-02T12:00'};
- readCurrent=()=>{};requireSaved=()=>true;task=async fn=>fn();confirmAction=async()=>true;reloadForms=async()=>{};status=()=>{};
- rpc=async(method)=>method==='previewManagedFormAction'?{fingerprint:'fp'}:{id:'r',closesAt:'2026-10-02T03:00:00Z'};`,c);
- await vm.runInContext("formCommand('set-close','r')",c);
- assert.equal(vm.runInContext("state.scheduleDrafts['publish:r']",c),'2026-10-03T10:00');
- vm.runInContext("state.scheduleDrafts['close:r']=''",c);
- await assert.rejects(vm.runInContext("formCommand('set-close','r')",c),/日時/);
+ vm.runInContext(`state.forms={records:[{id:'r',revision:'r1',kind:'form',stage:'registered',input:{policy:{}},publishingSettings:{scheduledTime:'',closesAt:'2027-10-02T02:00:00Z'}}]};
+ state.scheduleDrafts={'publish:r':'2027-10-03T10:00','close:r':'2027-10-02T12:00'};let calls=[];
+ readCurrent=()=>{};requireSaved=()=>true;task=async fn=>fn();confirmAction=async()=>true;reloadForms=async()=>{};render=()=>{};status=()=>{};
+ rpc=async(method,targets,changes)=>{calls.push([method,targets,changes]);return {records:[{...state.forms.records[0],publishingSettings:{...publishingSettings(state.forms.records[0]),...changes}}]};};`,c);
+ await vm.runInContext("formCommand('save-close-date','r')",c);
+ assert.equal(vm.runInContext("state.scheduleDrafts['publish:r']",c),'2027-10-03T10:00');
+ assert.equal(vm.runInContext("state.forms.records[0].publishingSettings.closesAt",c),'2027-10-02T03:00:00.000Z');
+ vm.runInContext("state.scheduleDrafts['close:r']=''",c);await vm.runInContext("formCommand('save-close-date','r')",c);
+ assert.equal(vm.runInContext("state.forms.records[0].publishingSettings.closesAt",c),'');
+ assert.equal(vm.runInContext("calls.every(c=>c[0]==='saveManagedPublishingSettings')",c),true);
 });
 
-test('retrying a deadline batch skips records whose requested deadline was already saved',async()=>{
+test('failed deadline save retains both input and saved individual dates for retry',async()=>{
  const c=model();c.document={getElementById:()=>null,querySelectorAll:()=>[]};
- vm.runInContext(`state.forms={records:[{id:'a',kind:'form',stage:'registered',label:'A'},{id:'b',kind:'form',stage:'registered',label:'B'}]};
- state.scheduleDrafts={'batch:close':'2026-10-01T11:00'};let calls=[];
- readCurrent=()=>{};requireSaved=()=>true;task=async fn=>fn();confirmAction=async()=>true;reloadForms=async()=>{};status=()=>{};
- rpc=async(method,id,action,...args)=>{calls.push([method,id]);if(method==='previewManagedFormAction')return {fingerprint:'fp',title:id};if(id==='b')throw Error('拒否');state.forms.records[0].closesAt='2026-10-01T02:00:00.000Z';return state.forms.records[0];};`,c);
- await vm.runInContext("formCommand('set-close-all')",c);vm.runInContext('calls=[]',c);
+ vm.runInContext(`state.forms={records:[{id:'a',revision:'a1',kind:'form',stage:'registered',input:{policy:{}},publishingSettings:{scheduledTime:'',closesAt:''}}]};
+ state.scheduleDrafts={'batch:close':'2027-10-01T11:00'};
+ readCurrent=()=>{};requireSaved=()=>true;task=async fn=>fn();confirmAction=async()=>true;reloadForms=async()=>{};render=()=>{};status=()=>{};
+ rpc=async()=>{throw Error('保存失敗');};`,c);
+ await assert.rejects(vm.runInContext("formCommand('set-close-all')",c),/保存失敗/);
+ assert.equal(vm.runInContext("state.scheduleDrafts['batch:close']",c),'2027-10-01T11:00');
+ assert.equal(vm.runInContext("state.forms.records[0].publishingSettings.closesAt",c),'');
+ vm.runInContext(`rpc=async(method,targets,changes)=>({records:[{...state.forms.records[0],publishingSettings:{...publishingSettings(state.forms.records[0]),...changes}}]});`,c);
  await vm.runInContext("formCommand('set-close-all')",c);
- assert.equal(vm.runInContext("calls.some(c=>c[1]==='a')",c),false);
- assert.equal(vm.runInContext("calls.filter(c=>c[0]==='runManagedFormAction'&&c[1]==='b').length",c),1);
+ assert.equal(vm.runInContext("state.forms.records[0].publishingSettings.closesAt",c),'2027-10-01T02:00:00.000Z');
 });

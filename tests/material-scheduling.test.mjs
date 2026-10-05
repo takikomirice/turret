@@ -13,6 +13,12 @@ test('scheduled material is a draft with a UTC deadline, while its form is alrea
  assert.throws(()=>e.run('schedule',scheduled),/投稿|予約|確認/);assert.equal(e.calls.filter(c=>c[0]==='create').length,1);
 });
 
+test('rescheduling cannot bypass the active deadline with an unrelated replacement deadline option',()=>{
+ const e=schedulingEnvironment();e.run('schedule',{scheduledTime:'2026-10-02T01:00:00Z'});e.run('set-close',{closesAt:'2026-10-03T01:00:00Z'});
+ assert.throws(()=>e.run('reschedule',{scheduledTime:'2026-10-05T01:00:00Z',closesAt:'2026-10-06T01:00:00Z'}),/受付終了/);
+ assert.equal(e.read().scheduledTime,'2026-10-02T01:00:00.000Z');assert.equal(e.read().closesAt,'2026-10-03T01:00:00.000Z');
+});
+
 for(const time of ['', 'yesterday', '2026-10-01T10:00', '2026-02-30T10:00:00+09:00', '2026-10-01T08:59:00+09:00'])test('invalid or past schedule is rejected without publication: '+time,()=>{
  const e=schedulingEnvironment();assert.throws(()=>e.run('schedule',{scheduledTime:time}),/日時|未来/);
  assert.equal(e.form.published,false);assert.equal(e.calls.length,0);

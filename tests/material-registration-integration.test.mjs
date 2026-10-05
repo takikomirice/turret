@@ -16,9 +16,94 @@ function environment(){
  vm.runInContext(`state.panel='setup';state.step='publish';state.forms={classes:[{courseId:'100'}],defaults:{},records:[savedRecord]};state.batchMaterialDraft={materialTitlePattern:'{class_label} 新しい資料',description:'新しい本文',topicName:'振り返り',topicChange:true};state.scheduleDrafts={'batch:publish':'2026-10-05T10:00','batch:close':'2026-10-06T10:00'};let confirmations=[],messages=[];rpc=backend;requireSaved=()=>true;task=async work=>work();render=()=>{};reloadForms=async()=>{};status=message=>messages.push(message);confirmAction=async(title,summary)=>{confirmations.push(summary);return true;};`,c);
  return {...e,ui:c,topics,topicCalls};
 }
-test('one aggregate confirmation creates topic, saves settings, schedules material and closes form later',async()=>{
+test('aggregate registration persists individual dates without posting, opening forms or installing a timer',async()=>{
  const e=environment();await vm.runInContext("formCommand('register-all')",e.ui);
- assert.equal(e.topicCalls.length,1);assert.equal(e.read().topicId,'topic-one');assert.equal(e.read().input.description,'新しい本文');assert.equal(e.read().scheduledTime,'2026-10-05T01:00:00.000Z');assert.equal(e.read().closesAt,'2026-10-06T01:00:00.000Z');assert.equal([...e.posts.values()][0].topicId,'topic-one');assert.equal(e.form.accepting,true);assert.equal(vm.runInContext('confirmations.length',e.ui),1);assert.match(vm.runInContext('confirmations[0]',e.ui),/メールアドレスを収集する/);assert.match(vm.runInContext('confirmations[0]',e.ui),/同名トピック.*[\s\S]*作成/);
+ assert.equal(e.read().input.description,'新しい本文');
+ assert.equal(e.read().stage,'registered');assert.equal(e.posts.size,0);assert.equal(e.form.accepting,false);assert.equal(e.form.published,false);assert.equal(e.triggers.length,0);
+ assert.deepEqual(plain(e.read().publishingSettings),{scheduledTime:'2026-10-05T01:00:00.000Z',closesAt:'2026-10-06T01:00:00.000Z'});
+ assert.equal(vm.runInContext('confirmations.length',e.ui),1);
+ e.ui.savedRecord=plain(e.read());vm.runInContext('state.forms.records=[savedRecord];state.scheduleDrafts={};',e.ui);
+ assert.equal(vm.runInContext("scheduleDraftValue('publish:f1',publishingSettings(savedRecord).scheduledTime)",e.ui),'2026-10-05T10:00');
+});
+
+for(const action of ['schedule-all','set-close-all'])test(`${action} saves only its date and does not activate either reservation`,async()=>{
+ const e=environment();await vm.runInContext(`formCommand('${action}')`,e.ui);
+ assert.equal(e.posts.size,0);assert.equal(e.form.published,false);assert.equal(e.triggers.length,0);
+ assert.deepEqual(plain(e.read().publishingSettings),action==='schedule-all'?{scheduledTime:'2026-10-05T01:00:00.000Z',closesAt:''}:{scheduledTime:'',closesAt:'2026-10-06T01:00:00.000Z'});
+});
+
+test('bulk posting uses saved dates rather than unsaved bulk inputs and activates the deadline',async()=>{
+ const e=environment();await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(e.posts.size,0);
+ vm.runInContext("state.scheduleDrafts={'batch:publish':'2026-10-08T10:00','batch:close':'2026-10-09T10:00'};",e.ui);
+ await vm.runInContext("formCommand('publish-all')",e.ui);
+ assert.equal(e.posts.size,1);const post=[...e.posts.values()][0];assert.equal(post.state,'DRAFT');assert.equal(post.scheduledTime,'2026-10-05T01:00:00.000Z');
+ assert.equal(e.read().closesAt,'2026-10-06T01:00:00.000Z');assert.equal(e.read().closeState,'scheduled');assert.equal(e.triggers.length,1);assert.equal(e.form.accepting,true);
+ e.advance(6*86400000);e.fire();assert.equal(e.form.accepting,false);
+});
+
+test('registration of dates keeps an existing deadline and scheduled Classroom material unchanged',async()=>{
+ const e=environment();e.c.saveManagedRecord_({...e.read(),materialSettingsSaved:true});e.run('schedule',{scheduledTime:'2026-10-03T01:00:00Z'});e.run('set-close',{closesAt:'2026-10-04T01:00:00Z'});
+ const original=plain([...e.posts.values()][0]);e.ui.savedRecord=plain(e.read());vm.runInContext('state.forms.records=[savedRecord];',e.ui);
+ await vm.runInContext("formCommand('set-close-all')",e.ui);await vm.runInContext("formCommand('schedule-all')",e.ui);
+ assert.deepEqual(plain([...e.posts.values()][0]),original);assert.equal(e.read().closesAt,'2026-10-04T01:00:00.000Z');assert.equal(e.read().closeState,'scheduled');
+ assert.deepEqual(plain(e.read().publishingSettings),{scheduledTime:'2026-10-05T01:00:00.000Z',closesAt:'2026-10-06T01:00:00.000Z'});
+});
+
+test('individual date overrides select immediate posting and defer the saved deadline until posting',async()=>{
+ const e=environment();await vm.runInContext("formCommand('register-all')",e.ui);
+ vm.runInContext("state.scheduleDrafts={'publish:f1':'','close:f1':'2026-10-07T12:00'};",e.ui);
+ await vm.runInContext("formCommand('save-close-date','f1')",e.ui);
+ assert.equal(e.triggers.length,0);assert.equal(vm.runInContext("state.scheduleDrafts['publish:f1']",e.ui),'');
+ await vm.runInContext("formCommand('save-publish-date','f1')",e.ui);
+ assert.equal(e.posts.size,0);assert.equal(e.form.published,false);
+ await vm.runInContext("formCommand('publish','f1')",e.ui);
+ assert.equal([...e.posts.values()][0].state,'PUBLISHED');assert.equal(e.read().closesAt,'2026-10-07T03:00:00.000Z');assert.equal(e.triggers.length,1);
+});
+
+test('expired saved publication and deadline are rejected before any posting or timer changes',async()=>{
+ for(const elapsed of [5*86400000,6*86400000]){
+  const e=environment();await vm.runInContext("formCommand('register-all')",e.ui);e.advance(elapsed);
+  await vm.runInContext("formCommand('publish-all')",e.ui);
+  assert.equal(e.posts.size,0);assert.equal(e.form.published,false);assert.equal(e.triggers.length,0);assert.equal(e.read().stage,'registered');
+  assert.match(vm.runInContext('messages.at(-1)',e.ui),/未来/);
+ }
+});
+
+test('invalid, conflicting or foreign date batches leave every managed row unchanged',()=>{
+ for(const invalid of ['past','reversed','stale','foreign','duplicate','unprepared','wrong-key']){
+  const e=environment(),r=e.read(),other={...plain(r),id:'f2'};if(invalid==='foreign')other.ownerScriptId='another';if(invalid==='unprepared')other.stage='creating';
+  if(invalid==='foreign'){const saved=e.c.saveManagedRecord_({...other,ownerScriptId:r.ownerScriptId});const sheet=e.sheets.get('システム管理'),values=sheet.getRange(3,1,1,3).getDisplayValues();values[0][2]=JSON.stringify({...saved,ownerScriptId:'another'});sheet.getRange(3,1,1,3).setValues(values);}else e.c.saveManagedRecord_(other);
+  const before=plain(e.c.getManagedRecords_()),targets=before.map(x=>({id:x.id,revision:x.revision}));
+  if(invalid==='stale')targets[1].revision='stale';if(invalid==='duplicate')targets[1]=targets[0];
+  const changes=invalid==='past'?{closesAt:'2026-09-30T01:00:00Z'}:invalid==='reversed'?{scheduledTime:'2026-10-05T01:00:00Z',closesAt:'2026-10-05T01:00:00Z'}:invalid==='wrong-key'?{stage:'published'}:{closesAt:'2026-10-06T01:00:00Z'};
+  assert.throws(()=>e.c.saveManagedPublishingSettings(targets,changes));assert.deepEqual(plain(e.c.getManagedRecords_()),before);
+  assert.equal(e.posts.size,0);assert.equal(e.form.published,false);assert.equal(e.triggers.length,0);
+ }
+});
+
+test('date saves preserve unrelated rows and old active deadlines survive after pending settings are saved',()=>{
+ const e=environment();e.c.saveManagedRecord_({...e.read(),materialSettingsSaved:true});e.run('publish');e.run('set-close',{closesAt:'2026-10-02T01:00:00Z'});
+ const other=e.c.saveManagedRecord_({...plain(e.read()),id:'f2'}),r=e.read();
+ e.c.saveManagedPublishingSettings([{id:r.id,revision:r.revision}],{closesAt:'2026-10-06T01:00:00Z'});
+ assert.deepEqual(plain(e.c.loadManagedRecord_('f2')),plain(other));assert.equal(e.read().closesAt,'2026-10-02T01:00:00.000Z');
+ e.advance(2*86400000);e.fire();assert.equal(e.form.accepting,false);
+});
+
+test('cancelling active reservations clears their saved dates so a later post cannot reuse them',()=>{
+ const e=environment();e.c.saveManagedRecord_({...e.read(),materialSettingsSaved:true});let r=e.read();
+ e.c.saveManagedPublishingSettings([{id:r.id,revision:r.revision}],{scheduledTime:'2026-10-05T01:00:00Z',closesAt:'2026-10-06T01:00:00Z'});
+ e.run('schedule',{scheduledTime:'2026-10-05T01:00:00Z',closesAt:'2026-10-06T01:00:00Z'});
+ e.run('cancel-schedule');assert.equal(e.read().publishingSettings.scheduledTime,'');
+ e.run('cancel-close');assert.equal(e.read().publishingSettings.closesAt,'');assert.equal(e.read().closesAt,undefined);
+});
+
+test('a refreshed record cannot silently adopt the revision of a locally edited date',async()=>{
+ const e=environment(),field={dataset:{scheduleKey:'close:f1',scheduleSaved:''},value:'2026-10-06T10:00'};
+ e.ui.document={getElementById:()=>null,querySelectorAll:selector=>selector==='[data-schedule-key]'?[field]:[]};vm.runInContext('readScheduleDrafts()',e.ui);
+ const r=e.c.saveManagedRecord_({...e.read(),publishingSettings:{scheduledTime:'',closesAt:'2026-10-07T01:00:00Z'}});e.ui.savedRecord=plain(r);vm.runInContext('acceptFormConsoleData({...state.forms,records:[savedRecord]});',e.ui);
+ await assert.rejects(vm.runInContext("formCommand('save-close-date','f1')",e.ui),/更新|再確認/);
+ assert.equal(e.read().publishingSettings.closesAt,'2026-10-07T01:00:00Z');assert.equal(vm.runInContext("state.scheduleDrafts['close:f1']",e.ui),'2026-10-06T10:00');
 });
 test('cancelled aggregate confirmation does not change backend records, topics, forms or posts',async()=>{
  const e=environment(),before=plain(e.read());vm.runInContext('confirmAction=async()=>false;',e.ui);await vm.runInContext("formCommand('register-all')",e.ui);
@@ -27,7 +112,7 @@ test('cancelled aggregate confirmation does not change backend records, topics, 
 test('aggregate deadline extension works against real server validation of the previous deadline',async()=>{
  const e=environment(),r=e.read();r.closesAt='2026-10-03T01:00:00Z';e.c.saveManagedRecord_(r);e.ui.savedRecord=plain(e.read());vm.runInContext('state.forms.records=[savedRecord];',e.ui);
  await vm.runInContext("formCommand('register-all')",e.ui);
- assert.equal(e.read().scheduledTime,'2026-10-05T01:00:00.000Z');assert.equal(e.read().closesAt,'2026-10-06T01:00:00.000Z');
+ assert.equal(e.read().publishingSettings.scheduledTime,'2026-10-05T01:00:00.000Z');assert.equal(e.read().publishingSettings.closesAt,'2026-10-06T01:00:00.000Z');assert.equal(e.read().closesAt,'2026-10-03T01:00:00Z');
 });
 
 for(const stage of ['publish','schedule'])for(const command of ['save-material-settings','apply-batch-material-settings','register-all']){
