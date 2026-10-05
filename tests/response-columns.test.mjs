@@ -213,7 +213,7 @@ test('form creation and evaluation setup have separate controls and system colum
 
 test('creation request discards evaluation draft so step one cannot add evaluation columns',async()=>{
  const c=ui();
- vm.runInContext("state.formDraft=defaultFormDraft();state.formDraft.additionalColumns=[{header:'評価',choices:[]}];const calls=[];readCurrent=()=>{};requireSaved=()=>true;task=async f=>f();confirmAction=async()=>false;rpc=async(method,...args)=>{calls.push({method,args});if(method==='getFormConsoleData')return state.forms;return {input:{additionalColumns:[]},targets:[],configRevision:'r',fingerprint:'p'};}",c);
+ vm.runInContext("state.formDraft=defaultFormDraft();state.formDraft.additionalColumns=[{header:'評価',choices:[]}];const calls=[];readCurrent=()=>{};requireSaved=()=>true;task=async f=>f();confirmAction=async()=>false;rpc=async(method,...args)=>{calls.push({method,args});if(method==='getFormConsoleData')return state.forms;return {input:{additionalColumns:[]},targets:[{courseId:'100',className:'1組',title:'1組 振り返り',sheetName:'回答 1組',action:'create'}],configRevision:'r',fingerprint:'p'};}",c);
  await vm.runInContext("formCommand('preview')",c);
  assert.deepEqual(JSON.parse(vm.runInContext("JSON.stringify(calls.find(c=>c.method==='previewFormSetup').args[0].additionalColumns)",c)),[]);
 });

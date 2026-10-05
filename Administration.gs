@@ -714,18 +714,40 @@ function previewFormSetupUnlocked_(raw, expectedConfigRevision) {
   const metadata = formMetadata_(input.templateId);
   if (!metadata.settings || !metadata.settings.collectsEmail) throw new Error('ひな形のメール収集を有効にしてください。');
   DriveApp.getFolderById(input.folderId).getName();
-  const labels = new Set();
+  const labels = new Set(), records=getManagedRecords_(), rosterContext={};
   const targets = getSelectedClassRecords_().map(function(c) {
     const label = input.labels[c.courseId] || c.className;
     const sheetName = input.prefix + ' ' + label;
-    if (!label || sheetName.length > 100 || /[\[\]:*?\/\\]/.test(sheetName) || labels.has(sheetName) || ss.getSheetByName(sheetName)) throw new Error('回答タブ名が重複または不正です: ' + sheetName);
+    if (!label || sheetName.length > 100 || /[\[\]:*?\/\\]/.test(sheetName) || labels.has(sheetName)) throw new Error('回答タブ名が重複または不正です: ' + sheetName);
     labels.add(sheetName);
-    const students = managedRoster_(c.courseId);
-    if (!students.length) throw new Error(c.className + 'の生徒一覧を取得してください。');
-    const outside = students.some(function(s) { return !input.policy.emails.includes(s.email) && !input.policy.domains.includes(s.email.split('@')[1]); });
-    if (outside) throw new Error(c.className + 'の生徒を回答許可の範囲に含めてください。');
-    return {courseId:c.courseId,className:c.className,label:label,sheetName:sheetName,
-      title:input.titlePattern.replace(/\{class(?:_label)?\}/g,function(){return label;}),materialTitle:input.materialTitlePattern.replace(/\{class(?:_label)?\}/g,function(){return label;}), students: students.map(function(s) {return s.email;}).sort()};
+    const title=input.titlePattern.replace(/\{class(?:_label)?\}/g,function(){return label;});
+    const named=records.filter(function(r){return r.kind==='form' && r.sheetName===sheetName;});
+    const matches=named.filter(function(r){return r.courseId===c.courseId;});
+    if(matches.length>1 || named.length && !matches.length)throw new Error('回答タブ名が別の作成記録と重複しています: '+sheetName);
+    const existing=matches[0],collision=ss.getSheetByName(sheetName);
+    if(existing)assertManagedOwner_(existing);
+    if(collision && (!existing || (existing.responseSheetId!=null
+      ? String(existing.responseSheetId)!==String(collision.getSheetId())
+      : !existing.formId || !collision.getFormUrl() || FormApp.openByUrl(collision.getFormUrl()).getId()!==existing.formId)))throw new Error('回答タブ名が重複または作成記録と一致しません: '+sheetName);
+    const target={courseId:c.courseId,className:c.className,label:label,sheetName:sheetName,
+      title:title,materialTitle:input.materialTitlePattern.replace(/\{class(?:_label)?\}/g,function(){return label;}),action:'create'};
+    if(existing) {
+      target.recordId=existing.id;target.recordRevision=existing.revision;target.title=existing.title;target.materialTitle=existing.materialTitle;
+      if(['registered','published','scheduled','draft','deleted'].includes(existing.stage))target.action='skip';
+      else if(existing.stage==='creating')target.action=managedFormCopyMatches_(existing).length?'reconcile':'recreate';
+      else if(['pending','created','linking','linked'].includes(existing.stage))target.action='resume';
+      else throw new Error(c.className+'の作成・投稿結果を一覧から照合してください。');
+    }
+    if(target.action==='skip')target.students=existing.students||[];
+    else {
+      const students=managedRoster_(c.courseId,rosterContext);
+      if (!students.length) throw new Error(c.className + 'の生徒一覧を取得してください。');
+      const policy=existing?existing.input.policy:input.policy;
+      const outside=students.some(function(s) {return !policy.emails.includes(s.email) && !policy.domains.includes(s.email.split('@')[1]);});
+      if(outside)throw new Error(c.className+'の生徒を回答許可の範囲に含めてください。');
+      target.students=students.map(function(s){return s.email;}).sort();
+    }
+    return target;
   });
   const preview = { input: input, targets: targets, configRevision: expectedConfigRevision,
     templateRevision: DriveApp.getFileById(input.templateId).getLastUpdated().toISOString(), ownerSpreadsheetId:ss.getId() };
@@ -741,12 +763,20 @@ function beginFormSetup(raw, expectedRevision, fingerprint) {
     else {
       const p = previewFormSetupUnlocked_(raw, expectedRevision);
       if (p.fingerprint !== fingerprint) throw new Error('プレビュー後に設定が更新されました。再確認してください。');
+      // 全件が既存の履歴なら、設定や履歴行を増やさず同じフォームを返す。
+      if(p.targets.every(function(t){return !!t.recordId;}))return p.targets.map(function(t){return records.find(function(r){return r.id===t.recordId;});});
       batch=saveManagedRecord_({id:Utilities.getUuid(),kind:'batch',input:p.input,targets:p.targets,stage:'prepared',requestFingerprint:fingerprint});
     }
     return batch.targets.map(function(t) {
+      if(t.recordId){
+        const linked=records.find(function(r){return r.id===t.recordId;});
+        if(!linked)throw new Error('管理対象の記録がありません。作成内容を再確認してください。');
+        assertManagedOwner_(linked);return linked;
+      }
       const id=batch.id+':'+t.courseId,existing=records.find(function(r){return r.id===id;});
       if(existing){assertManagedOwner_(existing);return existing;}
-      return saveManagedRecord_(Object.assign({},t,{id:id,kind:'form',jobId:batch.id,input:batch.input,stage:'pending',requestFingerprint:fingerprint},batch.input.deferMaterialSettings?{materialSettingsSaved:false}:{}));
+      const target=Object.assign({},t);delete target.action;
+      return saveManagedRecord_(Object.assign(target,{id:id,kind:'form',jobId:batch.id,input:batch.input,stage:'pending',requestFingerprint:fingerprint},batch.input.deferMaterialSettings?{materialSettingsSaved:false}:{}));
     });
   });
 }
@@ -854,16 +884,35 @@ function prepareFormTarget(id, expectedRevision) {
   });
 }
 
-function reconcileManagedForm(id, expectedRevision) {
+/** 照合と作成確認で同じ検索条件を使い、検索未完了を未作成と取り違えない。 */
+function managedFormCopyMatches_(record) {
+  const marker=record.id.replace(/'/g,"\\'");
+  const files=Drive.Files.list({q:"trashed = false and appProperties has { key='turretRecord' and value='"+marker+"' }",fields:'files(id,appProperties),nextPageToken,incompleteSearch',pageSize:100,includeItemsFromAllDrives:true,supportsAllDrives:true});
+  const matches=(files.files||[]).filter(function(f){return f.appProperties && f.appProperties.turretScript===ScriptApp.getScriptId();});
+  if(files.nextPageToken || files.incompleteSearch || matches.length>1)throw new Error('作成結果の検索が未完了、または複数のフォームが見つかりました。一意に確認できないため再作成しません。Driveを確認してから再度照合してください。');
+  if(!matches.length && record.formId)throw new Error('保存済みのフォームIDがあります。再作成せず、Driveのフォームを確認してください。');
+  return matches;
+}
+
+function reconcileManagedForm(id, expectedRevision, recreateMissing) {
   return withAppLock_(function() {
     const r=loadManagedRecord_(id,expectedRevision);
+    if (r.kind!=='form') throw new Error('フォームの作成記録ではありません。');
     if (r.stage!=='creating') return r;
-    const marker=r.id.replace(/'/g,"\\'");
-    const files=Drive.Files.list({q:"trashed = false and appProperties has { key='turretRecord' and value='"+marker+"' }",fields:'files(id,appProperties),nextPageToken',pageSize:100});
-    const matches=(files.files||[]).filter(function(f){return f.appProperties && f.appProperties.turretScript===ScriptApp.getScriptId();});
-    if(matches.length!==1 || files.nextPageToken) throw new Error('作成済みフォームを一意に確認できません。自動で再作成しません。');
+    if (recreateMissing===true && (!expectedRevision || r.copyNotFound!==true)) throw new Error('先に作成結果を照合し、最新の状態で再作成を確認してください。');
+    const matches=managedFormCopyMatches_(r);
+    if(!matches.length) {
+      // 検索結果が遅れて反映される場合があるため、0件でも自動では作り直さない。
+      if(recreateMissing===true) {
+        r.stage='pending';delete r.copyNotFound;r.lastError='';
+      } else {
+        r.copyNotFound=true;
+        r.lastError='作成済みフォームが見つかりません。少し待って再度照合してください。保存先フォルダにもフォームがなく、前回の実行が終了している場合は「このフォームだけ再作成」を選んでください。';
+      }
+      return saveManagedRecord_(r);
+    }
     FormApp.openById(matches[0].id).setPublished(false);
-    r.formId=matches[0].id;r.stage='created';return saveManagedRecord_(r);
+    r.formId=matches[0].id;r.stage='created';delete r.copyNotFound;r.lastError='';return saveManagedRecord_(r);
   });
 }
 

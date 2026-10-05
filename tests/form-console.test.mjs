@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
 import {adminEnvironment, AdminSheet, plain} from './helpers/admin-environment.mjs';
 import {NativeForm} from './helpers/native-forms.mjs';
 
@@ -418,6 +419,212 @@ test('copy success followed by response loss never triggers a second copy',()=>{
  assert.throws(()=>c.prepareFormTarget(r.id,r.revision),/response lost/);
  const saved=c.loadManagedRecord_(r.id);assert.equal(saved.stage,'creating');assert.equal(calls.copies,1);
  assert.throws(()=>c.prepareFormTarget(r.id,saved.revision),/未確認/);assert.equal(calls.copies,1);
+});
+
+function failedCopyEnv(){
+ const e=provisioningEnv(),[r]=e.begin();
+ const copy=e.c.Drive.Files.copy;
+ e.c.Drive.Files.copy=()=>{throw Error('copy failed');};
+ assert.throws(()=>e.c.prepareFormTarget(r.id,r.revision),/copy failed/);
+ e.c.Drive.Files.copy=copy;
+ e.c.Drive.Files.list=()=>({files:[]});
+ return {...e,record:e.c.loadManagedRecord_(r.id)};
+}
+
+test('zero copy matches offers explicit recovery without automatically creating or resetting the record',()=>{
+ const e=failedCopyEnv(),{c,record}=e;
+ const missing=c.reconcileManagedForm(record.id,record.revision);
+ assert.equal(missing.stage,'creating');assert.equal(missing.copyNotFound,true);
+ assert.match(missing.lastError,/見つかりません/);
+ assert.equal(c.loadManagedRecord_(record.id).copyNotFound,true);
+ assert.throws(()=>c.prepareFormTarget(missing.id,missing.revision),/未確認/);
+ assert.equal(e.calls.copies,0);assert.equal(e.isLocked(),false);
+});
+
+test('explicit missing-copy recovery requires a prior check and current revision',()=>{
+ const e=failedCopyEnv(),{c,record}=e;let searches=0;
+ c.Drive.Files.list=()=>{searches++;return {files:[]};};
+ assert.throws(()=>c.reconcileManagedForm(record.id,record.revision,true),/照合/);
+ assert.equal(searches,0);
+ const missing=c.reconcileManagedForm(record.id,record.revision);
+ assert.throws(()=>c.reconcileManagedForm(record.id,record.revision,true),/更新/);
+ assert.throws(()=>c.reconcileManagedForm(record.id,undefined,true),/更新|照合/);
+ assert.equal(c.loadManagedRecord_(record.id).stage,'creating');assert.equal(e.calls.copies,0);
+ for(const unconfirmed of ['true',1]){
+  const checked=c.reconcileManagedForm(record.id,c.loadManagedRecord_(record.id).revision,unconfirmed);
+  assert.equal(checked.stage,'creating');
+ }
+ const reset=c.reconcileManagedForm(missing.id,c.loadManagedRecord_(record.id).revision,true);
+ assert.equal(reset.stage,'pending');assert.equal(reset.copyNotFound,undefined);
+ assert.deepEqual(plain(reset.input),plain(record.input));
+ const ready=c.prepareFormTarget(reset.id,reset.revision);
+ assert.equal(ready.stage,'registered');assert.equal(e.calls.copies,1);assert.equal(e.calls.posts,0);
+ assert.throws(()=>c.reconcileManagedForm(reset.id,reset.revision,true),/更新/);
+ c.prepareFormTarget(ready.id,ready.revision);assert.equal(e.calls.copies,1);
+});
+
+for(const retry of [false,true])test('a discovered original copy is reused without duplication; retry='+retry,()=>{
+ const e=failedCopyEnv(),{c,record}=e;
+ const checked=c.reconcileManagedForm(record.id,record.revision);
+ const file=c.Drive.Files.copy({appProperties:{turretRecord:record.id,turretScript:'script-one'}});
+ c.Drive.Files.list=options=>{
+  assert.ok(options.q.includes("value='"+record.id+"'"));
+  assert.match(options.fields,/incompleteSearch/);
+  return {files:[{id:file.id,appProperties:{turretRecord:record.id,turretScript:'script-one'}}]};
+ };
+ const found=c.reconcileManagedForm(checked.id,checked.revision,retry);
+ assert.equal(found.stage,'created');assert.equal(found.formId,file.id);
+ assert.equal(found.copyNotFound,undefined);assert.equal(found.lastError,'');
+ const ready=c.prepareFormTarget(found.id,found.revision);
+ assert.equal(ready.stage,'registered');assert.equal(e.calls.copies,1);
+});
+
+for(const result of [
+ {files:[],nextPageToken:'next'},
+ {files:[],incompleteSearch:true},
+ {files:[{id:'a',appProperties:{turretScript:'script-one'}},{id:'b',appProperties:{turretScript:'script-one'}}]}
+])test('ambiguous or incomplete search cannot reset or recreate a missing copy: '+JSON.stringify(result),()=>{
+ const e=failedCopyEnv(),{c,record}=e;
+ const missing=c.reconcileManagedForm(record.id,record.revision);
+ c.Drive.Files.list=()=>result;
+ for(const retry of [false,true])assert.throws(()=>c.reconcileManagedForm(missing.id,missing.revision,retry),/確認|照合/);
+ assert.equal(c.loadManagedRecord_(record.id).stage,'creating');assert.equal(e.calls.copies,0);assert.equal(e.isLocked(),false);
+});
+
+test('failed search, known form IDs and copied ownership never permit missing-copy recovery',()=>{
+ const e=failedCopyEnv(),{c,record}=e;
+ let missing=c.reconcileManagedForm(record.id,record.revision);
+ c.Drive.Files.list=()=>{throw Error('permission denied');};
+ assert.throws(()=>c.reconcileManagedForm(missing.id,missing.revision,true),/permission denied/);
+ assert.equal(c.loadManagedRecord_(record.id).stage,'creating');assert.equal(e.isLocked(),false);
+ c.Drive.Files.list=()=>({files:[]});missing.formId='known-form';missing=c.saveManagedRecord_(missing);
+ assert.throws(()=>c.reconcileManagedForm(missing.id,missing.revision,true),/フォームID|確認/);
+ assert.equal(c.loadManagedRecord_(record.id).formId,'known-form');
+ c.ScriptApp.getScriptId=()=> 'other-script';
+ assert.throws(()=>c.reconcileManagedForm(missing.id,missing.revision,true),/別の運用/);assert.equal(e.calls.copies,0);
+});
+
+test('two failed copies among seven classes recover individually and preserve the five successful records',()=>{
+ const e=sevenClassProvisioningEnv(),{c}=e,records=e.begin(),copy=c.Drive.Files.copy;
+ const failed=[records[1],records[3]],failedIds=new Set(failed.map(r=>r.id));
+ c.Drive.Files.copy=(body,...args)=>{
+  if(failedIds.has(body.appProperties.turretRecord))throw Error('copy failed');
+  return copy(body,...args);
+ };
+ for(const r of records){
+  if(failedIds.has(r.id))assert.throws(()=>c.prepareFormTarget(r.id,r.revision),/copy failed/);
+  else c.prepareFormTarget(r.id,r.revision);
+ }
+ const completed=records.filter(r=>!failedIds.has(r.id)).map(r=>plain(c.loadManagedRecord_(r.id)));
+ c.Drive.Files.copy=copy;c.Drive.Files.list=()=>({files:[]});
+ for(const r of failed){
+  const saved=c.loadManagedRecord_(r.id),missing=c.reconcileManagedForm(r.id,saved.revision);
+  const reset=c.reconcileManagedForm(r.id,missing.revision,true);
+  assert.equal(c.prepareFormTarget(r.id,reset.revision).stage,'registered');
+ }
+ assert.deepEqual(records.filter(r=>!failedIds.has(r.id)).map(r=>plain(c.loadManagedRecord_(r.id))),completed);
+ assert.equal(e.calls.copies,7);assert.equal(e.calls.destination,7);assert.equal(e.calls.posts,0);
+ assert.equal(c.getManagedRecords_().filter(r=>r.kind==='form').length,7);
+});
+
+test('preparation preview skips five completed classes and marks only the two failed copies for recreation',()=>{
+ const e=sevenClassProvisioningEnv(),{c}=e,records=e.begin(),copy=c.Drive.Files.copy;
+ const failedIds=new Set([records[1].id,records[3].id]);
+ c.Drive.Files.copy=(body,...args)=>{if(failedIds.has(body.appProperties.turretRecord))throw Error('copy failed');return copy(body,...args);};
+ for(const r of records){
+  if(failedIds.has(r.id))assert.throws(()=>c.prepareFormTarget(r.id,r.revision),/copy failed/);
+  else c.prepareFormTarget(r.id,r.revision);
+ }
+ c.Drive.Files.copy=copy;c.Drive.Files.list=()=>({files:[]});
+ const before=plain(c.getManagedRecords_()),plan=e.preview();
+ assert.deepEqual(plain(plan.targets.map(t=>t.action)),['skip','recreate','skip','recreate','skip','skip','skip']);
+ assert.deepEqual(plain(c.getManagedRecords_()),before);assert.equal(e.calls.copies,5);
+ const resumed=c.beginFormSetup(e.raw,plan.configRevision,plan.fingerprint);
+ assert.deepEqual(plain(resumed.map(r=>r.id)),plain(records.map(r=>r.id)));
+ assert.deepEqual(plain(c.getManagedRecords_()),before);
+});
+
+test('resumed creation preview continues a partially prepared answer tab instead of rejecting its name',()=>{
+ const e=provisioningEnv(),{c}=e,[r]=e.begin(),copy=c.Drive.Files.copy;
+ c.Drive.Files.copy=(...args)=>{const copied=copy(...args);e.forms.get(copied.id).setTitle=()=>{throw Error('title failed');};return copied;};
+ assert.throws(()=>c.prepareFormTarget(r.id,r.revision),/title failed/);
+ assert.equal(e.preview().targets[0].action,'resume');
+});
+
+test('fully completed setup is a skip-only preview without creating another batch or changing forms',()=>{
+ const e=provisioningEnv(),{c}=e,[r]=e.begin();c.prepareFormTarget(r.id,r.revision);
+ const before=plain(c.getManagedRecords_()),p=e.preview();
+ assert.equal(p.targets[0].action,'skip');
+ const records=c.beginFormSetup(e.raw,p.configRevision,p.fingerprint);
+ assert.equal(records[0].id,r.id);assert.deepEqual(plain(c.getManagedRecords_()),before);assert.equal(e.calls.copies,1);
+});
+
+test('adding a selected class prepares only the new class and keeps the existing managed form',()=>{
+ const e=provisioningEnv(),{c}=e,[r]=e.begin();c.prepareFormTarget(r.id,r.revision);
+ e.sheets.get('クラス一覧').rows.push(['追加クラス','200','1']);e.sheets.get('生徒一覧').rows.push(['new@example.com','追加生徒','200']);
+ const p=e.preview();assert.deepEqual(plain(p.targets.map(t=>t.action)),['skip','create']);
+ const records=c.beginFormSetup(e.raw,p.configRevision,p.fingerprint);
+ assert.equal(records[0].id,r.id);c.prepareFormTarget(records[1].id,records[1].revision);
+ assert.equal(e.calls.copies,2);assert.equal(c.getManagedRecords_().filter(r=>r.kind==='form').length,2);
+});
+
+for(const changed of ['untracked','other-course','other-sheet','multiple-records','copied-owner'])test('matching a tab name alone cannot skip or adopt unrelated forms: '+changed,()=>{
+ const e=provisioningEnv(),{c}=e;
+ if(changed==='untracked')e.sheets.set('回答 1-1',new AdminSheet('回答 1-1',[['メール','質問']]));
+ else {
+  const [r]=e.begin(),saved=c.prepareFormTarget(r.id,r.revision);
+  if(changed==='other-course')saved.courseId='200';
+  if(changed==='other-sheet')saved.responseSheetId=99999;
+  if(changed==='multiple-records')c.saveManagedRecord_({...plain(saved),id:'second-record'});
+  else if(changed==='copied-owner')c.ScriptApp.getScriptId=()=> 'other-script';
+  else c.saveManagedRecord_(saved);
+ }
+ assert.throws(()=>e.preview(),/重複|不正|別の運用|一致|確認/);
+ assert.equal(e.calls.copies,changed==='untracked'?0:1);
+});
+
+test('skipping prepared forms preserves their individual settings even when the draft or roster changed',()=>{
+ const e=provisioningEnv(),{c}=e,[r]=e.begin();let ready=c.prepareFormTarget(r.id,r.revision);
+ ready.title='個別に編集した題名';ready.input.templateId='previous-template';ready=c.saveManagedRecord_(ready);
+ e.sheets.get('生徒一覧').rows=[['メールアドレス','名前','コースID']];
+ const before=plain(c.getManagedRecords_()),p=e.preview();
+ assert.equal(p.targets[0].action,'skip');assert.equal(p.targets[0].title,'個別に編集した題名');
+ assert.equal(c.beginFormSetup(e.raw,p.configRevision,p.fingerprint)[0].id,r.id);
+ assert.deepEqual(plain(c.getManagedRecords_()),before);
+});
+
+test('resumption confirmation detects a changed managed record before resetting or preparing anything',()=>{
+ const e=provisioningEnv(),{c}=e,[r]=e.begin();c.prepareFormTarget(r.id,r.revision);
+ const p=e.preview(),saved=c.loadManagedRecord_(r.id);saved.lastError='changed';c.saveManagedRecord_(saved);
+ assert.throws(()=>c.beginFormSetup(e.raw,p.configRevision,p.fingerprint),/更新|再確認/);assert.equal(e.calls.copies,1);
+});
+
+test('the real creation confirmation path recovers two missing forms among seven and becomes a no-op on repeat',async()=>{
+ const e=sevenClassProvisioningEnv(),{c}=e;e.raw.deferMaterialSettings=true;e.raw.additionalColumns=[];
+ const records=e.begin(),copy=c.Drive.Files.copy,failedIds=new Set([records[1].id,records[3].id]);
+ c.Drive.Files.copy=(body,...args)=>{if(failedIds.has(body.appProperties.turretRecord))throw Error('copy failed');return copy(body,...args);};
+ for(const r of records){if(failedIds.has(r.id))assert.throws(()=>c.prepareFormTarget(r.id,r.revision),/copy failed/);else c.prepareFormTarget(r.id,r.revision);}
+ c.Drive.Files.copy=copy;c.Drive.Files.list=()=>({files:[]});
+ const completed=records.filter(r=>!failedIds.has(r.id)).map(r=>plain(c.loadManagedRecord_(r.id)));
+ const ui=vm.createContext({console,structuredClone});
+ const script=readFileSync('Setting.html','utf8').match(/<script>([\s\S]*?)<\/script>/)[1];
+ vm.runInContext(script.replace(/boot\(\);\s*$/,''),ui);
+ ui.document={getElementById:()=>null,querySelectorAll:()=>[]};ui.raw=plain(e.raw);
+ const consoleData=()=>({defaults:{statusHeader:e.raw.statusHeader},records:plain(c.getManagedRecords_().filter(r=>r.kind==='form')),configRevision:c.getConfigRevision_(c.getConfig_())});
+ ui.initial=consoleData();
+ vm.runInContext('state.forms=initial;state.formDraft=raw;readCurrent=()=>{};requireSaved=()=>true;task=async fn=>fn();let messages=[],confirmations=[];status=(...args)=>messages.push(args);confirmAction=async(...args)=>{confirmations.push(args);return true;}',ui);
+ ui.reloadForms=async()=>{ui.latest=consoleData();vm.runInContext('state.forms=latest',ui);};
+ const rpcCalls=[];
+ ui.rpc=async(method,...args)=>{rpcCalls.push([method,...plain(args)]);return method==='getFormConsoleData'?consoleData():plain(c[method](...plain(args)));};
+ await vm.runInContext("formCommand('preview')",ui);
+ assert.equal(e.calls.copies,7);assert.equal(e.calls.destination,7);assert.equal(e.calls.posts,0);
+ assert.deepEqual(rpcCalls.filter(call=>call[0]==='prepareFormTarget').map(call=>call[1]),[records[1].id,records[3].id]);
+ assert.deepEqual(records.filter(r=>!failedIds.has(r.id)).map(r=>plain(c.loadManagedRecord_(r.id))),completed);
+ assert.equal(vm.runInContext('messages.at(-1)[1]',ui),'success');assert.equal(vm.runInContext('confirmations.length',ui),1);
+ const before=plain(c.getManagedRecords_());rpcCalls.length=0;
+ await vm.runInContext("formCommand('preview')",ui);
+ assert.deepEqual(rpcCalls.map(call=>call[0]),['getFormConsoleData','previewFormSetup']);
+ assert.deepEqual(plain(c.getManagedRecords_()),before);assert.equal(e.calls.copies,7);
 });
 test('publication verifies updated permissions; no call occurs on stale preview',()=>{
  const e=provisioningEnv(),{c,calls,permissions}=e;let [r]=e.begin();r=c.prepareFormTarget(r.id,r.revision);

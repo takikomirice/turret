@@ -948,7 +948,10 @@ function renderFormRecords(mode){
   let actions='';
   if(r.kind==='form'&&mode==='prepare'){
    if(['pending','created','linking','linked'].includes(r.stage))actions+=formRecordButton('準備を続ける','prepare',r);
-   if(r.stage==='creating')actions+=formRecordButton('作成結果を照合','reconcile-form',r);
+   if(r.stage==='creating'){
+    actions+=formRecordButton('作成結果を照合','reconcile-form',r);
+    if(r.copyNotFound===true)actions+=formRecordButton('このフォームだけ再作成','retry-form',r);
+   }
   }
   if(r.kind==='form'&&r.settingsUpdate){
    actions+=formRecordButton('設定の更新を再開','resume-settings',r)+formRecordButton('受付停止','close',r);
@@ -1275,15 +1278,48 @@ async function formCommand(action,id,registration){
  if(action==='preview'){
    const raw=copy(state.formDraft||defaultFormDraft());raw.deferMaterialSettings=true;raw.additionalColumns=[];raw.statusHeader=state.forms&&state.forms.defaults&&state.forms.defaults.statusHeader||'送信状態';let plan;
   await task(async()=>{acceptFormConsoleData(await rpc('getFormConsoleData',{returnPage:state.formPage||0}));plan=await rpc('previewFormSetup',raw,state.forms.configRevision);});if(!plan)return;
-  const summary=plan.targets.map(t=>t.className+' → '+t.title+' / '+t.sheetName).join('\n')+'\n名前・管理・'+raw.statusHeader+'は自動作成します。\n評価・コメント列は次の「評価・コメント列」で設定します。\n\n非公開のフォームと回答タブを準備します。資料投稿は別操作です。';
+  const remaining=plan.targets.filter(t=>t.action!=='skip');
+  if(!remaining.length){status('選択したクラスはすべて準備済みです。作成済みのフォームをスキップしました。','success');return;}
+  const actionLabels={create:'新規作成',resume:'準備を再開',reconcile:'照合して再開',recreate:'再作成',skip:'スキップ（準備済み）'};
+  const recreate=remaining.filter(t=>t.action==='recreate');
+  const summary=plan.targets.map(t=>(actionLabels[t.action]||'新規作成')+'：'+t.className+' → '+t.title+' / '+t.sheetName).join('\n')+'\n\n準備済みのフォームは変更しません。途中のフォームは保存済みの設定で再開します。\n名前・管理・'+raw.statusHeader+'は自動作成します。\n評価・コメント列は次の「評価・コメント列」で設定します。\n\n非公開のフォームと回答タブを準備します。資料投稿は別操作です。'+(recreate.length?'\n\n再作成の対象：'+recreate.map(t=>t.className).join('、')+'\n前回の作成処理が終了し、Driveの保存先フォルダにも対象のフォームがないことを確認してください。実行直前にも照合し、見つかったフォームは再作成せず利用します。':'');
   if(!await confirmAction('フォームを準備する',summary,'準備する'))return;
-  await task(async()=>{const records=await rpc('beginFormSetup',raw,plan.configRevision,plan.fingerprint);let failures=[];for(const r of records){status(r.label+' を準備しています…');try{await rpc('prepareFormTarget',r.id,r.revision);}catch(e){failures.push(r.label+': '+(e.message||e));}}await reloadForms();status(failures.length?failures.join('\n'):'フォームと回答先を準備しました。次の「評価・コメント列」で必要な列を設定してください。',failures.length?'error':'success');});return;
+  await task(async()=>{
+   const records=await rpc('beginFormSetup',raw,plan.configRevision,plan.fingerprint);let failures=[];
+   for(let r of records){
+    if(['registered','published','scheduled','draft','deleted'].includes(r.stage))continue;
+    const target=plan.targets.find(t=>t.recordId===r.id||t.courseId===r.courseId);
+    status(r.label+' を準備しています…');
+    try{
+     if(r.stage==='creating'){
+      r=await rpc('reconcileManagedForm',r.id,r.revision);
+      if(r.copyNotFound){
+       if(!target||target.action!=='recreate')throw new Error(r.lastError||'作成済みフォームが見つかりません。作成内容を再確認してください。');
+       r=await rpc('reconcileManagedForm',r.id,r.revision,true);
+      }
+     }
+     const result=await rpc('prepareFormTarget',r.id,r.revision);
+     if(result.stage!=='registered')failures.push(r.label+': '+(result.lastError||'準備が途中です。「準備を続ける」で再開してください。'));
+    }catch(e){failures.push(r.label+': '+(e.message||e));}
+   }
+   await reloadForms();status(failures.length?failures.join('\n'):'未完了のフォームと回答先を準備しました。準備済みのフォームはスキップしました。次の「評価・コメント列」で必要な列を設定してください。',failures.length?'error':'success');
+  });return;
  }
   const r=state.forms.records.find(item=>item.id===id);if(!r)return;
   if(['publish','schedule','reschedule'].includes(action)&&!requireMaterialSettings([r]))return;
+ if(action==='retry-form'){
+  if(r.kind!=='form'||r.stage!=='creating'||r.copyNotFound!==true)return;
+  const summary='対象：'+r.label+' / '+r.title+'\nDriveの保存先フォルダに対象のフォームがないことと、前回の作成処理が終了していることを確認してください。少し待って再度照合すると、作成済みフォームが見つかる場合があります。\n\n再度照合し、見つかればそのフォームを使います。見つからない場合だけ、保存済みの設定でこの1件を再作成します。ほかのクラスのフォームは変更しません。';
+  if(!await confirmAction('このフォームだけ再作成',summary,'存在しないことを確認して再作成'))return;
+  await task(async()=>{try{
+   const checked=await rpc('reconcileManagedForm',id,r.revision,true);
+   const result=await rpc('prepareFormTarget',id,checked.revision);
+   status(result.stage==='registered'?'フォームと回答先を準備しました。':result.lastError||'準備が途中です。「準備を続ける」で再開してください。',result.stage==='registered'?'success':'error');
+  }finally{await reloadForms();}});return;
+ }
  if(['prepare','reconcile-form','reconcile-post'].includes(action)){
   const method={prepare:'prepareFormTarget','reconcile-form':'reconcileManagedForm','reconcile-post':'reconcileManagedPost'}[action];
-  await task(async()=>{try{await rpc(method,id,r.revision);status('処理結果を更新しました。','success');}finally{await reloadForms();}});return;
+  await task(async()=>{try{const result=await rpc(method,id,r.revision);status(result.copyNotFound?result.lastError:'処理結果を更新しました。',result.copyNotFound?'error':'success');}finally{await reloadForms();}});return;
  }
  if(!managedActionLabel(action))return;
  const options={};
