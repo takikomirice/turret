@@ -1048,6 +1048,8 @@ function managedSettingsPlan_(r, changes) {
   result.formTitleChanged=result.title!==r.title;
   result.policyChanged=JSON.stringify(input.policy)!==JSON.stringify(r.input.policy);
   result.materialPatch={};
+  // 保存記録と同じ入力も、Classroom 側の現在値と照合する。
+  result.materialFields=keys.filter(function(k){return k==='materialTitlePattern'||k==='description';}).map(function(k){return k==='materialTitlePattern'?'title':'description';});
   if(topicChanged){result.topicChange=true;result.topic={courseId:String(r.courseId),name:input.topicName,topicId:'',missing:false};}
   if(result.materialTitle!==r.materialTitle)result.materialPatch.title=result.materialTitle;
   if(input.description!==r.input.description)result.materialPatch.description=input.description;
@@ -1081,10 +1083,18 @@ function managedSettingsSnapshot_(r, plan, context) {
     snapshot.permissions=publishedPermissions_(r.formId).map(managedCanonicalSnapshot_).sort(function(a,b){return JSON.stringify(a).localeCompare(JSON.stringify(b));});
     if(snapshot.permissions.some(function(p){return p.role!=='reader';}))throw new Error('回答者権限を安全に変更できません。フォーム画面で権限を確認してください。');
   }
-  if(r.materialId&&r.stage!=='deleted'&&Object.keys(plan.materialPatch).length){
+  const materialFields=Array.from(new Set(Object.keys(plan.materialPatch).concat(plan.materialFields||[])));
+  if(r.materialId&&r.stage!=='deleted'&&materialFields.length){
     const post=Classroom.Courses.CourseWorkMaterials.get(r.courseId,r.materialId);
     if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
-    snapshot.material={};Object.keys(plan.materialPatch).forEach(function(k){snapshot.material[k]=post[k]||'';});
+    snapshot.material={};materialFields.forEach(function(k){snapshot.material[k]=post[k]||'';});
+    (plan.materialFields||[]).forEach(function(k){
+      const desired=k==='title'?plan.materialTitle:plan.input.description;
+      if(snapshot.material[k]!==desired){
+        if(!Object.prototype.hasOwnProperty.call(plan.materialPatch,k))plan.changes.push((k==='title'?'Classroom の資料タイトル':'Classroom の資料本文')+'：'+(snapshot.material[k]||'（空欄）')+' → '+(desired||'（空欄）'));
+        plan.materialPatch[k]=desired;
+      }
+    });
     // ローカルに名前がなくても、実際に解除する手動トピックを確認画面に示す。
     if(plan.topic&&!plan.topic.name&&!r.input.topicName&&snapshot.material.topicId)plan.changes.push('トピック：Classroom トピックID '+snapshot.material.topicId+' → （空欄）');
   }
@@ -1180,7 +1190,7 @@ function resumeManagedFormSettingsUnlocked_(r) {
     ensureCopiedResponderPolicy_(Object.assign({},r,{input:plan.input}));
     validateResponderAccess_(publishedPermissions_(r.formId),policy,managedSettingsAccess_(r,policy,{}),true);
   }
-  if(before.material){
+  if(before.material&&Object.keys(plan.materialPatch).length){
     const service=Classroom.Courses.CourseWorkMaterials,post=service.get(r.courseId,r.materialId);
     if(!post||String(post.id)!==String(r.materialId)||!['DRAFT','PUBLISHED'].includes(post.state))throw new Error('資料の投稿状態を確認してください。');
     Object.keys(plan.materialPatch).forEach(function(k){unchanged(post[k]||'',before.material[k],plan.materialPatch[k]);});

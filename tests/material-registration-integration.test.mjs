@@ -64,3 +64,65 @@ test('bulk preserve keeps different manual topics on multiple existing materials
  assert.equal(e.posts.get(first.materialId).topicId,'manual-a');assert.equal(e.posts.get(second.materialId).topicId,'manual-b');
  assert.equal(e.posts.get(first.materialId).description,'共通本文だけ');assert.equal(e.posts.get(second.materialId).description,'共通本文だけ');
 });
+
+for(const stage of ['publish','schedule'])test(`bulk registration restores the requested description when the ${stage} material differs from its saved record`,async()=>{
+ const e=environment();e.c.saveManagedRecord_({...e.read(),materialSettingsSaved:true});
+ e.run(stage,stage==='schedule'?{scheduledTime:'2026-10-05T01:00:00Z'}:{});
+ const r=e.read(),post=e.posts.get(r.materialId);post.description='';post.topicId='manual-topic';
+ e.ui.savedRecord=plain(r);
+ vm.runInContext(`state.forms.records=[savedRecord];state.batchMaterialDraft=null;state.scheduleDrafts={};batchMaterialSettingsDraft().materialTitlePattern='{class_label} 編集';`,e.ui);
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(post.title,'1A 編集');assert.equal(post.description,r.input.description);assert.equal(post.topicId,'manual-topic');
+ assert.equal(post.id,r.materialId);assert.equal(post.state,stage==='publish'?'PUBLISHED':'DRAFT');
+});
+
+test('bulk registration reads title, multiline description and explicit topic selection from the input fields',async()=>{
+ const e=environment();vm.runInContext('state.batchMaterialDraft=null;state.scheduleDrafts={};',e.ui);
+ const fields=[{dataset:{batchMaterialField:'materialTitlePattern'},value:'{class_label} 画面の資料'},
+  {dataset:{batchMaterialField:'description'},value:'画面の本文\n二行目'},
+  {dataset:{batchMaterialField:'topicChange'},type:'checkbox',checked:true},
+  {dataset:{batchMaterialField:'topicName'},value:'振り返り'}];
+ e.ui.document={getElementById:()=>null,querySelectorAll:selector=>selector==='[data-batch-material-field]'?fields:[]};
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(e.read().materialTitle,'1A 画面の資料');assert.equal(e.read().input.description,'画面の本文\n二行目');assert.equal(e.read().topicId,'topic-one');
+});
+
+for(const description of ['回答してください',''])test(`unchanged saved text is reconciled against remote text for ${description?'nonempty':'empty'} descriptions`,async()=>{
+ const e=environment();const initial=e.read();initial.input.description=description;initial.materialSettingsSaved=true;e.c.saveManagedRecord_(initial);e.run('publish');
+ const r=e.read(),post=e.posts.get(r.materialId);post.description='Classroom 側の異なる本文';post.topicId='manual';
+ r.materialSettingsBaseline={materialTitlePattern:r.input.materialTitlePattern,description,topicName:''};e.c.saveManagedRecord_(r);
+ e.ui.savedRecord=plain(e.read());vm.runInContext('state.forms.records=[savedRecord];state.batchMaterialDraft=null;state.scheduleDrafts={};',e.ui);
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(post.description,description);assert.equal(post.topicId,'manual');assert.match(vm.runInContext('confirmations[0]',e.ui),/Classroom の資料本文/);
+ const patches=e.calls.filter(c=>c[0]==='patch').length;
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(e.calls.filter(c=>c[0]==='patch').length,patches);
+});
+
+test('remote description changes after confirmation reject registration even when saved input is unchanged',async()=>{
+ const e=environment();e.c.saveManagedRecord_({...e.read(),materialSettingsSaved:true});e.run('publish');
+ const r=e.read(),post=e.posts.get(r.materialId);post.description='確認前の本文';e.ui.savedRecord=plain(r);
+ vm.runInContext('state.forms.records=[savedRecord];state.batchMaterialDraft=null;state.scheduleDrafts={};',e.ui);
+ e.ui.changeRemote=()=>{post.description='確認後の本文';};vm.runInContext('confirmAction=async()=>{changeRemote();return true;};',e.ui);
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(post.description,'確認後の本文');assert.equal(e.calls.filter(c=>c[0]==='patch').length,0);
+ assert.match(vm.runInContext('messages.at(-1)',e.ui),/再確認/);
+});
+
+test('bulk registration updates title, saved description and an explicitly selected topic on an existing material',async()=>{
+ const e=environment();e.c.saveManagedRecord_({...e.read(),materialSettingsSaved:true});e.run('publish');
+ const r=e.read(),post=e.posts.get(r.materialId);post.description='';e.ui.savedRecord=plain(r);
+ vm.runInContext(`state.forms.records=[savedRecord];state.batchMaterialDraft={materialTitlePattern:'{class_label} まとめて更新',description:savedRecord.input.description,topicName:'振り返り',topicChange:true};state.scheduleDrafts={};`,e.ui);
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(post.title,'1A まとめて更新');assert.equal(post.description,r.input.description);assert.equal(post.topicId,'topic-one');
+ assert.equal(e.read().input.topicName,'振り返り');assert.equal(post.id,r.materialId);assert.equal(e.posts.size,1);
+});
+
+test('bulk registration updates title, saved description and an explicitly selected topic on an existing material',async()=>{
+ const e=environment();e.c.saveManagedRecord_({...e.read(),materialSettingsSaved:true});e.run('publish');
+ const r=e.read(),post=e.posts.get(r.materialId);post.description='';e.ui.savedRecord=plain(r);
+ vm.runInContext(`state.forms.records=[savedRecord];state.batchMaterialDraft={materialTitlePattern:'{class_label} まとめて更新',description:savedRecord.input.description,topicName:'振り返り',topicChange:true};state.scheduleDrafts={};`,e.ui);
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(post.title,'1A まとめて更新');assert.equal(post.description,r.input.description);assert.equal(post.topicId,'topic-one');
+ assert.equal(e.read().input.topicName,'振り返り');assert.equal(post.id,r.materialId);assert.equal(e.posts.size,1);
+});

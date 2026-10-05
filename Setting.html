@@ -792,6 +792,10 @@ function missingMaterialTopicsSummary(preview){
  const missing=Array.from(new Map((preview.targets||[]).filter(p=>p.missingTopic).map(p=>[p.missingTopic.courseId,p.missingTopic])).values());
  return missing.length?'\n\n同名トピックがないクラス：\n'+missing.map(t=>(t.className||t.courseId)+'：'+t.name).join('\n')+'\n上記のクラスに同名トピックを作成して反映します。':'';
 }
+function remoteMaterialDifferencesSummary(preview){
+ const differences=(preview.targets||[]).flatMap(p=>(p.changes||[]).filter(text=>text.startsWith('Classroom の資料')).map(text=>(p.label||p.id)+'：'+text));
+ return differences.length?'\n\nClassroom側の文面の差分：\n'+differences.join('\n'):'';
+}
 function batchMaterialSaveStatus(){
  const d=batchMaterialSettingsDraft(),targets=batchMaterialSettingsTargets();
  return targets.length&&d.topicChange!==true&&targets.every(r=>r.materialSettingsSaved!==false&&['materialTitlePattern','description'].every(k=>(r.input&&r.input[k]||'')===(d[k]||'')))?'保存済み':'未保存';
@@ -1076,7 +1080,7 @@ async function formCommand(action,id,registration){
   const changes=materialSettingsChanges(batchMaterialSettingsDraft());changes.materialTitlePattern=changes.materialTitlePattern.trim();changes.description=changes.description.trim();
   if(!changes.materialTitlePattern){status('投稿タイトルを入力してください。','error');return;}
   const topicKey=JSON.stringify(changes),topicProgress=state.batchMaterialTopicProgress;
-  const targets=allTargets.filter(r=>!materialSettingsReady(r)||changes.topicChange===true&&!(topicProgress&&topicProgress.key===topicKey&&topicProgress.completed[r.id]===r.revision)||r.input.materialTitlePattern!==changes.materialTitlePattern||(r.input.description||'')!==changes.description||r.materialSettingsBaseline?.materialTitlePattern!==changes.materialTitlePattern||r.materialSettingsBaseline?.description!==changes.description);
+  const targets=allTargets.filter(r=>!materialSettingsReady(r)||(r.materialId&&r.stage!=='deleted'||changes.topicChange===true)&&!(topicProgress&&topicProgress.key===topicKey&&topicProgress.completed[r.id]===r.revision)||r.input.materialTitlePattern!==changes.materialTitlePattern||(r.input.description||'')!==changes.description||r.materialSettingsBaseline?.materialTitlePattern!==changes.materialTitlePattern||r.materialSettingsBaseline?.description!==changes.description);
   const pending=topicProgress&&topicProgress.key===topicKey&&(state.forms.records||[]).filter(r=>topicProgress.targets.includes(r.id)&&r.settingsUpdate);
   if(pending&&pending.length){status('更新が途中のクラスで「設定の更新を再開」を完了してください：'+pending.map(r=>r.label||r.className||r.id).join('、'),'error');return false;}
   if(!targets.length){
@@ -1087,7 +1091,7 @@ async function formCommand(action,id,registration){
    for(let start=0;start<targets.length;start+=100){const part=await rpc('previewManagedFormSettings',{targets:targets.slice(start,start+100).map(r=>({id:r.id,revision:materialSettingsDraft(r).revision})),changes,saveMaterialSettings:true,registerCommonMaterial:true});plans.push(...part.targets);}
    preview={targets:plans};
   });if(!preview)return;
-  const summary=targets.map(r=>r.label||r.className||r.id).join('、')+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+(registration?'\n\n'+registration.summary:'')+'\n\n各クラスの投稿タイトル・投稿文・トピックを保存します。個別の文面も置き換わり、投稿済み・予約済みの資料にも反映します。';
+  const summary=targets.map(r=>r.label||r.className||r.id).join('、')+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+remoteMaterialDifferencesSummary(preview)+(registration?'\n\n'+registration.summary:'')+'\n\n各クラスの投稿タイトル・投稿文・トピックを保存します。個別の文面も置き換わり、投稿済み・予約済みの資料にも反映します。';
   if(!await confirmAction(registration?'一括登録':'クラスルーム投稿の一括登録',summary,registration?'一括登録':'各クラスに反映'))return;
   if(JSON.stringify(batchMaterialSettingsTargets().map(r=>[r.id,r.revision]))!==targetVersions){status('対象の状態が更新されました。内容を再確認して、もう一度反映してください。','error');return;}
   let completed=false;
@@ -1122,7 +1126,7 @@ async function formCommand(action,id,registration){
    const r=state.forms.records.find(r=>r.id===id);if(!r||!editableFormSettingsRecord(r))return;
    const d=materialSettingsDraft(r),changes=materialSettingsChanges(d);let preview;
    await task(async()=>{preview=await rpc('previewManagedFormSettings',{targets:[{id,revision:d.revision}],changes,saveMaterialSettings:true});});if(!preview)return;
-   const summary=(r.label||r.className)+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+'\n\n投稿タイトル・投稿文・トピックを保存します。投稿済み・予約済みの資料にも反映します。';
+   const summary=(r.label||r.className)+'\n'+changes.materialTitlePattern+'\n'+(changes.description||'（投稿文なし）')+'\nトピック：'+materialTopicSummary(changes,preview)+missingMaterialTopicsSummary(preview)+remoteMaterialDifferencesSummary(preview)+'\n\n投稿タイトル・投稿文・トピックを保存します。投稿済み・予約済みの資料にも反映します。';
    if(!await confirmAction('投稿設定を保存',summary,'設定を保存'))return;
    await task(async()=>{
     try{
