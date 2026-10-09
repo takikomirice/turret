@@ -2058,7 +2058,7 @@ function snapshotSheetContents_(ss, name) {
   const values = range.getValues();
   const formulas = typeof range.getFormulas === 'function' ? range.getFormulas() : [];
   formulas.forEach(function(row, r) { row.forEach(function(formula, c) { if (formula) values[r][c] = formula; }); });
-  return { name: name, exists: true, values: values };
+  return { name: name, exists: true, values: values, formulas: formulas };
 }
 
 function restoreSheetContents_(ss, snapshot) {
@@ -2069,7 +2069,12 @@ function restoreSheetContents_(ss, snapshot) {
   }
   if (!sheet) sheet = ss.insertSheet(snapshot.name);
   sheet.clearContents();
-  if (snapshot.values.length && snapshot.values[0].length) sheet.getRange(1, 1, snapshot.values.length, snapshot.values[0].length).setValues(snapshot.values);
+  // 復元時も文字列を数式に変えない。保存前から存在した数式だけをそのまま戻す。
+  const rows = snapshot.values.map(function(row, r) { return row.map(function(value, c) {
+    const formula = snapshot.formulas && snapshot.formulas[r] && snapshot.formulas[r][c];
+    return formula || scoringSheetLiteral_(value);
+  }); });
+  if (rows.length && rows[0].length) sheet.getRange(1, 1, rows.length, rows[0].length).setValues(rows);
 }
 
 function getConfig_() {
@@ -2734,7 +2739,8 @@ function mappingLiteral_(value) {
 function appendRows_(sheet, rows) {
   if (!rows || rows.length === 0) return;
   const startRow = sheet.getLastRow() + 1;
-  sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows);
+  // 回答・氏名・返信本文はデータとして転記し、先頭の「=」を数式にしない。
+  sheet.getRange(startRow, 1, rows.length, rows[0].length).setValues(rows.map(function(row) { return row.map(scoringSheetLiteral_); }));
 }
 
 function classroomdata() {
@@ -2777,7 +2783,7 @@ function replaceRosterRows_(name, headers, rows) {
     oldMax=typeof sheet.getMaxColumns==='function' ? sheet.getMaxColumns() : headers.length;
     if(oldMax<headers.length){sheet.insertColumnsAfter(oldMax,headers.length-oldMax);expandedSheet=sheet;}
     sheet.clearContents();
-    sheet.getRange(1, 1, rows.length + 1, headers.length).setValues([headers].concat(rows));
+    sheet.getRange(1, 1, rows.length + 1, headers.length).setValues([headers].concat(rows).map(function(row) { return row.map(scoringSheetLiteral_); }));
     sheet.setFrozenRows(1);
     SpreadsheetApp.flush();
     if (name==='クラス一覧' || name===STUDENT_SHEET_NAME) ensureRosterFilter_(sheet,headers.length);
