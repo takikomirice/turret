@@ -14,7 +14,7 @@ export const validConfig = () => ({
 });
 
 export class AdminSheet {
-  constructor(name, rows = []) { this.name = name; this.rows = rows.map(row => [...row]); this.notes=[]; this.maxColumns = 26; this.sheetId = nextSheetId++; }
+  constructor(name, rows = []) { this.name = name; this.rows = rows.map(row => [...row]); this.notes=[]; this.validations=[]; this.maxColumns = 26; this.sheetId = nextSheetId++; }
   getSheetId() { return this.sheetId; }
   getName() { return this.name; }
   getLastRow() { let n = this.rows.length; while(n && this.rows[n - 1].every(v => v === '' || v == null)) n--; return n; }
@@ -26,7 +26,15 @@ export class AdminSheet {
   getRange(row, col, height = 1, width = 1) {
     const read = () => Array.from({length:height}, (_,y) => Array.from({length:width},(_,x)=>this.rows[row+y-1]?.[col+x-1] ?? ''));
     const range = {
-      getValues: read, getDisplayValues: () => read().map(r=>r.map(String)), getValue: () => read()[0][0],
+      getValues: read, getDisplayValues: () => read().map(r=>r.map(v=>{
+        // 対応表のIF/IFS式だけを評価し、Sheetsが返す計算済み表示値を再現する。
+        if(typeof v==='string' && /^=IF\(D\d+="","",IFS\(/.test(v)){
+          const n=Number(v.match(/^=IF\(D(\d+)/)[1]),selected=String(this.rows[n-1]?.[3] || '');
+          const clauses=[...v.matchAll(/D\d+="((?:[^"]|"")*)","((?:[^"]|"")*)"/g)];
+          return clauses.find(m=>m[1].replaceAll('""','"')===selected)?.[2].replaceAll('""','"') || '';
+        }
+        return String(v);
+      })), getValue: () => read()[0][0],
       getFormulas: () => read().map(r=>r.map(v=>typeof v==='string' && v.startsWith('=') ? v : '')),
       getColumn:()=>col, getNumColumns:()=>width,
       getNote:()=>this.notes[row-1]?.[col-1] || '',
@@ -36,7 +44,11 @@ export class AdminSheet {
       setValues: values => { this.beforeWrite?.(values); values.forEach((r,y)=>r.forEach((value,x)=>{this.rows[row+y-1] ??=[]; this.rows[row+y-1][col+x-1]=value;})); return range; },
       clearContent: () => range.setValues(Array.from({length:height},()=>Array(width).fill(''))),
       setNumberFormat: () => range, setFontWeight: () => range, setBackground: () => range, setWrap: () => range,
-      setFormulas: values => range.setValues(values), clearDataValidations: () => range,
+      setFormulas: values => range.setValues(values),
+      getDataValidations: () => Array.from({length:height},(_,y)=>Array.from({length:width},(_,x)=>this.validations[row+y-1]?.[col+x-1] || null)),
+      setDataValidations: values => { values.forEach((r,y)=>r.forEach((v,x)=>{this.validations[row+y-1]??=[];this.validations[row+y-1][col+x-1]=v;}));return range; },
+      setDataValidation: rule => range.setDataValidations(Array.from({length:height},()=>Array(width).fill(rule))),
+      clearDataValidations: () => range.setDataValidation(null),
       createFilter: () => { if(this.filter)throw Error('filter exists');return this.filter={row,column:col,rows:height,columns:width}; }
     }; return range;
   }
@@ -70,7 +82,7 @@ export function adminEnvironment({config = validConfig(), includeAdmin = true, a
     deleteSheet:sheet=>sheets.delete(sheet.name), setActiveSheet:sheet=>{activeSheet=sheet.name;}, getId:()=> 'test-admin-sheet', getSpreadsheetTimeZone:()=> 'Asia/Tokyo' };
   const insert=ss.insertSheet;ss.insertSheet=name=>{const s=insert(name);s.setName=next=>{sheets.delete(s.name);s.name=next;sheets.set(next,s);return s;};return s;};
   const c=vm.createContext({console,Logger:{log(){}},Date,PropertiesService:{getScriptProperties:()=>propertyApi(props),getUserProperties:()=>propertyApi(userProps)},
-    SpreadsheetApp:{getActiveSpreadsheet:()=>ss,flush(){},getUi:()=>({alert(){throw Error('unexpected native alert');}})},
+    SpreadsheetApp:{getActiveSpreadsheet:()=>ss,flush(){},getUi:()=>({alert(){throw Error('unexpected native alert');}}),newDataValidation:()=>{let values,allowInvalid=true;return {requireValueInList(v){values=[...v];return this;},setAllowInvalid(v){allowInvalid=v;return this;},build(){return {values,allowInvalid};}};}},
     LockService:{getScriptLock:()=>({tryLock:()=>{if(locked)return false;locked=true;return true;},releaseLock:()=>{locked=false;}})},
     Session:{getScriptTimeZone:()=> 'Asia/Tokyo'},
     Utilities:{DigestAlgorithm:{SHA_256:'sha256'},Charset:{UTF_8:'utf8'},computeDigest:(algorithm,value)=>Array.from(createHash('sha256').update(value).digest()),getUuid:()=> 'test-uuid-'+(++uuid),sleep(){} },

@@ -237,9 +237,9 @@ h2{font-size:21px}
 const steps = [
  {id:'prepare',title:'シートを準備',subtitle:'新規作成・JSONの再利用'},
  {id:'classes',title:'クラスと生徒',subtitle:'対象の選択・名簿の取得'},
- {id:'forms',title:'フォームを準備',subtitle:'ひな形・クラス別に作成'},
+ {id:'forms',title:'フォームを準備',subtitle:'ひな形・クラス別に作成・対応表'},
  {id:'columns',title:'評価・コメント列',subtitle:'回答タブを選んで列を追加'},
- {id:'sources',title:'回答先と通知先',subtitle:'通知の確認・クラスの対応表'},
+ {id:'sources',title:'回答先と通知先',subtitle:'通知先・通知利用の確認'},
  {id:'fields',title:'列と項目',subtitle:'列の役割・評価の変換'},
  {id:'template',title:'メッセージ',subtitle:'本文と差し込み'},
  {id:'publish',title:'資料を投稿',subtitle:'Classroomに配布・受付管理'},
@@ -255,9 +255,9 @@ function automationReady() { return !!state.data&&!state.data.recoveryRequired&&
 function visibleProgress(id){
   if(id==='columns'){const records=(state.forms&&state.forms.records||[]).filter(r=>r.kind==='form'),pending=records.some(r=>r.columnSetup),configured=records.filter(r=>configuredColumnHeaders(r).length),headers=[...new Set(configured.flatMap(configuredColumnHeaders))];return {id,state:pending?'attention':configured.length?'complete':'pending',detail:pending?'列の設定を再開してください':configured.length?'列を設定済み：'+configured.length+' / '+records.length+'件。設定済みの列：'+headers.join('、'):'必要な評価・コメント列を、フォーム作成後に追加します。既存の列と値は保持します。'};}
  if(['forms','publish'].includes(id)&&state.formsError&&showsFormData())return {id,state:'attention',detail:'最新情報を取得できません。手順を開いて再取得してください。'};
- if(id==='forms'||id==='publish')return !state.formsStale&&state.forms&&state.forms.setupProgress&&state.forms.setupProgress[id]||progressFor(id);
- if(!['classes','sources'].includes(id))return progressFor(id);
- const parts=(id==='classes'?['classes','students']:['sources'].concat(state.data&&state.data.mappingNeeded||count('mappings')?['mapping']:[])).map(progressFor);
+ if(id==='forms'||id==='publish'){const progress=!state.formsStale&&state.forms&&state.forms.setupProgress&&state.forms.setupProgress[id]||progressFor(id);if(id==='forms'&&state.data&&(state.data.mappingNeeded||count('mappings'))&&progressFor('mapping').state!=='complete')return {id,state:'attention',detail:progressFor('mapping').detail};return progress;}
+ if(id!=='classes')return progressFor(id);
+ const parts=['classes','students'].map(progressFor);
  return {id,state:parts.every(p=>p.state==='complete')?'complete':parts.some(p=>p.state==='attention')?'attention':'pending',detail:''};
 }
 function dirtySections() { return Object.keys(state.drafts); }
@@ -415,7 +415,7 @@ function renderStep(id) {
  if(id==='forms')return renderForms('prepare');
  if(id==='columns')return renderResponseColumns();
  if(id==='publish')return renderForms('publish');
- if(id==='sources'){const c=draftValue(id),hasRecipients=c.reminderTo.some(v=>v.trim());return '<div class="card"><p class="help">フォームの回答先は、この運用スプレッドシートへ自動接続します。</p><div class="help-label"><label>未採点リマインダー/エラーの通知先メールアドレス</label>'+helpButton('未採点リマインダー/エラーの通知先メールアドレス','未採点・未送信・エラーの件数を担当者へメールで知らせる通知先です。生徒へのClassroom返却先には使いません。自動通知するには「自動実行」でリマインダーを有効にしてください。登録は任意です。利用しない場合は下の確認にチェックして保存してください。')+'</div>'+sourceEntries('reminderTo',c.reminderTo,'メールアドレス',false)+'<label class="check-line"><input type="checkbox" id="reminderOptOutConfirmed"'+(c.reminderOptOutConfirmed&&!hasRecipients?' checked':'')+(hasRecipients?' disabled':'')+'> メール通知を利用しないことを確認しました</label><p class="help">通知先を登録するか、利用しないことを確認してから「この手順を保存」を押してください。</p>'+saveFooter(id)+'</div>'+renderMapping();}
+ if(id==='sources'){const c=draftValue(id),hasRecipients=c.reminderTo.some(v=>v.trim());return '<div class="card"><p class="help">フォームの回答先は、この運用スプレッドシートへ自動接続します。</p><div class="help-label"><label>未採点リマインダー/エラーの通知先メールアドレス</label>'+helpButton('未採点リマインダー/エラーの通知先メールアドレス','未採点・未送信・エラーの件数を担当者へメールで知らせる通知先です。生徒へのClassroom返却先には使いません。自動通知するには「自動実行」でリマインダーを有効にしてください。登録は任意です。利用しない場合は下の確認にチェックして保存してください。')+'</div>'+sourceEntries('reminderTo',c.reminderTo,'メールアドレス',false)+'<label class="check-line"><input type="checkbox" id="reminderOptOutConfirmed"'+(c.reminderOptOutConfirmed&&!hasRecipients?' checked':'')+(hasRecipients?' disabled':'')+'> メール通知を利用しないことを確認しました</label><p class="help">通知先を登録するか、利用しないことを確認してから「この手順を保存」を押してください。</p>'+saveFooter(id)+'</div>';}
  if(id==='fields')return renderFields();
  if(id==='template')return renderTemplate();
  return renderAutomation()+renderDiagnostics();
@@ -425,8 +425,8 @@ function sourceEntries(key,values,label,multiline){
  return '<div class="entry-list">'+entries.map((value,i)=>'<div class="entry-row">'+(multiline?'<textarea rows="2" data-source-entry="'+key+'" aria-label="'+label+(i+1)+'">'+esc(value)+'</textarea>':'<input type="email" data-source-entry="'+key+'" aria-label="'+label+(i+1)+'" value="'+esc(value)+'">')+button('削除','data-remove-entry="'+key+'" data-entry-index="'+i+'" aria-label="'+label+(i+1)+'を削除"')+'</div>').join('')+'</div><div class="actions inline-actions">'+button('＋ '+label+'を追加','data-add-entry="'+key+'"')+'</div>';
 }
 function renderMapping(){
- const needed=!!state.data.mappingNeeded,hasRows=count('mappings')>0,c=state.data.config||{},sourceReady=(c.formSources||[]).length&&(c.formSheetNamePrefix||[]).length;
- return '<details class="card"'+(needed?' open':'')+'><summary>回答シートとクラスの対応表 '+(needed?(progressFor('mapping').state==='complete'?'<span class="tag complete">設定済み</span>':'<span class="tag attention">設定が必要</span>'):hasRows?'<span class="tag">'+count('mappings')+'行</span>':'（必要な場合のみ）')+helpButton('回答シートとクラスの対応表','同じ生徒が複数クラスにいる場合などに、回答ごとの送信先を指定します。')+'</summary>'+(sourceReady?'<div class="actions">'+button('対応表を作成・更新','data-action="mapping"')+sheetButton('mapping','対応表を開く')+'</div>'+helpButton('対応表の編集','対応表でクラス名を選び、状態を更新してください（courseIdは自動）。'):'<p class="help">先にフォームを準備して、回答先を接続してください。</p><div class="actions">'+button('フォームを準備する','data-step="forms"')+'</div>')+'</details>';
+ const data=state.data||{},needed=!!data.mappingNeeded,c=data.config||{},sourceReady=(c.formSources||[]).length&&(c.formSheetNamePrefix||[]).length;
+ return '<section class="card">'+helpHeading('回答シートとクラスの対応表','回答の送信先クラスを指定します。フォーム作成時に自動登録され、クラス名を選ぶとcourseIdが自動反映されます。')+(needed&&progressFor('mapping').state!=='complete'?'<p class="notice">'+esc(progressFor('mapping').detail)+'</p>':'')+'<div class="actions">'+sheetButton('mapping','対応表シートへ')+button('対応表を更新','data-action="mapping"'+(sourceReady?'':' disabled'))+'</div><p class="help">クラス追加後や既存行の自動反映を整えるときに更新してください。割り当てとメモは保持します。'+(sourceReady?'':'先にフォームを準備して回答先を接続してください。')+'</p></section>';
 }
 function sheetHelp(){return '<p class="help">この画面を移動してシートを編集できます。閉じた場合は「自動送信システム」メニューから開き直し、「状態を更新」してください。</p>';}
 function renderFields(){
@@ -619,7 +619,7 @@ async function applyProfile(){if(!state.profile)return;readCurrent();if(!require
 async function command(name,exportKind=state.exportKind){
  if(name==='save-all'){await saveAllSettings();return;}
  if(name==='settings-back'){const previous=state.returnPanel||{panel:'setup',step:'prepare'};state.panel=previous.panel;state.step=previous.step;render();if(showsFormData())refreshFormsInBackground();else if(state.panel==='setup'&&state.step==='fields')refreshHeadersInBackground();return;}
- if(name==='mapping-sources'){state.panel='setup';state.step='sources';render();return;}
+ if(name==='mapping-sources'){state.panel='setup';state.step='forms';render();return;}
  if(name==='diagnose'){await runDiagnostics();return;}
  if(name==='add-grade'){readCurrent();const c=draftValue('fields');c.gradeScale.push({from:'',to:''});state.commonGradeOpen=true;putDraft('fields',c);render();$('grade-'+(c.gradeScale.length-1)+'-from').focus();return;}
  if(name==='close'){readCurrent();if(dirtySections().length&&!await confirmAction('未保存の入力があります','画面を閉じると、未保存の入力は失われます。\n保存する場合はキャンセルして、各手順の保存ボタンを押してください。','保存せず閉じる'))return;status('このブラウザーのタブを閉じてください。');return;}
@@ -969,7 +969,7 @@ function managedStage(stage){return {pending:'準備待ち',creating:'作成結�
 function renderForms(mode){
  mode=mode||'prepare';
  let notice=state.formsLoading?'<p class="notice" role="status">最新情報を取得中… '+(state.forms?'前回取得した内容を表示しています。':'')+'</p>':state.formsError?'<div class="notice" role="status">最新情報を取得できませんでした。'+esc(state.formsError)+(state.forms?' 前回取得した内容を表示しています。':'')+' '+button('再取得','data-form-command="refresh-list"')+'</div>':'';
- if(!state.forms)return notice||'<p role="status">フォーム情報を取得しています…</p>';
+ if(!state.forms)return (mode==='prepare'?renderMapping():'')+(notice||'<p role="status">フォーム情報を取得しています…</p>');
  if(mode==='prepare')notice+=renderFormSettingsEditor();
  if(mode==='publish')return notice+helpHeading('資料の投稿と受付','一括設定で文面を登録してください。クラスごとの例外は個別登録、取消・受付の開始や停止・削除は個別操作から実行します。Classroomの「授業」に資料を即時投稿、または日時を指定して予約します。日時の保存では投稿や受付開始を行いません。投稿の実行時にフォーム受付を開始し、保存済みの受付終了日時を有効にします。投稿状態は最終確認時の情報です。「投稿状態を確認」でClassroomと照合できます。')+renderBatchSchedules()+(state.forms.records.some(r=>r.kind==='form'&&['registered','published','scheduled','draft','deleted'].includes(r.stage)&&!r.formUpdate&&!r.settingsUpdate)?'<div class="actions">'+button('すべてのフォームを更新','data-form-command="update-all"')+'</div>':'')+renderFormRecords('publish');
  const d=state.formDraft||defaultFormDraft(),classes=state.forms.classes||[];
@@ -977,7 +977,7 @@ function renderForms(mode){
  const columns=formInput('emailHeader','既存のメール列名',d)+formInput('nameHeader','名前を補完する列',d);
  const extraSettings='<p class="help">名前補完・管理・'+esc(d.statusHeader)+'の列は自動作成します。管理・送信状態の列名は変更できません。評価・コメント列は、作成後に次の手順で追加します。</p><div class="actions">'+button('評価・コメント列へ','data-step="columns"')+'</div>';
  const labels=classes.map(c=>'<div><label>'+esc(c.className)+'<input id="form-class-'+esc(c.courseId)+'" data-class-label="'+esc(c.courseId)+'" value="'+esc(d.labels[c.courseId]||c.className)+'" aria-label="'+esc(c.className)+'の短い表記"></label></div>').join('');
- return notice+'<div class="actions">'+button('通知先と対応表へ','data-step="sources"')+'</div>'+renderFormRecords('prepare')+'<section class="card"><details id="formCreateDetails"'+(state.formCreateOpen===true||(state.formCreateOpen==null&&!state.forms.records.some(r=>r.kind==='form'))?' open':'')+'><summary>ひな形からフォームを作成'+helpButton('ひな形からフォームを作成','ひな形は「確認済みメールを収集」に設定。作成時は非公開で準備します。')+'</summary><div class="form-grid">'+input+'</div><details><summary>回答タブと管理用の列</summary><div class="form-grid">'+columns+'</div></details>'+extraSettings+'<h3>クラスの表記</h3>'+(classes.length?'<div class="form-labels">'+labels+'</div>':'<p class="notice">'+esc(state.forms.classWarning||'対象クラスを選択してください。')+'</p>'+button('クラスを選択する','data-step="classes"'))+'<div class="actions">'+button('作成内容を確認','data-form-command="preview"'+(!classes.length?' disabled':''),true)+'</div></details></section>';
+ return notice+renderMapping()+renderFormRecords('prepare')+'<section class="card"><details id="formCreateDetails"'+(state.formCreateOpen===true||(state.formCreateOpen==null&&!state.forms.records.some(r=>r.kind==='form'))?' open':'')+'><summary>ひな形からフォームを作成'+helpButton('ひな形からフォームを作成','ひな形は「確認済みメールを収集」に設定。作成時は非公開で準備します。')+'</summary><div class="form-grid">'+input+'</div><details><summary>回答タブと管理用の列</summary><div class="form-grid">'+columns+'</div></details>'+extraSettings+'<h3>クラスの表記</h3>'+(classes.length?'<div class="form-labels">'+labels+'</div>':'<p class="notice">'+esc(state.forms.classWarning||'対象クラスを選択してください。')+'</p>'+button('クラスを選択する','data-step="classes"'))+'<div class="actions">'+button('作成内容を確認','data-form-command="preview"'+(!classes.length?' disabled':''),true)+'</div></details></section>';
 }
 function renderFormRecords(mode){
  const allRecords=state.forms.records,returns=allRecords.filter(r=>r.kind==='announcement').slice().reverse();

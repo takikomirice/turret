@@ -677,14 +677,15 @@ test('step and panel navigation starts content at the top while preserving draft
 });
 
 
-test('roster and later source mapping have independent progress while both gate automation',()=>{
+test('roster and form mapping have independent progress while both gate automation',()=>{
  const c=interactiveModel();
  vm.runInContext("state.data.mappingNeeded=true;state.data.progress.find(p=>p.id==='students').state='pending';",c);
  assert.equal(vm.runInContext("visibleProgress('classes').state",c),'pending');
  assert.equal(vm.runInContext('automationReady()',c),false);
  vm.runInContext("state.data.progress.find(p=>p.id==='students').state='complete';state.data.progress.find(p=>p.id==='mapping').state='attention';",c);
  assert.equal(vm.runInContext("visibleProgress('classes').state",c),'complete');
- assert.equal(vm.runInContext("visibleProgress('sources').state",c),'attention');
+ assert.equal(vm.runInContext("visibleProgress('sources').state",c),'complete');
+ assert.equal(vm.runInContext("visibleProgress('forms').state",c),'attention');
  assert.equal(vm.runInContext('automationReady()',c),false);
 });
 
@@ -694,14 +695,13 @@ test('mapping follows form creation and source registration rather than roster r
  assert.match(markup,/data-action="students"/);
  assert.doesNotMatch(markup,/回答シートとクラスの対応表/);
  markup=vm.runInContext("renderStep('sources')",c);
- assert.match(markup,/data-step="forms"/);
  assert.doesNotMatch(markup,/data-action="mapping"/);
+ markup=vm.runInContext("renderStep('forms')",c);
+ assert.match(markup,/data-action="mapping" disabled/);
  vm.runInContext("state.data.config.formSources=[{url:'test'}];state.data.config.formSheetNamePrefix=['回答'];",c);
- markup=vm.runInContext("renderStep('sources')",c);
+ markup=vm.runInContext("renderStep('forms')",c);
  assert.match(markup,/data-action="mapping"/);
- assert.match(markup,/<details class="card"><summary>回答シート/);
- vm.runInContext('state.data.mappingNeeded=true;',c);
- assert.match(vm.runInContext("renderStep('sources')",c),/<details class="card" open>/);
+ assert.doesNotMatch(markup,/data-action="mapping" disabled/);
 });
 
 test('form preparation and Classroom publishing render distinct actions and retain an existing-source route',()=>{
@@ -709,7 +709,7 @@ test('form preparation and Classroom publishing render distinct actions and reta
  vm.runInContext("state.forms={classes:[],defaults:{},records:[{id:'f1',kind:'form',stage:'registered',label:'A',materialTitle:'資料'},{id:'f2',kind:'form',stage:'pending',label:'B'}]};",c);
  const forms=vm.runInContext("renderStep('forms')",c),publish=vm.runInContext("renderStep('publish')",c);
  assert.match(forms,/data-form-command="create-template"/);assert.match(forms,/data-form-command="prepare"/);
- assert.doesNotMatch(forms,/data-form-command="publish"/);assert.match(forms,/通知先と対応表へ/);
+ assert.doesNotMatch(forms,/data-form-command="publish"/);assert.match(forms,/対応表シートへ/);assert.doesNotMatch(forms,/通知先と対応表へ/);
  assert.match(publish,/<option value="publish">/);assert.doesNotMatch(publish,/id="form-templateId"/);
  assert.match(publish,/<option value="prepare-form">/);
 });

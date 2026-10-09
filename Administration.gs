@@ -921,13 +921,7 @@ function registerManagedSource_(r) {
   if (!config.formSources.some(function(s){return s.id===ss.getId();})) config.formSources.push({id:ss.getId(),url:'https://docs.google.com/spreadsheets/d/'+ss.getId()+'/edit',courseId:''});
   if (!config.formSheetNamePrefix.includes(r.input.prefix)) config.formSheetNamePrefix.push(r.input.prefix);
   applyConfigDraft_(config,getConfigRevision_(getConfig_()));
-  const mapping=ensureSheet_(MAPPING_SHEET_NAME,MAPPING_SHEET_HEADERS);
-  if (!hasMatchingHeaders_(mapping,MAPPING_SHEET_HEADERS)) throw new Error('対応表の見出しを確認してください。');
-  const rows=adminSheetValues_(mapping),found=[];
-  rows.slice(1).forEach(function(row,i){if(row[0]===ss.getId()&&row[2]===r.sheetName)found.push(i+2);});
-  if(found.length>1)throw new Error('対応表が重複しています。');
-  const values=[ss.getId(),ss.getName(),r.sheetName,r.className,r.courseId,'turret作成'];
-  mapping.getRange(found[0]||mapping.getLastRow()+1,1,1,6).setValues([values.map(managedLiteral_)]);
+  updateMappingSheet_([[ss.getId(),ss.getName(),r.sheetName,r.className,r.courseId,'turret作成']]);
 }
 
 function managedLiteral_(value) { return /^[=+\-@]/.test(String(value)) ? "'"+value : value; }

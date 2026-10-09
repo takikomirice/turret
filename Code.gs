@@ -2608,7 +2608,7 @@ function readMappingEntries_(strict) {
   ['元SS_ID', '元シート名', 'クラス名', 'courseId', 'メモ'].forEach(function(header) {
     if (!(header in headerMap)) {
       if (!strict) return;
-      throw new Error('対応表シートのヘッダが不正です。設定の「回答先と通知先」で対応表を確認してください。');
+      throw new Error('対応表シートのヘッダが不正です。設定の「フォームを準備」で対応表を確認してください。');
     }
   });
   if (!('元SS_ID' in headerMap) || !('元シート名' in headerMap) || !('クラス名' in headerMap) || !('courseId' in headerMap) || !('メモ' in headerMap)) {
@@ -2637,67 +2637,98 @@ function createMappingSheet() {
 }
 
 function createMappingSheetUnlocked_() {
-  const config = getConfig_();
-  const classRecords = getSelectedClassRecords_();
-  const targetSheets = collectFormTargetSheets_(config);
-  const existingMap = readMappingEntries_(false);
+  const targets = collectFormTargetSheets_(getConfig_());
+  const count = updateMappingSheet_(targets.map(function(item) {
+    return [item.sourceId, item.spreadsheetName, item.sheetName, '', '', ''];
+  }));
+  return '対応表を更新しました（' + count + '件）。既存の割り当てとメモは保持しています。';
+}
 
-  const classNameSet = {};
-  classRecords.forEach(function(item) {
-    const className = String(item.className || '').trim();
-    if (!className) return;
-    if (classNameSet[className]) {
-      throw new Error('同期対象クラスに同名のクラス名があります。対応表のドロップダウンに使うため、クラス名が重複しない状態で実行してください: ' + className);
-    }
-    classNameSet[className] = true;
+/** フォーム登録と手動更新で共用する。呼び出し元はアプリのロックを保持する。 */
+function updateMappingSheet_(additions) {
+  const ss = getAppSpreadsheet_(), existing = ss.getSheetByName(MAPPING_SHEET_NAME);
+  if (existing && existing.getLastRow() && !hasMatchingHeaders_(existing, MAPPING_SHEET_HEADERS)) {
+    throw new Error('対応表の見出しを確認してください。設定の「フォームを準備」から対応表シートを開けます。');
+  }
+  const oldCount = existing ? Math.max(0, existing.getLastRow() - 1) : 0;
+  const rows = oldCount ? existing.getRange(2, 1, oldCount, 6).getDisplayValues() : [];
+  const keys = new Set();
+  rows.forEach(function(row) {
+    if (!row[0] || !row[2]) return;
+    const key = makeMappingLookupKey_(row[0], row[2]);
+    if (keys.has(key)) throw new Error('対応表が重複しています。同じ回答シートの行を1行に整理してください。');
+    keys.add(key);
+  });
+  additions.forEach(function(row) {
+    const key = makeMappingLookupKey_(row[0], row[2]);
+    if (!keys.has(key)) { rows.push(row.slice()); keys.add(key); }
   });
 
-  const ss = getAppSpreadsheet_();
-  let sheet = ss.getSheetByName(MAPPING_SHEET_NAME);
-  if (!sheet) {
-    sheet = ss.insertSheet(MAPPING_SHEET_NAME);
-  } else {
-    const lastRow = Math.max(sheet.getLastRow(), 1);
-    const lastCol = Math.max(sheet.getLastColumn(), MAPPING_SHEET_HEADERS.length);
-    sheet.getRange(1, 1, lastRow, lastCol).clearDataValidations();
-    sheet.clear();
-  }
-
-  const rows = [MAPPING_SHEET_HEADERS];
-  targetSheets.forEach(function(item) {
-    const existing = existingMap.get(makeMappingLookupKey_(item.sourceId, item.sheetName)) || {};
-    rows.push([
-      item.sourceId,
-      item.spreadsheetName,
-      item.sheetName,
-      existing.className || '',
-      '',
-      existing.note || ''
-    ]);
+  const classes = getSelectedClassRecords_().map(function(c) { return {className:c.className, courseId:c.courseId}; });
+  const byId = new Map();
+  classes.forEach(function(c) {
+    if (!c.className || byId.has(c.courseId)) throw new Error('クラス一覧の名前の空欄・コースIDの重複を確認してください。');
+    byId.set(c.courseId,c);
   });
-
-  sheet.getRange(1, 1, rows.length, MAPPING_SHEET_HEADERS.length).setValues(rows);
-  sheet.setFrozenRows(1);
-  sheet.autoResizeColumns(1, MAPPING_SHEET_HEADERS.length);
-
-  const numRows = rows.length - 1;
-  if (numRows > 0) {
-    const classNames = classRecords.map(function(item) { return item.className; });
-    const validation = SpreadsheetApp.newDataValidation()
-      .requireValueInList(classNames, true)
-      .setAllowInvalid(false)
-      .build();
-    sheet.getRange(2, 4, numRows, 1).setDataValidation(validation);
-
-    const formulas = [];
-    for (let i = 0; i < numRows; i++) {
-      const rowNum = i + 2;
-      formulas.push([buildCourseIdFormulaForRow_(rowNum, classRecords)]);
+  // 同期対象から外したクラスも、既存の割り当てがある間は選択肢と式に残す。
+  rows.forEach(function(row) {
+    const name = String(row[3] || '').trim(), id = String(row[4] || '').trim();
+    if (name && id && !byId.has(id)) {
+      const c = {className:name,courseId:id}; classes.push(c); byId.set(id,c);
     }
-    sheet.getRange(2, 5, numRows, 1).setFormulas(formulas);
+  });
+  const counts = new Map(), used = new Set(classes.map(function(c) { return c.className; }));
+  classes.forEach(function(c) { counts.set(c.className,(counts.get(c.className)||0)+1); });
+  const options = classes.map(function(c) {
+    let label = c.className;
+    if (counts.get(label) > 1) {
+      do { label += '（ID: ' + c.courseId + '）'; } while (used.has(label));
+    }
+    used.add(label);
+    return {className:label,courseId:c.courseId,name:c.className};
+  });
+  const assignments = rows.map(function(row, i) {
+    const name = String(row[3] || '').trim(), id = String(row[4] || '').trim();
+    if (!name) return ['', buildCourseIdFormulaForRow_(i+2,options)];
+    const candidates = options.filter(function(c) { return c.className===name || c.name===name; });
+    // 既存の送信先IDを優先する。改名後に別クラスが旧名を使っても送信先を変えない。
+    const match = options.find(function(c) { return c.courseId===id; }) || (candidates.length===1 ? candidates[0] : null);
+    if (!match) throw new Error('対応表の'+(i+2)+'行目のクラスを特定できません。同名クラスはコースIDを確認してください。');
+    return [mappingLiteral_(match.className),buildCourseIdFormulaForRow_(i+2,options)];
+  });
+  const validation = SpreadsheetApp.newDataValidation().requireValueInList(options.map(function(c) {return c.className;}),true).setAllowInvalid(false).build();
+  // 更新対象だけを保存し、途中失敗では数式と入力規則も元へ戻す。
+  const oldRange = oldCount ? existing.getRange(2,4,oldCount,2) : null;
+  const oldValues = oldRange ? oldRange.getValues() : [], oldFormulas = oldRange ? oldRange.getFormulas() : [];
+  const oldRules = oldRange ? oldRange.getDataValidations() : [];
+  const restoreValues = oldValues.map(function(row,i) {return row.map(function(v,j) {return oldFormulas[i][j] || mappingLiteral_(v);});});
+  let sheet = existing;
+  try {
+    sheet = ensureSheet_(MAPPING_SHEET_NAME,MAPPING_SHEET_HEADERS);
+    if (rows.length+1 > sheet.getMaxRows()) sheet.insertRowsAfter(sheet.getMaxRows(),rows.length+1-sheet.getMaxRows());
+    if (rows.length > oldCount) sheet.getRange(oldCount+2,1,rows.length-oldCount,6).setValues(rows.slice(oldCount).map(function(row) {return row.map(mappingLiteral_);}));
+    if (rows.length) {
+      sheet.getRange(2,4,rows.length,1).setDataValidation(validation);
+      sheet.getRange(2,4,rows.length,2).setValues(assignments);
+    }
+    sheet.setFrozenRows(1);
+    SpreadsheetApp.flush();
+  } catch (error) {
+    try {
+      if (!existing && sheet) ss.deleteSheet(sheet);
+      else if (sheet) {
+        if (rows.length>oldCount) sheet.getRange(oldCount+2,1,rows.length-oldCount,6).clearContent().clearDataValidations();
+        if (oldRange) { oldRange.setDataValidations(oldRules); oldRange.setValues(restoreValues); }
+        SpreadsheetApp.flush();
+      }
+    } catch (rollbackError) { throw new Error('対応表の更新と復旧に失敗しました。対応表を確認してください。'+error+' / '+rollbackError); }
+    throw error;
   }
+  return rows.length;
+}
 
-  return '対応表シートを作成/更新しました（' + targetSheets.length + '件）';
+function mappingLiteral_(value) {
+  return typeof value==='string' && /^[=+\-@]/.test(value) ? "'"+value : value;
 }
 
 function appendRows_(sheet, rows) {

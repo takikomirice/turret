@@ -306,8 +306,8 @@ test('multiple custom columns use independent optional dropdowns and preserve ex
  const insert=e.ss.insertSheet;e.ss.insertSheet=name=>{const sheet=insert(name),getRange=sheet.getRange.bind(sheet);sheet.getRange=(...args)=>{const range=getRange(...args);range.setDataValidation=rule=>{validations.push({args,rule});return range;};return range;};return sheet;};
  const old=plain(e.c.getConfig_().fields[0]);const [r]=e.begin();e.c.prepareFormTarget(r.id,r.revision);
  assert.deepEqual(e.sheets.get('回答 1-1').rows[0],['メール','質問','名前','点数','思考','補足','管理','状態']);
- assert.deepEqual(validations.map(v=>v.args[1]),[4,5]);
- assert.deepEqual(validations.map(v=>v.rule),[['1','2','3'],['A','B','C']]);
+ assert.deepEqual(validations.map(v=>v.args[1]),[4,5,4]);
+ assert.deepEqual(validations.map(v=>v.rule),[['1','2','3'],['A','B','C'],['テストクラス']]);
  const config=e.c.getConfig_();assert.deepEqual(plain(config.fields[0]),old);
  assert.deepEqual(plain(config.fields.map(f=>f.sourceHeader)),['点数','思考','補足']);
  assert.equal(config.scoreSourceHeader,'点数');
