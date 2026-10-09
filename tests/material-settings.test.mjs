@@ -25,6 +25,23 @@ test('saving only the posting title and an empty message preserves form settings
  assert.equal(r.materialTitle,'1A 新しい資料');assert.equal(r.input.description,'');assert.equal(r.title,'フォーム');
  assert.equal(e.posts.get(id).title,'1A 新しい資料');assert.equal(e.posts.get(id).description,'');assert.equal(e.posts.get(id).scheduledTime,'2026-10-02T01:00:00.000Z');
 });
+
+for(const action of ['publish','schedule'])test('plain posting titles can be saved, posted and updated without changing identity: '+action,()=>{
+ const e=environment();e.save({materialTitlePattern:'授業の振り返り'});
+ e.run(action,action==='schedule'?{scheduledTime:'2026-10-02T01:00:00Z'}:{});
+ const before=e.read(),postBefore={...e.posts.get(before.materialId)};
+ assert.equal(postBefore.title,'授業の振り返り');assert.equal(e.calls.find(c=>c[0]==='create')[2],'100');
+ const after=e.save({materialTitlePattern:'今週の振り返り'}),post=e.posts.get(after.materialId);
+ assert.equal(after.materialTitle,'今週の振り返り');assert.equal(after.materialId,before.materialId);assert.equal(after.title,before.title);
+ assert.equal(post.title,'今週の振り返り');assert.equal(post.state,postBefore.state);assert.equal(post.scheduledTime,postBefore.scheduledTime);
+ assert.equal(e.calls.filter(c=>c[0]==='create').length,1);
+});
+
+test('posting-title validation still rejects empty and oversized titles before writing',()=>{
+ const e=environment(),before=JSON.stringify(e.read());
+ for(const title of ['', '   ', 'あ'.repeat(151)])assert.throws(()=>e.save({materialTitlePattern:title}),/タイトル|入力/);
+ assert.equal(JSON.stringify(e.read()),before);assert.equal(e.calls.length,0);
+});
 test('failed saves remain unconfirmed and a lost response resumes without creating another post',()=>{
  const e=environment(),sheet=e.sheets.get('システム管理');sheet.beforeWrite=()=>{throw Error('storage failed');};
  assert.throws(()=>e.save(),/storage failed/);sheet.beforeWrite=null;assert.equal(e.read().materialSettingsSaved,false);

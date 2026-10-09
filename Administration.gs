@@ -554,7 +554,7 @@ function normalizeFormSetup_(raw) {
     input[key] = String(raw[key] || '').trim();
     if ((!input[key] && key !== 'description') || input[key].length > (key === 'description' ? 5000 : 150)) throw new Error('入力を確認してください: ' + key);
   });
-  if (![input.titlePattern, input.materialTitlePattern].every(function(title) { return title.includes('{class_label}') || title.includes('{class}'); })) throw new Error('タイトルに {class_label} を含めてください。');
+  if (!/\{class(?:_label)?\}/.test(input.titlePattern)) throw new Error('フォーム名に {class_label} を含めてください。');
   if (legacy) input.gradeChoices = normalizeManagedChoices_(String(raw.gradeChoices || '').split(/[\s,、]+/));
   else input.additionalColumns = normalizeManagedColumns_(raw.additionalColumns === undefined ? [] : raw.additionalColumns);
   const headers = [input.emailHeader,input.nameHeader,input.statusHeader,SCORING_MANAGEMENT_HEADER].concat(managedCustomColumns_(input).map(function(c) { return c.header; }));
@@ -1015,7 +1015,7 @@ function managedSettingsPlan_(r, changes) {
   function change(label,before,after){if(before!==after)result.changes.push(label+'：'+(before||'（空欄）')+' → '+(after||'（空欄）'));}
   keys.filter(function(k){return k!=='labels'&&k!=='topicChange';}).forEach(function(k){
     if(typeof changes[k]!=='string' || changes[k].length>(k==='description'?5000:k==='domains'||k==='emails'?5000:150))throw new Error('入力を確認してください：'+k);
-    if(['titlePattern','materialTitlePattern'].includes(k) && !/\{class(?:_label)?\}/.test(changes[k]))throw new Error('タイトルに {class_label} を含めてください。');
+    if(k==='titlePattern' && !/\{class(?:_label)?\}/.test(changes[k]))throw new Error('フォーム名に {class_label} を含めてください。');
     if(!['domains','emails'].includes(k)){
       const value=k==='topicName'?managedTopicName_(changes[k]):changes[k].trim();
       // 旧画面が送る空欄・古い値では、Classroom 側の手動設定を変更しない。

@@ -285,6 +285,16 @@ test('domain input accepts the school email suffix without an at sign',()=>{
  e.raw.domains='@example.com';assert.throws(()=>e.c.normalizeFormSetup_(e.raw),/回答者/);
 });
 
+test('creation accepts a plain posting title while retaining form-name and posting-title validation',()=>{
+ const e=provisioningEnv();e.raw.materialTitlePattern='授業の振り返り';
+ assert.equal(e.preview().targets[0].materialTitle,'授業の振り返り');
+ for(const title of ['', '   ', 'あ'.repeat(151)]){
+  e.raw.materialTitlePattern=title;assert.throws(()=>e.preview(),/materialTitlePattern/);
+ }
+ e.raw.materialTitlePattern='授業の振り返り';e.raw.titlePattern='クラス表記なし';
+ assert.throws(()=>e.preview(),/class_label/);assert.equal(e.calls.copies,0);
+});
+
 function flexibleInput(e, columns=[]){
  delete e.raw.gradeHeader;delete e.raw.commentHeader;delete e.raw.gradeChoices;
  e.raw.additionalColumns=columns;

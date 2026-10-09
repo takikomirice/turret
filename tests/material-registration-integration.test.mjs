@@ -26,6 +26,14 @@ test('aggregate registration persists individual dates without posting, opening 
  assert.equal(vm.runInContext("scheduleDraftValue('publish:f1',publishingSettings(savedRecord).scheduledTime)",e.ui),'2026-10-05T10:00');
 });
 
+test('bulk registration accepts a title without a class placeholder from the real UI',async()=>{
+ const e=environment();vm.runInContext("state.batchMaterialDraft.materialTitlePattern='全クラス共通の振り返り';",e.ui);
+ await vm.runInContext("formCommand('register-all')",e.ui);
+ assert.equal(e.read().materialTitle,'全クラス共通の振り返り');
+ assert.equal(e.read().materialSettingsBaseline.materialTitlePattern,'全クラス共通の振り返り');
+ assert.equal(e.read().input.titlePattern,'{class_label} フォーム');assert.equal(e.posts.size,0);
+});
+
 for(const action of ['schedule-all','set-close-all'])test(`${action} saves only its date and does not activate either reservation`,async()=>{
  const e=environment();await vm.runInContext(`formCommand('${action}')`,e.ui);
  assert.equal(e.posts.size,0);assert.equal(e.form.published,false);assert.equal(e.triggers.length,0);
