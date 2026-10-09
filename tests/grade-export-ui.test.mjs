@@ -124,3 +124,25 @@ test('date candidates prefer nearby lessons from the selected class only',()=>{
  const e=client();e.g.course='a';e.g.profile.base.mapping={a:'授業A',b:'授業B'};e.g.profile.calendar=[{title:'授業B',date:'2026-09-25'},{title:'授業A',date:'2026-09-28'},{title:'授業A',date:'2026-09-24'}];
  assert.deepEqual(plain(e.c.gradeDateCandidates('2026-09-25')),['2026-09-24','2026-09-28']);
 });
+
+test('grade period and correction inputs display weekdays while preserving date-only values',()=>{
+ const e=client();e.g.profile.base.start='2026-10-09';e.g.profile.base.end='2026-10-15';
+ let html=e.c.renderGrades();
+ assert.match(html,/type="text"[^>]*value="2026\/10\/09（金）"/);assert.match(html,/type="text"[^>]*value="2026\/10\/15（木）"/);
+ assert.match(html,/id="gradeStart"[^>]*value="2026-10-09"/);assert.match(html,/id="gradeEnd"[^>]*value="2026-10-15"/);
+ html=e.c.gradeRuleControls('r0','2026-10-09');assert.match(html,/type="text"[^>]*value="2026\/10\/09（金）"/);
+});
+
+test('choosing a correction candidate refreshes its displayed weekday without changing the saved date format',async()=>{
+ const e=client(),native=e.element('gradeDate0',''),display=e.element('date-display-gradeDate0','');native.type='date';native.dataset.dateNative='true';e.element('gradeMode0','extra');
+ await e.c.gradeChange({target:{dataset:{gradeCandidate:'0'},value:'2026-10-09'}});
+ assert.equal(native.value,'2026-10-09');assert.equal(display.value,'2026/10/09（金）');
+});
+
+test('an invalid visible grade date blocks navigation and cannot save the previous date silently',async()=>{
+ const e=client(),native=e.element('gradeStart','2026-10-09'),display=e.element('date-display-gradeStart','2026/02/30');
+ native.type='date';display.dataset.dateInput='gradeStart';display.focus=()=>{};
+ e.c.syncDateInput(display,true);const before=plain(e.g.profile);
+ await assert.rejects(e.c.gradeAction('next',{}),/日付|日時/);
+ assert.equal(e.g.step,1);assert.deepEqual(plain(e.g.profile),before);assert.equal(e.calls.length,0);
+});

@@ -34,6 +34,17 @@ test('bulk registration accepts a title without a class placeholder from the rea
  assert.equal(e.read().input.titlePattern,'{class_label} フォーム');assert.equal(e.posts.size,0);
 });
 
+test('an invalid visible date cannot register a previously valid hidden date',async()=>{
+ const e=environment(),before=JSON.stringify(e.read());
+ const native={id:'schedule-batch:publish',type:'datetime-local',value:'2026-10-05T10:00',dataset:{dateNative:'true',scheduleKey:'batch:publish'}};
+ const display={id:'date-display-schedule-batch:publish',value:'2026/02/30 10:00',dataset:{dateInput:native.id},focus(){}};
+ e.ui.document.getElementById=id=>id===native.id?native:id===display.id?display:null;
+ e.ui.syncDateInput(display,true);
+ await assert.rejects(vm.runInContext("formCommand('register-all')",e.ui),/日付|日時/);
+ assert.equal(JSON.stringify(e.read()),before);assert.equal(e.posts.size,0);
+ assert.equal(native.value,'2026-10-05T10:00');assert.equal(display.value,'2026/02/30 10:00');
+});
+
 for(const action of ['schedule-all','set-close-all'])test(`${action} saves only its date and does not activate either reservation`,async()=>{
  const e=environment();await vm.runInContext(`formCommand('${action}')`,e.ui);
  assert.equal(e.posts.size,0);assert.equal(e.form.published,false);assert.equal(e.triggers.length,0);

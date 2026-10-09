@@ -41,6 +41,7 @@ h3{font-size:16px}
 p+p{margin-top:8px}
 .muted,.help{color:var(--muted)}
 .help{font-size:12px;margin-top:6px;line-height:1.65}
+.date-input{position:relative;display:block;min-width:0;width:100%}.date-input>input[type=text]{width:100%;padding-right:48px}.date-picker{position:absolute;right:3px;top:3px;bottom:3px;width:38px;display:flex;align-items:center;justify-content:center;border-radius:5px}.date-picker svg{width:18px;height:18px;pointer-events:none}.date-input .date-picker-native{position:absolute;inset:0;width:100%;height:100%;min-width:0;padding:0;opacity:0;cursor:pointer}.date-picker-native::-webkit-calendar-picker-indicator{position:absolute;inset:0;width:auto;height:auto;padding:0;cursor:pointer}.date-picker:focus-within{outline:2px solid var(--teal);outline-offset:1px}.date-input>input[aria-invalid=true]{border-color:var(--danger,#b42318)}
 .help-heading,.help-label{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .help-heading h2,.help-heading h3,.help-label label{margin:0}
 .help-label{margin-bottom:6px}
@@ -634,6 +635,7 @@ async function command(name,exportKind=state.exportKind){
 }
 async function handleClick(event){
  const b=event.target.closest('button');if(!b||b.disabled||state.busy)return;
+ if(b.dataset.panel||b.dataset.step)assertDateInputsValid();
  if(b.dataset.gradeAction){await task(()=>gradeAction(b.dataset.gradeAction,b));return;}
  if(b.dataset.helpTitle!==undefined){event.preventDefault();if(activeHelp===b&&helpPinned)hideHelp();else{showHelp(b);helpPinned=true;}return;}
  if(b.dataset.formCommand){await formCommand(b.dataset.formCommand,b.dataset.record);return;}
@@ -862,9 +864,57 @@ function scheduleInputPreview(value){
  if(!value)return '未設定';
  try{return scheduleDisplay(scheduleInputToIso(value));}catch(error){return '日時が不正です。';}
 }
+// 標準の日付欄の表示はOS依存のため、曜日を含む表示用テキストとカレンダーの値を分ける。
+const dateInputDrafts={};
+function calendarWeekday(value){
+ if(!/^\d{4}-\d{2}-\d{2}$/.test(value||'')||Number(value.slice(0,4))<1)return '';
+ const date=new Date(value+'T00:00:00Z');
+ return Number.isFinite(date.getTime())&&date.toISOString().slice(0,10)===value?'日月火水木金土'[date.getUTCDay()]:'';
+}
+function dateInputDisplay(value,type){
+ if(!value)return '';
+ if(type==='datetime-local'){try{scheduleInputToIso(value);}catch(error){return value;}}
+ else if(!/^\d{4}-\d{2}-\d{2}$/.test(value))return value;
+ const day=calendarWeekday(value.slice(0,10));if(!day)return value;
+ return value.slice(0,10).replace(/-/g,'/')+'（'+day+'）'+(type==='datetime-local'?' '+value.slice(11,16):'');
+}
+function parseDateInputText(text,type){
+ const value=String(text||'').trim();if(!value)return '';
+ const match=value.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})(?:\s*[（(][日月火水木金土](?:曜日)?[）)])?(?:[ T]+(\d{1,2}):(\d{2}))?$/);
+ if(!match)throw Error('日付は年/月/日、日時は年/月/日 時:分で入力してください。');
+ const date=match[1]+'-'+match[2].padStart(2,'0')+'-'+match[3].padStart(2,'0');
+ if(!calendarWeekday(date)||type==='date'&&match[4]||type==='datetime-local'&&!match[4])throw Error('日付・日時が不正です。');
+ if(type==='date')return date;
+ const local=date+'T'+match[4].padStart(2,'0')+':'+match[5];scheduleInputToIso(local);return local;
+}
+function dateInputControl(id,type,value,label,attrs='',description=''){
+ const draft=dateInputDrafts[id],text=draft&&draft.value===value?draft.text:dateInputDisplay(value,type);
+ if(draft&&draft.value!==value)delete dateInputDrafts[id];
+ const described=description?' aria-describedby="'+esc(description)+'"':'';
+ return '<span class="date-input"><input type="text" id="date-display-'+esc(id)+'" data-date-input="'+esc(id)+'" value="'+esc(text)+'" placeholder="'+(type==='date'?'年/月/日':'年/月/日 時:分')+'" aria-label="'+esc(label)+'"'+described+(dateInputDrafts[id]?.invalid?' aria-invalid="true"':'')+' autocomplete="off"><span class="date-picker"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4m8-4v4M4 10h16"/></svg><input type="'+type+'" id="'+esc(id)+'" class="date-picker-native" data-date-native="true" value="'+esc(value)+'" aria-label="'+esc(label)+'をカレンダーで選択"'+described+' '+attrs+'></span></span>';
+}
+function syncDateInput(target,commit=false){
+ const id=target.dataset?.dateInput,native=id?$(id):target;
+ if(!native||!id&&!native.dataset?.dateNative)return target;
+ const display=$('date-display-'+native.id);if(!display)return native;
+ if(id){
+  try{
+   native.value=parseDateInputText(display.value,native.type);display.setCustomValidity?.('');display.removeAttribute?.('aria-invalid');
+   if(commit){display.value=dateInputDisplay(native.value,native.type);delete dateInputDrafts[native.id];}
+   else dateInputDrafts[native.id]={value:native.value,text:display.value};
+  }catch(error){display.setCustomValidity?.(error.message);display.setAttribute?.('aria-invalid','true');dateInputDrafts[native.id]={value:native.value,text:display.value,invalid:true};}
+ }else{display.value=dateInputDisplay(native.value,native.type);display.setCustomValidity?.('');display.removeAttribute?.('aria-invalid');delete dateInputDrafts[native.id];}
+ return native;
+}
+function assertDateInputsValid(){
+ Object.keys(dateInputDrafts).forEach(id=>{
+  const display=$('date-display-'+id),native=$(id);if(!display||!native)return;
+  try{parseDateInputText(display.value,native.type);}catch(error){display.setCustomValidity?.(error.message);display.reportValidity?.();display.focus();throw error;}
+ });
+}
 function updateScheduleInputPreview(input){
  if(!input.dataset?.scheduleKey)return;
- const preview=$('schedule-preview-'+input.dataset.scheduleKey);if(preview)preview.textContent=scheduleInputPreview(input.value);
+ const preview=$('schedule-preview-'+input.dataset.scheduleKey);if(preview)preview.textContent=dateInputDrafts[input.id]?.invalid?'日時が不正です。':scheduleInputPreview(input.value);
 }
 function readScheduleDrafts(){
  state.scheduleDrafts=state.scheduleDrafts||{};
@@ -877,7 +927,7 @@ function readScheduleDrafts(){
 }
 function scheduleInput(key,label,saved){
  const draft=state.scheduleDrafts||{},value=Object.prototype.hasOwnProperty.call(draft,key)?draft[key]:scheduleIsoToInput(saved);
- return '<label for="schedule-'+esc(key)+'">'+esc(label)+'（日本時間）</label><input type="datetime-local" id="schedule-'+esc(key)+'" data-schedule-key="'+esc(key)+'" data-schedule-saved="'+esc(scheduleIsoToInput(saved))+'" value="'+esc(value)+'" aria-describedby="schedule-preview-'+esc(key)+'"><p class="help" id="schedule-preview-'+esc(key)+'" aria-live="polite" aria-atomic="true">'+esc(scheduleInputPreview(value))+'</p>';
+ return '<label for="date-display-schedule-'+esc(key)+'">'+esc(label)+'（日本時間）</label>'+dateInputControl('schedule-'+key,'datetime-local',value,label+'（日本時間）','data-schedule-key="'+esc(key)+'" data-schedule-saved="'+esc(scheduleIsoToInput(saved))+'"','schedule-preview-'+key)+'<p class="help" id="schedule-preview-'+esc(key)+'" aria-live="polite" aria-atomic="true">'+esc(scheduleInputPreview(value))+'</p>';
 }
 function scheduleDraftValue(key,saved){const drafts=state.scheduleDrafts||{};return Object.prototype.hasOwnProperty.call(drafts,key)?drafts[key]:scheduleIsoToInput(saved);}
 function publishingSettings(r){return r.publishingSettings||{scheduledTime:r.scheduledTime||'',closesAt:r.closesAt||''};}
@@ -912,7 +962,7 @@ function acceptScheduleResult(id,action,record){
  const material=['publish','schedule','reschedule','cancel-schedule'].includes(action),deadline=['set-close','cancel-close'].includes(action);
  if(!material&&!deadline)return;
  const key=(material?'publish:':'close:')+id,value=scheduleIsoToInput(record[material?'scheduledTime':'closesAt']);
- delete (state.scheduleDrafts||{})[key];const el=$('schedule-'+key);if(el){el.value=value;el.dataset.scheduleSaved=value;updateScheduleInputPreview(el);}
+ delete (state.scheduleDrafts||{})[key];const el=$('schedule-'+key);if(el){el.value=value;el.dataset.scheduleSaved=value;syncDateInput(el);updateScheduleInputPreview(el);}
  delete (state.scheduleDraftRevisions||{})[key];
 }
 function renderScheduleControls(r){
@@ -1103,6 +1153,7 @@ async function registerAllPublishingSettings(){
 }
 async function formCommand(action,id,registration){
  if(state.registrationPending&&!registration)return;
+ assertDateInputsValid();
  if(action==='reload-topics'){readCurrent();await task(async()=>{await refreshMaterialTopics();render();});return;}
   if(action==='register-all'){await registerAllPublishingSettings();return;}
   if(action==='reload-publishing-dates'){
@@ -1424,13 +1475,13 @@ function gradeReadInputs(){
 }
 function renderGradeResponse(r){return '<details><summary>'+esc(r.email+' / '+r.source+' / 提出 '+(r.submitted||'不明'))+'</summary><dl>'+Object.keys(r.fields).map(k=>'<dt>'+esc(k)+'</dt><dd style="white-space:pre-wrap">'+esc(r.fields[k])+'</dd>').join('')+'</dl></details>';}
 function gradeDateCandidates(date){const p=gradeUI.profile,title=p.base.mapping[gradeUI.course];return [...new Set(p.calendar.filter(e=>e.title===title).map(e=>e.date))].sort((a,b)=>date?(Math.abs(Date.parse(a)-Date.parse(date))-Math.abs(Date.parse(b)-Date.parse(date))||a.localeCompare(b)):a.localeCompare(b)).slice(0,8);}
-function gradeRuleControls(id,date){const candidates=gradeDateCandidates(date);return (candidates.length?'<label>近い授業日の候補'+gradeSelect('gradeCandidate'+id,[{value:'',label:'候補から選ぶ（任意）'}].concat(candidates.map(d=>({value:d,label:d}))), '','data-grade-candidate="'+id+'"')+'</label>':'')+gradeSelect('gradeMode'+id,[{value:'planned',label:'予定内にする／日付を補正'},{value:'extra',label:'予定外として右端に残す'}],'planned')+'<label>出力に使う日付<input type="date" id="gradeDate'+id+'" value="'+esc(date||'')+'"></label>';}
+function gradeRuleControls(id,date){const candidates=gradeDateCandidates(date);return (candidates.length?'<label>近い授業日の候補'+gradeSelect('gradeCandidate'+id,[{value:'',label:'候補から選ぶ（任意）'}].concat(candidates.map(d=>({value:d,label:d}))), '','data-grade-candidate="'+id+'"')+'</label>':'')+gradeSelect('gradeMode'+id,[{value:'planned',label:'予定内にする／日付を補正'},{value:'extra',label:'予定外として右端に残す'}],'planned')+'<label>出力に使う日付'+dateInputControl('gradeDate'+id,'date',date||'','出力に使う日付')+'</label>';}
 function renderGrades(){
  if(!gradeUI.loaded)return '<div class="card"><h2>成績出力</h2><p>'+(gradeUI.loading?'設定と名簿を読み込んでいます…':'出力条件と保存済みプリセットを読み込みます。')+'</p>'+gradeButton('読み込み','reload')+'</div>';
  const g=gradeUI,p=g.profile,b=p.base,classes=gradeSelectedClasses();if(!classes.some(c=>c.id===g.course))g.course=classes[0]?.id||'';
  let html='<div class="card"><h2>成績出力</h2><p>クラスごとのCSVを直接出力します。未回答は空欄です。元の回答・採点・返却判断は変更しません。</p><div class="grade-toolbar">'+gradeSelect('gradePreset',[{value:'',label:'プリセットを選択'}].concat(g.store.value.presets.map(x=>({value:x.id,label:x.name}))),g.preset)+gradeButton('呼び出す','load-preset')+'<input id="gradePresetName" aria-label="プリセット名" placeholder="プリセット名" value="'+esc(g.store.value.presets.find(x=>x.id===g.preset)?.name||'')+'">'+gradeButton('保存','save-preset')+gradeButton('別名保存','save-as')+gradeButton('削除','delete-preset')+'</div><label class="check-line"><input type="checkbox" id="gradeRemember"'+(g.remember?' checked':'')+'>対象クラス・期間もプリセットに含める</label><div class="grade-toolbar">'+gradeButton('下書きを保存','save-draft')+gradeButton('保存済みを再読み込み','reload')+'<span id="gradeDraftStatus">'+(g.dirty?'下書き保存待ち':'下書き保存済み')+'</span></div><details><summary>成績出力設定のJSON入出力</summary><div class="grade-toolbar">'+gradeSelect('gradeJsonKind',gradeKinds.map(x=>({value:x.kind,label:x.title})),'grade-all')+gradeButton('JSONを書き出す','export-json')+'<label>JSONを読み込む<input type="file" accept=".json,application/json" data-profile-kind="auto"></label></div>'+(state.profile?'<pre>'+esc(profileSummary(state.profile.inspection))+'</pre>'+renderGradeConflicts()+button('確認した設定を適用','data-command="apply-profile"'):'')+'</details></div>';
  html+='<nav class="grade-steps" aria-label="出力の手順">'+['対象','列と並び順','ICSの対応','日付の確認','重複の確認','プレビュー'].map((name,i)=>'<span'+(g.step===i+1?' aria-current="step"':'')+'>'+(i+1)+'. '+name+'</span>').join('')+'</nav><div class="card">';
- if(g.step===1){html+='<h3>対象クラス・期間</h3><p>既定は全クラス・全期間です。生徒一覧の除外(1)が空欄の生徒を含めます。</p>'+gradeButton('全クラス・全期間','all')+'<div class="grade-classes">'+g.data.classes.map(c=>'<label><input type="checkbox" data-grade-class="'+esc(c.id)+'"'+(!b.classIds.length||b.classIds.includes(c.id)?' checked':'')+'>'+esc(c.name)+'（'+c.students.length+'人）</label>').join('')+'</div><div class="grid two"><label>開始日（空欄は制限なし）<input id="gradeStart" type="date" value="'+esc(b.start)+'"></label><label>終了日（空欄は制限なし）<input id="gradeEnd" type="date" value="'+esc(b.end)+'"></label></div>';}
+ if(g.step===1){html+='<h3>対象クラス・期間</h3><p>既定は全クラス・全期間です。生徒一覧の除外(1)が空欄の生徒を含めます。</p>'+gradeButton('全クラス・全期間','all')+'<div class="grade-classes">'+g.data.classes.map(c=>'<label><input type="checkbox" data-grade-class="'+esc(c.id)+'"'+(!b.classIds.length||b.classIds.includes(c.id)?' checked':'')+'>'+esc(c.name)+'（'+c.students.length+'人）</label>').join('')+'</div><div class="grid two"><label>開始日（空欄は制限なし）'+dateInputControl('gradeStart','date',b.start,'開始日（空欄は制限なし）')+'</label><label>終了日（空欄は制限なし）'+dateInputControl('gradeEnd','date',b.end,'終了日（空欄は制限なし）')+'</label></div>';}
  if(g.step===2){const options=[{value:'',label:'列を選択'}].concat(g.data.headers.map(h=>({value:h,label:h})));html+='<h3>列と並び順</h3><p>選択した評価列の値を、そのまま授業日ごとに並べます。</p><div class="grid two"><label>授業日の列'+gradeSelect('gradeDateHeader',options,b.dateHeader)+'</label><label>成績として出す列'+gradeSelect('gradeValueHeader',options,b.valueHeader)+'</label></div><label>生徒の並び順'+gradeSelect('gradeSort',[{value:'name',label:'名前の昇順（数字順に対応）'},{value:'number',label:'出席番号の昇順（空欄は末尾）'},{value:'roster',label:'生徒一覧の掲載順'}],b.sort)+'</label><h4>先頭列（上から順番）</h4>'+b.leading.map((h,i)=>'<div class="grade-toolbar">'+gradeSelect('gradeLeading'+i,gradeOptions(),h,'data-grade-leading="'+i+'"')+gradeButton('↑','up','data-index="'+i+'"')+gradeButton('↓','down','data-index="'+i+'"')+gradeButton('削除','remove-column','data-index="'+i+'"')+'</div>').join('')+gradeButton('列を追加','add-column');}
  if(g.step===3){const titles=[...new Set(p.calendar.map(e=>e.title))].sort();html+='<h3>ICSとクラスの対応</h3><p>ICSは任意です。読み込まなくても出力できます。現在の保存日程：'+p.calendar.length+'件</p><label>ICSファイル<input id="gradeIcs" type="file" accept=".ics,text/calendar"></label><p class="help">個別予定の日本時間・UTCに対応。繰り返し指定は個別予定に展開して書き出してください。</p><table><thead><tr><th>クラス</th><th>対応する授業名</th></tr></thead><tbody>'+classes.map((c,i)=>'<tr><td>'+esc(c.name)+'</td><td>'+gradeSelect('gradeMap'+i,[{value:'',label:'ICSを使わない'}].concat(titles.map(t=>({value:t,label:t}))),b.mapping[c.id]||'','data-grade-mapping="'+esc(c.id)+'"')+'</td></tr>').join('')+'</tbody></table>';}
  if(g.step>=4){html+='<div class="grade-toolbar"><label>確認するクラス'+gradeSelect('gradeCourse',classes.map(c=>({value:c.id,label:c.name})),g.course)+'</label>'+gradeButton('最新データで再確認','analyze')+'</div>';
@@ -1447,7 +1498,7 @@ function renderGrades(){
    }).join('') || '<p>この手順で確認が必要なものはありません。</p>';
    html+='<details><summary>回答ごとに日付を手動修正（正しい日付に見える入力ミスも修正できます）</summary>'+g.result.responses.filter(r=>r.courseId===g.course).map(r=>{const i=g.result.responses.indexOf(r);return '<div class="grade-response">'+renderGradeResponse(r)+gradeRuleControls('r'+i,r.date)+gradeButton('この回答だけに適用','answer-rule','data-index="'+i+'"')+'</div>';}).join('')+'</details>';
    html+='<details><summary>保存済みの補正・採否を確認／取り消す</summary>'+['dates','answers','duplicates','fields','lessons'].map(k=>(p.rules[k]||[]).map((r,i)=>'<div class="grade-toolbar"><code>'+esc(JSON.stringify(r))+'</code>'+gradeButton('取り消す','remove-rule','data-kind="'+k+'" data-index="'+i+'"')+'</div>').join('')).join('')+'</details>';
-   html+='<details><summary>クラス共通の授業回数を設定</summary><label>授業日<input type="date" id="gradeLessonDate"></label><label>授業回数<input type="number" min="1" max="20" value="2" id="gradeLessonCount"></label>'+gradeButton('この日の授業回数を設定','split-day')+'</details>';
+   html+='<details><summary>クラス共通の授業回数を設定</summary><label>授業日'+dateInputControl('gradeLessonDate','date','','授業日')+'</label><label>授業回数<input type="number" min="1" max="20" value="2" id="gradeLessonCount"></label>'+gradeButton('この日の授業回数を設定','split-day')+'</details>';
   }else{const c=g.result.classes.find(c=>c.id===g.course);html+='<h3>出力プレビュー</h3><p>クラス '+g.result.classes.length+'件。未回答は空欄、CSVはUTF-8（BOM付き）。複数クラスはZIPです。</p>'+(issues.length?'<div class="notice">未解決の確認事項があります。前の手順で解決してください。</div>':'')+(c?'<div class="grade-preview"><table><thead><tr>'+c.rows[0].map(v=>'<th>'+esc(v)+'</th>').join('')+'</tr></thead><tbody>'+c.rows.slice(1).map(row=>'<tr>'+row.map(v=>'<td>'+esc(v)+'</td>').join('')+'</tr>').join('')+'</tbody></table></div>':'')+gradeButton('CSVをダウンロード','download',issues.length?'disabled':'')+'<div id="gradeDownloadLink"></div>';}
   }
  }
@@ -1457,6 +1508,7 @@ function renderGradeConflicts(){return (state.profile?.inspection?.conflicts||[]
 function gradePutRule(kind,rule){const list=gradeUI.profile.rules[kind]||(gradeUI.profile.rules[kind]=[]),key=x=>kind==='lessons'?JSON.stringify([x.courseId,x.date]):kind==='dates'?JSON.stringify([x.courseId,x.from]):kind==='answers'?x.id:x.key,index=list.findIndex(x=>key(x)===key(rule));if(index<0)list.push(rule);else list[index]=rule;gradeChanged();}
 async function gradeAnalyze(){await gradePersist();const version=gradeUI.version,profile=copy(gradeUI.profile),result=await rpc('gradePreview',profile);if(version!==gradeUI.version)return;gradeUI.result=result;render();}
 async function gradeAction(action,element){
+ assertDateInputsValid();
  gradeReadInputs();const g=gradeUI;
  if(action==='reload'){if(g.loaded&&g.dirty&&!await confirmAction('保存済みを再読み込み','未保存の入力を破棄します。','読み込む'))return;clearTimeout(g.saveTimer);await g.saveChain.catch(()=>{});await gradeLoad();return;}
  if(!g.loaded)return;
@@ -1481,7 +1533,7 @@ async function gradeAction(action,element){
  await gradeAnalyze();
 }
 async function gradeChange(event){const e=event.target;if(state.panel!=='grades'||!gradeUI.loaded)return;
- if(e.dataset?.gradeCandidate!==undefined){if(e.value){$('gradeDate'+e.dataset.gradeCandidate).value=e.value;$('gradeMode'+e.dataset.gradeCandidate).value='planned';}return;}
+ if(e.dataset?.gradeCandidate!==undefined){if(e.value){$('gradeDate'+e.dataset.gradeCandidate).value=e.value;syncDateInput($('gradeDate'+e.dataset.gradeCandidate));$('gradeMode'+e.dataset.gradeCandidate).value='planned';}return;}
  if(e.id==='gradeIcs'){const file=e.files[0];if(!file)return;if(file.size>2000000)throw Error('ICSは2MB以内で指定してください。');const calendar=await rpc('gradeParseIcs',await file.text());if(!await confirmAction('授業日一覧を読み込む',calendar.length+'件の予定で基準日程を更新します。先生が保存した補正・予定内の判断は保持します。','読み込む'))return;gradeUI.profile.calendar=calendar;gradeChanged();render();return;}
  if(e.id==='gradeCourse'){gradeUI.course=e.value;render();return;}
  if(e.id==='gradePreset'){gradeUI.preset=e.value;render();return;}
@@ -1491,12 +1543,13 @@ async function gradeChange(event){const e=event.target;if(state.panel!=='grades'
 function boot(){
  initHelp();
  document.addEventListener('click',event=>{handleClick(event).catch(error=>status(error.message||String(error),'error'));});
- document.addEventListener('input',event=>{if(event.target.closest('#content')){readCurrent();updateMaterialSettingsControls();updateScheduleInputPreview(event.target);if(event.target.id==='messageTemplate'&&!event.isComposing)scheduleTemplatePreview();}});
+ document.addEventListener('input',event=>{const target=syncDateInput(event.target);if(target.closest('#content')){readCurrent();updateMaterialSettingsControls();updateScheduleInputPreview(target);if(event.target.id==='messageTemplate'&&!event.isComposing)scheduleTemplatePreview();}});
+ document.addEventListener('focusout',event=>{if(event.target.dataset?.dateInput)syncDateInput(event.target,true);});
  document.addEventListener('compositionstart',event=>{if(event.target.id==='messageTemplate'){cancelTemplatePreview();templatePreview.composing=true;updateTemplatePreview();}});
  document.addEventListener('compositionend',event=>{if(event.target.id==='messageTemplate'){templatePreview.composing=false;readCurrent();scheduleTemplatePreview();}});
- document.addEventListener('change',event=>{gradeChange(event).catch(error=>status(error.message,'error'));if(event.target.dataset.profileKind)inspectFile(event.target.files[0],event.target.dataset.profileKind);else if(event.target.id==='configurationExportKind'){state.exportKind=event.target.value;render();}else if(event.target.id==='includeTemplateFormUrl')state.includeTemplateFormUrl=event.target.checked;else if(event.target.id==='includeReminderTo')state.includeReminderTo=event.target.checked;else if(event.target.closest('#content')){readCurrent();updateMaterialSettingsControls();updateScheduleInputPreview(event.target);if(event.target.dataset.fieldProp==='type')render();}});
+ document.addEventListener('change',event=>{const target=syncDateInput(event.target,true);gradeChange({target}).catch(error=>status(error.message,'error'));if(target.dataset.profileKind)inspectFile(target.files[0],target.dataset.profileKind);else if(target.id==='configurationExportKind'){state.exportKind=target.value;render();}else if(target.id==='includeTemplateFormUrl')state.includeTemplateFormUrl=target.checked;else if(target.id==='includeReminderTo')state.includeReminderTo=target.checked;else if(target.closest('#content')){readCurrent();updateMaterialSettingsControls();updateScheduleInputPreview(target);if(target.dataset.fieldProp==='type')render();}});
  $('confirmCheck').addEventListener('change',()=>{$('confirmAccept').disabled=!$('confirmCheck').checked;});
- window.addEventListener('beforeunload',event=>{readFormSettingsDraft();readMaterialSettingsDrafts();readScheduleDrafts();if(dirtySections().length||gradeUI.dirty||Object.keys(formSettingsPatch()).length||(state.forms&&state.forms.records||[]).some(r=>materialSettingsDirty(r)||publishingDatesDirty(r))){event.preventDefault();event.returnValue='';}});
+ window.addEventListener('beforeunload',event=>{readFormSettingsDraft();readMaterialSettingsDrafts();readScheduleDrafts();if(Object.keys(dateInputDrafts).length||dirtySections().length||gradeUI.dirty||Object.keys(formSettingsPatch()).length||(state.forms&&state.forms.records||[]).some(r=>materialSettingsDirty(r)||publishingDatesDirty(r))){event.preventDefault();event.returnValue='';}});
  task(async()=>{state.bootstrap=await rpc('getWebConsoleBootstrap');[['scoringScreenLink',state.bootstrap.scoringUrl],['operationScreenLink',state.bootstrap.url]].forEach(([id,url])=>{const a=$(id);if(a&&url){a.href=url;a.hidden=false;}});if(state.bootstrap.connected){await refresh(true);}else renderWebWelcome();});
 }
 boot();
