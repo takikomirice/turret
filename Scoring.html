@@ -714,7 +714,7 @@ button.help-icon:focus-visible,button.context-help:focus-visible{outline:2px sol
 
 <body>
   <div class="wrap">
-    <nav aria-label="画面の移動" class="scoring-navigation"><strong>turret 採点</strong> <a id="scoringSettingsLink" class="navigation-link" hidden target="_blank" rel="noopener">管理画面</a> <a id="scoringOperationLink" class="navigation-link" hidden target="_blank" rel="noopener">運用スプレッドシート</a> <button id="openRuleBuilder" type="button">採点テンプレ</button> <button id="refreshNamesBtn" type="button" class="btn--xs" disabled title="読み込み済みの回答シート全体の空欄の名前を補完">名前を反映</button><button type="button" class="context-help" aria-label="名前を反映の説明" data-help-title="名前を反映" data-help-body="読み込み済みの回答シート全体の空欄の名前を、メールアドレスと取り込み済みのClassroom生徒一覧から補います。既存の名前・数式・採点結果は保持します。turretで管理しているフォームの回答シートで利用できます。未照合が残る場合は、管理画面で生徒一覧を更新して再実行してください。">?</button><span id="nameRefreshStatus" class="student-meta" role="status"></span></nav>
+    <nav aria-label="画面の移動" class="scoring-navigation"><strong>turret 採点</strong> <a id="scoringSettingsLink" class="navigation-link" hidden target="_blank" rel="noopener">管理画面</a> <a id="scoringOperationLink" class="navigation-link" hidden target="_blank" rel="noopener">運用スプレッドシート</a> <button id="openRuleBuilder" type="button">採点テンプレ</button> <button id="refreshNamesBtn" type="button" class="btn--xs" disabled title="名前の自動表示を設定・修復（初回・異常時のみ）">名前の自動表示</button><button type="button" class="context-help" aria-label="名前の自動表示の説明" data-help-title="名前の自動表示" data-help-body="既存フォームへの初回設定や、名前の数式を消したときの修復に使います。設定後は回答のクラスとメールアドレスで生徒一覧を参照し、スプシを閉じていても名前を自動表示します。通常は押す必要はありません。名簿と異なる既存名や独自数式がある場合は、変更せず該当行を案内します。回答・採点・コメントは保持します。未照合の場合は生徒一覧を確認してください。">?</button><span id="nameRefreshStatus" class="student-meta" role="status"></span></nav>
     <!-- 上段：生徒文（コンパクト表示） -->
     <section class="frame top" aria-label="生徒の提出内容">
       <div class="student-bar">
@@ -3981,16 +3981,23 @@ function initHelpPopovers_() {
       function refreshScoringNames_() {
         var target=state.targets && state.targets[state.currentSheet];
         if(!target || !target.namesAvailable || state.loading || state.saving || state.namesRefreshing || !preserveCurrentEdit_())return;
-        var key=state.currentSheet;state.namesRefreshing=true;state.nameRefreshTarget=key;state.nameRefreshMessage='名前を反映中…';updateNameRefreshButton_();
+        var key=state.currentSheet;state.namesRefreshing=true;state.nameRefreshTarget=key;state.nameRefreshMessage='名前の自動表示を設定中…';updateNameRefreshButton_();
         google.script.run.withSuccessHandler(function(result) {
           state.namesRefreshing=false;
-          state.nameRefreshMessage='補完 '+result.updated+'件・未照合 '+result.unmatched+'件';
+          state.nameRefreshMessage='自動表示を設定済み・未照合 '+result.unmatched+'件';
           if(state.currentSheet===key) {
-            var row=state.rows[state.currentIndex];loadInitData(row && row.rowNumber);
+            // 名前だけを差し替え、入力中の採点欄と下書き・重複判定を再読み込みしない。
+            if(result.configRevision && result.configRevision!==state.configRevision || result.nameColumn!==undefined && result.nameColumn!==state.config.nameCol)state.nameRefreshMessage+='。表示設定が変わりました。「適用」で読み直してください。';
+            else {
+              var names=new Map((result.names||[]).map(function(item){return [item.rowNumber,item.name];}));
+              state.rows.forEach(function(row){if(names.has(row.rowNumber))row.name=names.get(row.rowNumber);});
+              var row=state.rows[state.currentIndex],nameText=row && row.name!=null?String(row.name):'';
+              els.studentName.textContent=nameText?'生徒名：'+nameText:'生徒名：-';
+            }
           }
           updateNameRefreshButton_();
         }).withFailureHandler(function(error) {
-          state.namesRefreshing=false;state.nameRefreshMessage='名前の反映に失敗: '+(error && error.message ? error.message : error);updateNameRefreshButton_();
+          state.namesRefreshing=false;state.nameRefreshMessage='名前の自動表示を設定できません: '+(error && error.message ? error.message : error);updateNameRefreshButton_();
         }).scoringRefreshNames(key);
       }
       function loadInitData(preferredRowNumber) {

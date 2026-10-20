@@ -344,7 +344,8 @@ test('custom column setup resumes after interrupted configuration save without s
  const sheet=e.sheets.get('回答 1-1');sheet.rows.push(['kid@example.com','回答','生徒','5','4','']);
  const before=plain(sheet.rows);e.c.applyConfigDraft_=save;
  const pending=e.c.loadManagedRecord_(r.id);e.c.prepareFormTarget(r.id,pending.revision);
- assert.deepEqual(sheet.rows,before);assert.equal(e.calls.copies,1);
+ assert.deepEqual(sheet.rows.map(row=>[...row.slice(0,2),...row.slice(3)]),before.map(row=>[...row.slice(0,2),...row.slice(3)]));
+ assert.match(sheet.rows[1][2],/^=ARRAYFORMULA\(LET\(turret_names_version,1,/);assert.equal(e.calls.copies,1);
 });
 
 test('legacy pending records keep the original four-column layout and completion mapping',()=>{

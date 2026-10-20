@@ -56,16 +56,16 @@ function namesPage(){
  const p=readyPage();p.h.state.targets={[p.h.state.currentSheet]:{namesAvailable:true}};p.load();return p;
 }
 
-test('scoring name enrichment preserves grading drafts and refreshes the displayed student name',()=>{
+test('name formula setup preserves grading drafts and refreshes only names without a full reload',()=>{
  const p=namesPage(),button=p.elements.get('refreshNamesBtn');assert.ok(button);assert.equal(button.disabled,false);
  p.h.els.scoreInputs[0].value='5';p.h.markDirty();button.onclick();
  const request=p.calls.at(-1);assert.equal(request.method,'scoringRefreshNames');assert.equal(request.payload,'["book",1]');
  assert.equal(button.disabled,true);const count=p.calls.length;button.onclick();assert.equal(p.calls.length,count);
  p.h.els.scoreInputs[0].value='6';p.h.markDirty();
- request.success({updated:1,unmatched:2,skipped:0});const reload=p.calls.at(-1);assert.equal(reload.method,'scoringGetInitData');
- const response=p.response();response.rows[0].name='補完した名前';reload.success(response);
+ request.success({formulaEnabled:true,updated:1,unmatched:2,skipped:0,names:[{rowNumber:2,name:'補完した名前'}]});
+ assert.equal(p.calls.length,count);
  assert.match(p.elements.get('studentName').textContent,/補完した名前/);assert.equal(p.h.els.scoreInputs[0].value,'6');
- assert.match(p.elements.get('nameRefreshStatus').textContent,/補完 1件.*未照合 2件/);assert.equal(button.disabled,false);
+ assert.match(p.elements.get('nameRefreshStatus').textContent,/自動表示.*未照合 2件/);assert.equal(button.disabled,false);
 });
 
 test('name enrichment failures retain inputs and allow retry; unsupported targets do not send requests',()=>{
@@ -74,6 +74,14 @@ test('name enrichment failures retain inputs and allow retry; unsupported target
  assert.equal(button.disabled,false);assert.equal(p.h.els.scoreInputs[0].value,'5');assert.match(p.elements.get('nameRefreshStatus').textContent,/名簿がありません/);
  p.h.state.targets[p.h.state.currentSheet].namesAvailable=false;p.load();assert.equal(button.disabled,true);
  const count=p.calls.length;button.onclick();assert.equal(p.calls.length,count);
+});
+
+test('name refresh does not overlay names after another window changes only the name column',()=>{
+ const p=namesPage();p.h.state.config.nameCol='B';p.elements.get('refreshNamesBtn').onclick();
+ p.h.els.scoreInputs[0].value='6';p.h.markDirty();
+ p.calls.at(-1).success({formulaEnabled:true,unmatched:0,configRevision:p.h.state.configRevision,nameColumn:'C',names:[{rowNumber:2,name:'別列の内容'}]});
+ assert.equal(p.h.state.rows[0].name,'生徒');assert.equal(p.h.els.scoreInputs[0].value,'6');
+ assert.match(p.elements.get('nameRefreshStatus').textContent,/表示設定が変わりました/);
 });
 
 test('a name enrichment response for the previous target cannot reload a newly selected sheet',()=>{

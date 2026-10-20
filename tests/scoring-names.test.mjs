@@ -21,12 +21,12 @@ function environment(patch={}){
  return {...e,sheet,managedTarget:{spreadsheetId:e.ss.getId(),sheetId:sheet.sheetId}};
 }
 
-test('scoring name enrichment fills only blank names in the selected managed answer tab',()=>{
+test('legacy name enrichment still preserves existing names and formulas before explicit migration',()=>{
  const e=environment(),before=structuredClone(e.answer.rows);
  const targets=e.c.scoringGetTargets();
  assert.equal(targets.find(t=>t.sheetId===e.sheet.sheetId).namesAvailable,true);
  assert.equal(targets.find(t=>t.sheetId===e.answer.sheetId).namesAvailable,false);
- assert.deepEqual({...e.c.scoringRefreshNames(JSON.stringify([e.ss.getId(),e.sheet.sheetId]))},{updated:1,unmatched:2,skipped:2});
+ assert.deepEqual({...e.c.fillManagedNames_(e.c.loadManagedRecord_('managed-a'),e.sheet)},{updated:1,unmatched:2,skipped:2});
  assert.deepEqual(e.sheet.rows.slice(1),[
   ['KID@EXAMPLE.COM','正しい名前','5','採点済み'],['missing@example.com','','3','未照合'],
   ['kid@example.com','手入力','4','保持'],['kid@example.com','=IF(TRUE,"","")','2','数式'],
@@ -55,7 +55,7 @@ test('name enrichment reports missing roster or name headers without changing gr
  for(const missing of ['roster','name']){
   const e=environment();if(missing==='roster')e.sheets.delete('生徒一覧');else e.sheet.rows[0][1]='別の列';
   const before=structuredClone(e.sheet.rows);
-  assert.throws(()=>e.c.scoringRefreshNames(e.managedTarget),/生徒一覧|名前補完/);
+  assert.throws(()=>e.c.scoringRefreshNames(e.managedTarget),/生徒一覧|名前の自動表示/);
   assert.deepEqual(e.sheet.rows,before);
  }
 });

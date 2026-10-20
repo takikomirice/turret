@@ -123,7 +123,7 @@ function resolveScoringTarget_(target,read) {
 
 function scoringGetTargets() { assertWebOperator_(); return getScoringTargets_(); }
 
-/** 採点画面で選択した管理フォームの回答タブ全体に、空欄の名前を補完する。 */
+/** 選択した回答タブを数式による名前の自動表示へ移行・修復し、名前だけを返す。 */
 function scoringRefreshNames(target) {
   assertWebOperator_();
   return withAppLock_(function() {
@@ -136,7 +136,15 @@ function scoringRefreshNames(target) {
     if(!record)throw new Error('名前補完はturretで管理しているフォームの回答シートで利用できます。');
     assertManagedOwner_(record);
     if(record.formUpdate || record.settingsUpdate || record.columnSetup)throw new Error('フォーム・列・設定の更新を完了してから名前を補完してください。');
-    return fillManagedNames_(record,context.sheet,undefined,undefined,read);
+    const result=installManagedNameFormula_(record,context.sheet,read);
+    if(record.nameFormulaVersion!==1){record.nameFormulaVersion=1;saveManagedRecord_(record);}
+    const config=scoringLegacyApiGetConfig_(),headers=managedNameColumns_(record,context.sheet).headers;
+    scoringLegacyApplyHeaderResolutionToConfig_(config,scoringLegacyBuildHeaderMeta_(headers));
+    const column=scoringLegacyColA1ToIndex_(config.nameCol),length=Math.max(0,context.sheet.getLastRow()-1);
+    result.configRevision=scoringWriteRevision_(config);
+    result.nameColumn=config.nameCol;
+    result.names=length&&column>0?context.sheet.getRange(2,column,length,1).getDisplayValues().map(function(row,i){return {rowNumber:i+2,name:row[0]};}):[];
+    return result;
   });
 }
 
@@ -1048,9 +1056,9 @@ function getAppSpreadsheet_() {
 }
 
 /** 更新入口で共通ロックを使用する。対話ダイアログは呼び出し元で解放後に表示する。 */
-function withAppLock_(operation) {
+function withAppLock_(operation, waitMilliseconds) {
   const lock = LockService.getScriptLock();
-  if (!lock.tryLock(0)) {
+  if (!lock.tryLock(waitMilliseconds || 0)) {
     throw new Error('別の処理を実行中です。終了してからもう一度実行してください。');
   }
   try {
