@@ -3430,13 +3430,18 @@ function remindUngradedAndErrorsUnlocked_() {
     throw new Error('リマインド判定に必要な項目設定が不足しています。');
   }
 
+  // 採点画面と同じ判定を一括取得し、追加回答で無効になった採用判断も反映する。
+  const formStatusCache = createFormStatusCache_();
+  const scoringGuard = scoringBuildReturnGuard_(formStatusCache);
   const lines = [];
   let totalUngraded = 0;
   let totalPending = 0;
   let totalError = 0;
+  let totalDuplicateReview = 0;
 
   config.formSources.forEach(function(source) {
-    const formSs = SpreadsheetApp.openById(source.id);
+    if (!formStatusCache.spreadsheets.has(source.id)) formStatusCache.spreadsheets.set(source.id, SpreadsheetApp.openById(source.id));
+    const formSs = formStatusCache.spreadsheets.get(source.id);
     const fileName = formSs.getName();
 
     formSs.getSheets().forEach(function(sheet) {
@@ -3462,6 +3467,7 @@ function remindUngradedAndErrorsUnlocked_() {
       let ungraded = 0;
       let pending = 0;
       let errorCnt = 0;
+      let duplicateReview = 0;
 
       for (let r = 1; r < values.length; r++) {
         const row = values[r];
@@ -3469,26 +3475,31 @@ function remindUngradedAndErrorsUnlocked_() {
         const score = String(row[idxScore] || '').trim();
         const status = idxStatus != null ? String(row[idxStatus] || '').trim() : '';
 
-        if (submission && !score) ungraded++;
+        const review = scoringGuard && scoringGuard.bySource.get(makeResponseKey_(source.id, sheetName, r + 1));
+        // 未決定の重複は回答行単位で別集計し、不採用とともに未採点から除く。
+        if (submission && review && review.state === 'pending') duplicateReview++;
+        else if (submission && !score && (!review || review.state !== 'excluded')) ungraded++;
         if (status === '準備〇') pending++;
         if (status === '準備×' || status === '送信エラー') errorCnt++;
       }
 
-      if (ungraded > 0 || pending > 0 || errorCnt > 0) {
+      if (ungraded > 0 || pending > 0 || errorCnt > 0 || duplicateReview > 0) {
         lines.push(
           fileName + ' / ' + sheetName +
           '：未採点 ' + ungraded + '件, ' +
           '未送信 ' + pending + '件, ' +
-          'エラー ' + errorCnt + '件'
+          'エラー ' + errorCnt + '件, ' +
+          '重複の確認待ち ' + duplicateReview + '件'
         );
         totalUngraded += ungraded;
         totalPending += pending;
         totalError += errorCnt;
+        totalDuplicateReview += duplicateReview;
       }
     });
   });
 
-  if (totalUngraded === 0 && totalPending === 0 && totalError === 0) {
+  if (totalUngraded === 0 && totalPending === 0 && totalError === 0 && totalDuplicateReview === 0) {
     return;
   }
 
@@ -3501,7 +3512,9 @@ function remindUngradedAndErrorsUnlocked_() {
   body += '【全体集計】\n';
   body += '・未採点　：' + totalUngraded + '件\n';
   body += '・未送信　：' + totalPending + '件（送信シートは作成済み）\n';
-  body += '・エラー　：' + totalError + '件（準備×／送信エラー）\n\n';
+  body += '・エラー　：' + totalError + '件（準備×／送信エラー）\n';
+  body += '・重複の確認待ち　：' + totalDuplicateReview + '件（回答数）\n\n';
+  if (totalDuplicateReview > 0) body += '同じ生徒・クラス・授業日の回答が重複しています。採点画面で採用する回答を選んでください。\n\n';
   body += '（このメールはGASの時間トリガーで自動送信されています）\n';
 
   GmailApp.sendEmail(

@@ -15,6 +15,88 @@ const review=e=>e.c.scoringGetReview({target:e.target});
 function choose(e,indices){const group=review(e).groups[0];return e.c.scoringChooseResponses({target:e.target,groupId:group.id,fingerprint:group.fingerprint,accepted:indices.map(i=>group.responses[i].key)});}
 const send=e=>{e.c.importFromFormsToEval();e.c.evalToSendSheet();e.c.sendMessagesUnlocked_();};
 
+function remind(e){
+ const messages=[];e.c.GmailApp={sendEmail:(to,subject,body)=>messages.push({to,subject,body})};
+ e.c.remindUngradedAndErrors();return messages;
+}
+
+test('a returned adopted answer and an ungraded excluded answer need no reminder',()=>{
+ const e=setup();repeat(e);e.answer.rows[2][3]='';choose(e,[0]);send(e);
+ assert.equal(e.posts.length,1);assert.equal(remind(e).length,0);
+});
+
+test('only adopted ungraded answers are counted after choosing among duplicates',()=>{
+ const e=setup();repeat(e);e.answer.rows[1][3]='';e.answer.rows[2][3]='';choose(e,[1]);
+ const [message]=remind(e);assert.match(message.body,/未採点　：1件/);
+ assert.match(message.body,/重複の確認待ち　：0件/);
+});
+
+for(const graded of [false,true])test('unresolved duplicates share one reminder and are counted separately from ungraded answers: graded='+graded,()=>{
+ const e=setup();repeat(e);if(!graded){e.answer.rows[1][3]='';e.answer.rows[2][3]='';}
+ const messages=remind(e);assert.equal(messages.length,1);
+ assert.match(messages[0].body,/回答ブック \/ 回答 1：未採点 0件, 未送信 0件, エラー 0件, 重複の確認待ち 2件/);
+ assert.match(messages[0].body,/重複の確認待ち　：2件/);
+ assert.match(messages[0].body,/採点画面/);
+});
+
+test('a new response invalidates the adoption decision and returns all three answers to review',()=>{
+ const e=setup();repeat(e);choose(e,[0]);repeat(e);e.answer.rows[3][3]='';
+ const [message]=remind(e);assert.match(message.body,/未採点　：0件/);
+ assert.match(message.body,/重複の確認待ち　：3件/);
+});
+
+test('cross-tab duplicates use the shared adoption decision in reminders',()=>{
+ const e=setup();const other=new AdminSheet('回答 2',e.answer.rows);other.rows[1][3]='';
+ e.source.sheets.set(other.name,other);
+ e.sheets.get('対応表').rows.push([sourceId,other.name,'授業A','course-a','']);
+ const before=remind(e);assert.equal(before.length,1);assert.match(before[0].body,/重複の確認待ち　：2件/);
+ const group=review(e).groups[0],accepted=group.responses.find(r=>r.target.sheetId===e.answer.sheetId);
+ e.c.scoringChooseResponses({target:e.target,groupId:group.id,fingerprint:group.fingerprint,accepted:[accepted.key]});
+ assert.equal(remind(e).length,0);
+});
+
+test('ordinary ungraded answers and disabled duplicate checks retain their original reminder behavior',()=>{
+ const e=setup();e.answer.rows[1][3]='';
+ assert.match(remind(e)[0].body,/未採点　：1件/);
+ e.c.scoringSetConfig({...e.c.scoringGetConfig(),lessonDateHeader:''});repeat(e);e.answer.rows[2][3]='';
+ const [message]=remind(e);assert.match(message.body,/未採点　：2件/);assert.match(message.body,/重複の確認待ち　：0件/);
+});
+
+test('accepting both duplicates counts both missing scores but treats zero as graded',()=>{
+ const e=setup();repeat(e);e.answer.rows[1][3]='';e.answer.rows[2][3]='';choose(e,[0,1]);
+ assert.match(remind(e)[0].body,/未採点　：2件/);
+ const scoreCol=e.answer.rows[0].indexOf('点数');
+ e.answer.rows[1][scoreCol]=0;assert.match(remind(e)[0].body,/未採点　：1件/);
+ e.answer.rows[2][scoreCol]=0;assert.equal(remind(e).length,0);
+});
+
+test('pending delivery and send errors remain visible alongside duplicate review',()=>{
+ const e=setup();repeat(e);e.answer.rows[1][2]='準備〇';e.answer.rows[2][2]='送信エラー';
+ const [message]=remind(e);assert.match(message.body,/未送信　：1件/);assert.match(message.body,/エラー　：1件/);
+ assert.match(message.body,/重複の確認待ち　：2件/);
+ choose(e,[0]);const [after]=remind(e);assert.match(after.body,/エラー　：1件/);assert.match(after.body,/重複の確認待ち　：0件/);
+});
+
+test('legacy forms without lesson dates keep ordinary ungraded reminders',()=>{
+ const e=setup();e.props.delete('TURRET_SCORING_CONFIG');e.answer.rows[0][5]='自由記述';e.answer.rows[1][3]='';
+ const [message]=remind(e);assert.match(message.body,/未採点　：1件/);assert.match(message.body,/重複の確認待ち　：0件/);
+});
+
+test('default lesson dates detect review waiting even before scoring settings are saved',()=>{
+ const e=setup();e.props.delete('TURRET_SCORING_CONFIG');repeat(e);
+ assert.match(remind(e)[0].body,/重複の確認待ち　：2件/);
+});
+
+test('reminders preserve answers and adoption records and stop on unreadable decisions',()=>{
+ const e=setup();repeat(e);choose(e,[0]);
+ const before=structuredClone(e.answer.rows);remind(e);assert.deepEqual(e.answer.rows,before);
+ const column=e.answer.rows[0].indexOf('管理');assert.notEqual(column,-1);
+ e.answer.rows[1][column]='broken';const messages=[];
+ e.c.GmailApp={sendEmail:(...args)=>messages.push(args)};
+ assert.throws(()=>e.c.remindUngradedAndErrors(),/管理列/);
+ assert.equal(messages.length,0);assert.equal(e.isLocked(),false);
+});
+
 test('same student, class and lesson date are duplicates even when submitted on different days',()=>{
  const e=setup();repeat(e);const r=review(e);assert.equal(r.groups.length,1);assert.equal(r.groups[0].responses.length,2);
  assert.equal(r.rows[2].state,'pending');assert.equal(r.rows[3].state,'pending');send(e);assert.equal(e.posts.length,0);
