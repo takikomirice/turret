@@ -3955,7 +3955,7 @@ function initHelpPopovers_() {
             }
             return;
           }
-          var chunk=rows.slice(offset,offset+20);offset+=chunk.length;
+          var chunk=rows.slice(offset,offset+100);offset+=chunk.length;
           var payload={target:JSON.parse(targetKey).reduce(function(t,v,i){t[i===0?'spreadsheetId':'sheetId']=v;return t;},{}),
             rows:chunk.map(function(n){return Object.assign({rowNumber:n},data[String(n)]);})};
           google.script.run.withSuccessHandler(function(result){

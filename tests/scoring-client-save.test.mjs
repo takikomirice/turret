@@ -50,3 +50,16 @@ test('local persistence failure prevents sending an older draft as the latest ed
  const e=client();e.h.saveCurrentRow();e.h.els.scoreInputs[0].value='4';e.h.markDirty();
  e.storage.set=()=>{throw Error('quota exceeded');};e.h.flushPendingEdits(false);assert.equal(e.calls.length,0);
 });
+
+test('saving a class batches up to 100 rows and preserves failed and newer drafts between batches',()=>{
+ const e=client();e.h.state.dirty=false;
+ for(let row=2;row<=102;row++)e.h.savePendingEditToLocalStorage(e.h.state.currentSheet,row,[3,'','','',''],'講評',[]);
+ e.h.flushPendingEdits(false);assert.equal(e.calls.length,1);assert.equal(e.calls[0].payload.rows.length,100);
+ e.h.savePendingEditToLocalStorage(e.h.state.currentSheet,2,[4,'','','',''],'追記',[]);
+ e.calls[0].success({results:e.calls[0].payload.rows.map(row=>({rowNumber:row.rowNumber,ok:row.rowNumber!==3}))});
+ assert.equal(e.calls.length,2);assert.deepEqual(Array.from(e.calls[1].payload.rows,r=>r.rowNumber),[102]);
+ e.calls[1].failure(Error('通信失敗'));
+ assert.equal(e.h.state.saving,false);assert.equal(e.h.loadPendingEditFromLocalStorage(e.h.state.currentSheet,2).comment,'追記');
+ assert.ok(e.h.loadPendingEditFromLocalStorage(e.h.state.currentSheet,3));assert.ok(e.h.loadPendingEditFromLocalStorage(e.h.state.currentSheet,102));
+ assert.equal(e.h.loadPendingEditFromLocalStorage(e.h.state.currentSheet,4),null);assert.match(e.window.lastStatus,/失敗 2件/);
+});

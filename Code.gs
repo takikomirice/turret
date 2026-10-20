@@ -169,7 +169,7 @@ function scoringGetInitData(params) {
   data.targetLabel=context.target.label;
   data.configRevision=scoringWriteRevision_(data.config);
   const summary=!!(params && params.reviewMode==='summary');
-  data.review=scoringReviewForTarget_(scoringBuildReviewIndex_(null,{read:read,summary:summary}),context.target,summary);
+  data.review=scoringReviewForTarget_(scoringBuildReviewIndex_(null,{read:read,summary:summary,focusTarget:context.target}),context.target,summary);
   return data;
 }
 
@@ -191,8 +191,9 @@ function scoringSaveRows(payload) {
         return {key:scoringResponseKey_(context.target,row.rowNumber),normalized:normalized,result:result};
       } catch(error) { result.error=String(error.message || error);return {result:result}; }
     });
+    let journal;
     if(entries.some(function(entry){return !entry.result.error;})) {
-      scoringManagementColumn_(sheet,true);
+      journal=scoringManagementColumn_(sheet,true);
       scoringValidateResolvedConfig_(config,sheet,true);
       const plan=scoringColumnPlan_(config);
       entries.forEach(function(entry){if(!entry.result.error)entry.cells=scoringRowCells_(plan,entry.normalized);});
@@ -201,19 +202,18 @@ function scoringSaveRows(payload) {
     let batch=[],seen=new Set();
     entries.forEach(function(entry){
       if(entry.result.error)return;
-      if(seen.has(entry.key)){scoringSaveBatch_(sheet,batch);batch=[];seen.clear();}
+      if(seen.has(entry.key)){scoringSaveBatch_(sheet,batch,journal);batch=[];seen.clear();}
       batch.push(entry);seen.add(entry.key);
     });
-    if(batch.length)scoringSaveBatch_(sheet,batch);
+    if(batch.length)scoringSaveBatch_(sheet,batch,journal);
     const results=entries.map(function(entry){return entry.result;});
     return {ok:results.every(function(r){return r.ok;}),sheetName:context.target.key,results:results};
   });
 }
 
 /** 保留中の記録は回答より先に永続化し、完了記録は回答の保存確認後に更新する。 */
-function scoringSaveBatch_(sheet,entries) {
+function scoringSaveBatch_(sheet,entries,journal) {
   try {
-    const journal=scoringManagementColumn_(sheet,true);
     scoringWriteSaveRecords_(journal,entries,'pending');
     const blocks=[];
     entries.forEach(function(entry){
@@ -776,6 +776,7 @@ function scoringFingerprintValues_(row,headers,ignored,layout) {
 
 /** 同じセルの採用判断と保存状態をそれぞれ保持して更新する。呼び出し元で共通ロックを取る。 */
 function scoringPatchManagement_(column,patches) {
+  if(!patches.length)return;
   const blocks=patches.map(function(item){
     const data=scoringParseManagement_((column.values[item.row-2] || [''])[0]);
     const json=JSON.stringify(Object.assign(data,item.patch));
@@ -785,9 +786,12 @@ function scoringPatchManagement_(column,patches) {
   scoringWriteBlocks_(column.sheet,blocks);
   SpreadsheetApp.flush();
   // 書き込みの読み戻しが済むまで、旧シート削除や採点保存の完了を宣言しない。
-  const values=column.sheet.getRange(2,column.column,Math.max(1,column.sheet.getLastRow()-1),1).getValues();
-  blocks.forEach(function(block){if(!values[block.row-2] || values[block.row-2][0]!==block.values[0])throw new Error('管理列の保存を確認できません。再実行してください。');});
-  column.values=values;
+  let first=blocks[0].row,last=first;
+  blocks.forEach(function(block){first=Math.min(first,block.row);last=Math.max(last,block.row);});
+  const values=column.sheet.getRange(first,column.column,last-first+1,1).getValues();
+  blocks.forEach(function(block){if(!values[block.row-first] || values[block.row-first][0]!==block.values[0])throw new Error('管理列の保存を確認できません。再実行してください。');});
+  // 今回更新した範囲だけを読み戻す。同じリクエスト内の後続保存もこの確認済み状態を使う。
+  values.forEach(function(row,i){column.values[first-2+i]=row;});
 }
 
 function scoringWriteDecision_(group,accepted,read,revision) {
@@ -882,6 +886,11 @@ function scoringBuildReviewIndex_(books,options) {
   const targets=getScoringTargets_(null,read),groups=new Map(),responses=new Map(),bySource=new Map(),enabledTargets=new Set(),ignoredByTarget=new Map();
   const decisions=scoringReadRecords_('_scoring_decisions'),saves=scoringReadRecords_('_scoring_saves');
   const mappings=readMappingEntries_(true),coursesByEmail=new Map(),returnStates=new Map();
+  const targetCourse=function(target){
+    const mapping=mappings.get(makeMappingLookupKey_(target.spreadsheetId,target.sheetName));
+    return String(mapping && mapping.courseId || target.courseId || '');
+  };
+  const focusCourse=options.focusTarget ? targetCourse(options.focusTarget) : '';
   const students=operation.getSheetByName(STUDENT_SHEET_NAME);
   if (students && students.getLastRow()>1) {
     const values=students.getDataRange().getDisplayValues(),h=createHeaderMap_(values[0]);
@@ -894,6 +903,9 @@ function scoringBuildReviewIndex_(books,options) {
   }
   const posted=new Set(read.managed.filter(function(r){return r.kind==='announcement' && r.postId;}).map(function(r){return r.sourceKey;}));
   targets.forEach(function(target){
+    // 重複の組はクラス別。別クラスだと確定するタブだけを省き、不明なタブは名簿照合のため残す。
+    const course=targetCourse(target);
+    if(focusCourse && course && course!==focusCourse)return;
     const snapshot=scoringSnapshot_(read,target),sheet=snapshot.sheet,book=scoringBook_(read,target.spreadsheetId);
     const values=snapshot.values,headers=(values[0] || []).map(String),timezone=book.getSpreadsheetTimeZone();
     snapshot.timezone=timezone;
@@ -972,7 +984,7 @@ function scoringReviewForTarget_(index,target,summary) {
 }
 function scoringGetReview(params) {
   assertWebOperator_();const read=scoringReadContext_(),context=resolveScoringTarget_(params && params.target,read),summary=!!(params && params.reviewMode==='summary');
-  return scoringReviewForTarget_(scoringBuildReviewIndex_(null,{read:read,summary:summary}),context.target,summary);
+  return scoringReviewForTarget_(scoringBuildReviewIndex_(null,{read:read,summary:summary,focusTarget:context.target}),context.target,summary);
 }
 function scoringGetComparison(params) {
   assertWebOperator_();const read=scoringReadContext_(),context=resolveScoringTarget_(params && params.target,read);

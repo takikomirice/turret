@@ -1,11 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {scoringWorkload} from './helpers/scoring-workload.mjs';
+import {AdminSheet} from './helpers/scoring-environment.mjs';
 
 test('summary loading reads each answer grid once and does not hash every unique response',()=>{
  const e=scoringWorkload(5000),result=e.c.scoringGetInitData({target:e.target,reviewMode:'summary'});
  assert.equal(result.rows.length,1000);assert.equal(result.review.detailsDeferred,true);
- assert.equal(e.metrics.opens,1);assert.ok(e.metrics.timezones<=5);assert.ok(e.metrics.cells<51000);assert.ok(e.metrics.digests<10);
+ assert.equal(e.metrics.opens,1);assert.equal(e.metrics.valueReads,1);assert.equal(e.metrics.timezones,1);assert.ok(e.metrics.cells<11000);assert.ok(e.metrics.digests<10);
  assert.ok(Buffer.byteLength(JSON.stringify(result))<2000000);
  assert.equal(result.review.rows[2].state,'single');assert.equal(result.review.rows[2].answers,undefined);
 });
@@ -41,4 +42,34 @@ test('request-scoped reads never retain answers, eligibility or authorization ac
 
 test('comparison batches display reads per sheet even for many duplicate submissions',()=>{
  const e=scoringWorkload(5,1);for(let i=0;i<100;i++)e.answer.rows.push([...e.answer.rows[1]]);const review=e.c.scoringGetReview({target:e.target,reviewMode:'summary'});e.resetMetrics();const detail=e.c.scoringGetComparison({target:e.target,groupId:review.rows[2].groupId});assert.equal(detail.responses.length,101);assert.ok(e.metrics.displayReads<=2);
+});
+
+test('focused review includes same-course and unresolved tabs while ignoring only proven different courses',()=>{
+ const e=scoringWorkload(10),mapping=e.sheets.get('対応表');
+ mapping.rows[2][3]='course-0';mapping.rows[3][3]='';
+ e.sheets.set('生徒一覧',new AdminSheet('生徒一覧',[
+  ['メールアドレス','コースID'],['student-0@example.invalid','course-0'],['student-1@example.invalid','course-0']
+ ]));
+ const result=e.c.scoringGetInitData({target:e.target,reviewMode:'summary'});
+ assert.equal(result.review.rows[2].duplicateCount,3);assert.equal(result.review.rows[2].state,'pending');
+ assert.equal(e.metrics.valueReads,3);
+ const full=e.c.scoringBuildReviewIndex_(null,{summary:true});
+ const expected=e.c.scoringReviewForTarget_(full,result.target,true);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.review)),JSON.parse(JSON.stringify(expected)));
+});
+
+test('an unresolved selected class keeps the full review and mapping changes take effect on the next load',()=>{
+ const e=scoringWorkload(10),mapping=e.sheets.get('対応表');mapping.rows[1][3]='';
+ e.c.scoringGetInitData({target:e.target,reviewMode:'summary'});assert.equal(e.metrics.valueReads,5);
+ mapping.rows[1][3]='course-1';e.resetMetrics();
+ const result=e.c.scoringGetInitData({target:e.target,reviewMode:'summary'});
+ assert.equal(e.metrics.valueReads,2);assert.equal(result.review.rows[2].duplicateCount,2);
+});
+
+test('saving one row reads the management column once and verifies only the affected row',()=>{
+ const e=scoringWorkload(1000,1);e.c.scoringManagementColumn_(e.answer,true);
+ const column=e.answer.rows[0].indexOf('管理')+1,getRange=e.answer.getRange.bind(e.answer),reads=[];
+ e.answer.getRange=(...args)=>{const range=getRange(...args),getValues=range.getValues;range.getValues=()=>{if(args[0]>1&&args[1]===column&&args[3]===1)reads.push(args[2]);return getValues();};return range;};
+ const result=e.c.scoringSaveRows({target:e.target,rows:[{rowNumber:502,scores:[4,'','','',''],comment:'変更'}]});
+ assert.equal(result.ok,true);assert.deepEqual(reads,[1000,1,1]);
 });

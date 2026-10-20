@@ -29,3 +29,12 @@ const getRange=saved.answer.getRange.bind(saved.answer);
 saved.answer.getRange=(...args)=>{const range=getRange(...args),write=range.setValues;range.setValues=values=>{answerWrites++;return write(values);};return range;};
 const result=saved.c.scoringSaveRows({target:saved.target,rows:Array.from({length:100},(_,i)=>({rowNumber:i+2,scores:[3,'','','',''],comment:'架空の講評'}))});
 console.log(JSON.stringify({save:{rows:100,ok:result.ok,flushes,answerWrites}}));
+
+// 列の準備が済んだ運用中のタブで、少数行の保存が全行の読み戻しを繰り返さないことを測る。
+for(const rows of [1,40,100]) {
+ const e=scoringWorkload(1000,1);e.c.scoringManagementColumn_(e.answer,true);e.resetMetrics();let flushes=0;
+ e.c.SpreadsheetApp.flush=()=>flushes++;
+ const result=e.c.scoringSaveRows({target:e.target,rows:Array.from({length:rows},(_,i)=>({rowNumber:i+2,scores:[4,'','','',''],comment:'架空の講評'}))});
+ assert.equal(result.ok,true);
+ console.log(JSON.stringify({savePrepared:{totalAnswers:1000,rows,flushes,...e.metrics}}));
+}
