@@ -211,15 +211,6 @@ test('unknown delete result keeps tracked ID and can be reconciled without blind
  assert.throws(()=>c.runManagedFormAction(r.id,'delete',p.fingerprint),/timeout/);
  const after=c.loadManagedRecord_(r.id);assert.equal(after.materialId,'material');assert.equal(after.stage,'delete_review');
 });
-test('name enrichment matches course and email, preserves grades and manual names',()=>{
- const {c,sheets}=env();
- sheets.set('生徒一覧',new AdminSheet('生徒一覧',[['メールアドレス','名前','コースID'],['KID@EXAMPLE.COM','正しい名前','100'],['kid@example.com','別クラス名','200']]));
- const answer=new AdminSheet('フォーム回答 テスト',[['メール','名前','評価'],['kid@example.com','','5'],['missing@example.com','','3'],['kid@example.com','手入力','4']]);
- const result=c.fillManagedNames_({courseId:'100',input:{emailHeader:'メール',nameHeader:'名前'}},answer);
- assert.deepEqual(plain(result),{updated:1,unmatched:1,skipped:1});
- assert.deepEqual(answer.rows.slice(1),[['kid@example.com','正しい名前','5'],['missing@example.com','','3'],['kid@example.com','手入力','4']]);
-});
-
 function provisioningEnv(){
  const e=env(),{c,sheets,ss}=e;let next=0;
  const calls={copies:0,posts:0,removes:0,destination:0,trigger:0};const forms=new Map(),permissions=new Map();
@@ -249,6 +240,22 @@ function provisioningEnv(){
  const begin=()=>{const p=preview();return c.beginFormSetup(raw,p.configRevision,p.fingerprint);};
  return {...e,calls,forms,permissions,raw,preview,begin};
 }
+
+for(const shifted of [false,true])test('first response after empty form preparation keeps a formula without a name-button call: shifted='+shifted,()=>{
+ const e=provisioningEnv();let [record]=e.begin();record=e.c.prepareFormTarget(record.id,record.revision);
+ const sheet=[...e.sheets.values()].find(s=>String(s.getSheetId())===String(record.responseSheetId));
+ const nameCol=sheet.rows[0].indexOf(record.input.nameHeader),emailCol=sheet.rows[0].indexOf(record.input.emailHeader);
+ assert.equal(record.nameFormulaVersion,1);assert.equal(e.calls.trigger,1);
+ assert.ok(sheet.rows.slice(1).every(row=>!row[emailCol]));
+ assert.match(sheet.rows[1][nameCol],/^=ARRAYFORMULA/);
+ if(shifted)sheet.rows.splice(1,0,Array(sheet.rows[0].length).fill(''));
+ sheet.rows[1][emailCol]='kid@example.com';sheet.getParent=()=>e.ss;
+ e.props.set('TURRET_RESPONSE_TRIGGER',JSON.stringify({id:'trigger',owner:'owner-token',spreadsheetId:e.ss.getId()}));
+ e.userProps.set('APP_AUTOMATION_OWNER','owner-token');
+ e.c.managedFormResponseReceived_({triggerUid:'trigger',source:e.ss,range:{getSheet:()=>sheet,getRow:()=>2,getNumRows:()=>1}});
+ assert.match(sheet.rows[1][nameCol],/^=ARRAYFORMULA/);
+ if(shifted)assert.equal(sheet.rows[2][nameCol],'');
+});
 
 test('publication confirmation ignores API object and permission ordering but detects access changes',()=>{
  const e=provisioningEnv(),{c}=e;let [r]=e.begin();r=c.prepareFormTarget(r.id,r.revision);
@@ -680,7 +687,7 @@ test('deployed send path records IDs and preserves uncertain journal outcomes wi
   c.sendMessages();assert.equal(posts,1);
  }
 });
-test('regular import backfills names missed by a busy event without changing grades',()=>{
+test('regular import leaves unmigrated answer names blank and preserves grades',()=>{
  const {c,sheets}=env();
  const answer=new AdminSheet('回答 1',[['メール','名前','点数','状態'],['kid@example.com','','5','済']]);answer.getSheetId=()=>99;
  sheets.set('回答 1',answer);sheets.set('生徒一覧',new AdminSheet('生徒一覧',[['メールアドレス','名前','コースID','クラス名','studentId'],['kid@example.com','生徒','100','クラス','kid']]));
@@ -688,7 +695,7 @@ test('regular import backfills names missed by a busy event without changing gra
  for(const s of sheets.values())if(!s.getSheetId)s.getSheetId=()=>1;
  c.SpreadsheetApp.openById=()=>({getSheets:()=>[]});
  c.importFromFormsToEval();
- assert.deepEqual(answer.rows[1],['kid@example.com','生徒','5','済']);
+ assert.deepEqual(answer.rows[1],['kid@example.com','','5','済']);
 });
 test('failed material publication can still close response intake',()=>{
  const e=provisioningEnv(),{c,forms}=e;let [r]=e.begin();r=c.prepareFormTarget(r.id,r.revision);

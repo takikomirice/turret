@@ -2972,7 +2972,6 @@ function collectSendPreparationCandidates_(config, cache, guard, sendKeys) {
 function prepareSendDataUnlocked_() {
   if(typeof assertNoManagedFormUpdate_==='function')assertNoManagedFormUpdate_();
   const rosterRecords=readStudentRosterRecords_(getStudentSheet_());
-  if(typeof refreshAllManagedNames_==='function')refreshAllManagedNames_();
   const config = getConfig_();
   validateAppConfig_(config);
   const formStatusCache = createFormStatusCache_();

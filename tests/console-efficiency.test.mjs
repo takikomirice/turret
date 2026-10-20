@@ -38,50 +38,6 @@ test('guard failure stops before any external send or queued status change',()=>
  assert.equal(e.sheet.rows[1][e.sheet.rows[0].indexOf('送信状態')],'未');
 });
 
-function managedNames(){
- const e=scoringEnvironment();
- const roster=new AdminSheet('生徒一覧',[['メールアドレス','名前','コースID'],['kid@example.com','生徒A','100'],['kid@example.com','生徒B','200']]);
- e.sheets.set(roster.name,roster);
- const sheets=[];
- for(let i=0;i<3;i++){
-  const sheet=new AdminSheet('回答'+i,[['メール','長文回答','名前'],...Array.from({length:20},()=>['kid@example.com','回答本文',''])]);
-  e.sheets.set(sheet.name,sheet);sheets.push(sheet);
-  e.c.saveManagedRecord_({id:'form:'+i,kind:'form',courseId:i===2?'200':'100',responseSheetId:sheet.sheetId,input:{emailHeader:'メール',nameHeader:'名前'}});
- }
- return {...e,roster,answers:sheets};
-}
-test('name refresh shares roster and sheet list across courses, reads only needed columns and batches each contiguous run',()=>{
- const e=managedNames();let rosterReads=0,lists=0,writes=0;
- const range=e.roster.getRange.bind(e.roster);e.roster.getRange=(...args)=>{const r=range(...args),read=r.getDisplayValues;r.getDisplayValues=()=>{rosterReads++;return read();};return r;};
- const getSheets=e.ss.getSheets;e.ss.getSheets=()=>{lists++;return getSheets();};
- for(const sheet of e.answers){const getRange=sheet.getRange.bind(sheet);sheet.getRange=(r,c,h=1,w=1)=>{
-  if(r>1){assert.equal(w,1);assert.notEqual(c,2);}
-  return getRange(r,c,h,w);
- };sheet.beforeWrite=()=>writes++;}
- e.c.refreshAllManagedNames_();assert.equal(rosterReads,1);assert.equal(lists,1);assert.equal(writes,3);
- assert.equal(e.answers[0].rows[20][2],'生徒A');assert.equal(e.answers[2].rows[20][2],'生徒B');
- e.roster.rows[1][1]='変更後';e.answers[0].rows[1][2]='';
- e.c.refreshAllManagedNames_();assert.equal(rosterReads,2);assert.equal(e.answers[0].rows[1][2],'変更後');
-});
-test('name batching leaves manual names and blank-result formulas intact and rejects conflicting roster names',()=>{
- const e=scoringEnvironment();e.sheets.set('生徒一覧',new AdminSheet('生徒一覧',[
-  ['メールアドレス','名前','コースID'],['a@example.com','=literal','100'],['dup@example.com','A','100'],['dup@example.com','B','100']
- ]));
- const sheet=new AdminSheet('回答',[['メール','名前','評価'],[' A@example.com ','',5],['a@example.com','手入力',4],['a@example.com','=""',3],['a@example.com','',2],['dup@example.com','',1],['','',0]]);
- const getRange=sheet.getRange.bind(sheet);let writes=0;sheet.beforeWrite=()=>writes++;
- sheet.getRange=(...args)=>{const r=getRange(...args),read=r.getDisplayValues;r.getDisplayValues=()=>read().map(row=>row.map(v=>v==='=""'?'':v));return r;};
- const result=e.c.fillManagedNames_({courseId:'100',input:{emailHeader:'メール',nameHeader:'名前'}},sheet);
- assert.deepEqual(plain(result),{updated:2,unmatched:1,skipped:3});assert.equal(writes,2);
- assert.deepEqual(sheet.rows.slice(1).map(r=>r[1]),["'=literal",'手入力','=""',"'=literal",'','']);
- assert.deepEqual(sheet.rows.slice(1).map(r=>r[2]),[5,4,3,2,1,0]);
-});
-test('a failed name batch can be retried without touching already populated names',()=>{
- const e=managedNames();let fail=true;e.answers[1].beforeWrite=()=>{if(fail)throw Error('write failed');};
- assert.throws(()=>e.c.refreshAllManagedNames_(),/write failed/);
- assert.equal(e.answers[0].rows[1][2],'生徒A');assert.equal(e.answers[1].rows[1][2],'');
- fail=false;e.c.refreshAllManagedNames_();assert.equal(e.answers[2].rows[20][2],'生徒B');
-});
-
 function historyEnvironment(count){
  const e=scoringEnvironment();
  const records=[{id:'form:one',kind:'form',stage:'registered'},{id:'template:one',kind:'template'},...Array.from({length:count},(_,i)=>({id:'post:'+i,kind:'announcement',title:'返却'+i,postId:'p'+i,revision:'revision-'+i,stage:'published'}))];

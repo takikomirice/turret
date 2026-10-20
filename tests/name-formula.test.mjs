@@ -40,10 +40,10 @@ test('name formulas use exact forward/reverse lookups and an insertion-safe dyna
  assert.match(formula,/EXACT\(firstnames,lastnames\)/);
 });
 
-test('existing managed formula is left intact by legacy filling and a repeated setup',()=>{
+test('existing managed formula is left intact by a repeated setup',()=>{
  const e=environment();e.c.scoringRefreshNames(e.target);const formula=e.sheet.rows[1][1];let writes=0;e.sheet.beforeWrite=()=>writes++;
  const result=e.c.scoringRefreshNames(e.target);assert.equal(result.formulaEnabled,true);assert.equal(writes,0);
- e.c.fillManagedNames_(e.record,e.sheet);assert.equal(writes,0);assert.equal(e.sheet.rows[1][1],formula);
+ assert.equal(e.sheet.rows[1][1],formula);
 });
 
 test('a failed migration write keeps the original names and does not enable the formula mode',()=>{
@@ -67,6 +67,32 @@ function responseEvent(e){
  e.userProps.set('APP_AUTOMATION_OWNER','owner-token');
  return {triggerUid:'trigger',source:e.ss,range:{getSheet:()=>e.sheet,getRow:()=>2,getNumRows:()=>1}};
 }
+
+test('responses to unmigrated forms never write literal names or change existing cells',()=>{
+ for(const name of ['', '手入力', '=IF(TRUE,"","")']){
+  const e=environment([['メール','名前','点数'],['kid@example.com',name,5]]);
+  const before=structuredClone(e.sheet.rows);let writes=0;e.sheet.beforeWrite=()=>writes++;
+  e.c.managedFormResponseReceived_(responseEvent(e));
+  assert.equal(writes,0);assert.deepEqual(e.sheet.rows,before);
+  assert.equal(e.c.loadManagedRecord_(e.record.id).nameFormulaVersion,undefined);
+ }
+});
+
+test('the existing explicit refresh endpoint installs a formula instead of writing literal names',()=>{
+ const e=environment([['メール','名前','点数'],['kid@example.com','',5]]);
+ const result=e.c.refreshManagedNames(e.record.id,e.record.revision);
+ assert.equal(result.formulaEnabled,true);
+ assert.match(e.sheet.rows[1][1],/^=ARRAYFORMULA/);
+ assert.equal(e.c.loadManagedRecord_(e.record.id).nameFormulaVersion,1);
+ assert.equal(e.sheet.rows[1][2],5);
+});
+
+for(const field of ['formUpdate','settingsUpdate','columnSetup'])test('the explicit refresh endpoint refuses an interrupted '+field,()=>{
+ const e=environment();const record=e.c.loadManagedRecord_(e.record.id);record[field]={};
+ const saved=e.c.saveManagedRecord_(record),before=structuredClone(e.sheet.rows);
+ assert.throws(()=>e.c.refreshManagedNames(saved.id,saved.revision),/更新/);
+ assert.deepEqual(e.sheet.rows,before);assert.equal(e.isLocked(),false);
+});
 
 test('responses with an installed formula do no writes and need no lock even during another operation',()=>{
  const e=environment();e.c.scoringRefreshNames(e.target);const event=responseEvent(e);let writes=0;e.sheet.beforeWrite=()=>writes++;

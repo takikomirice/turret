@@ -21,17 +21,13 @@ function environment(patch={}){
  return {...e,sheet,managedTarget:{spreadsheetId:e.ss.getId(),sheetId:sheet.sheetId}};
 }
 
-test('legacy name enrichment still preserves existing names and formulas before explicit migration',()=>{
- const e=environment(),before=structuredClone(e.answer.rows);
+test('explicit migration is offered for managed forms and protects manual names and independent formulas',()=>{
+ const e=environment(),before=structuredClone(e.answer.rows),managedBefore=structuredClone(e.sheet.rows);
  const targets=e.c.scoringGetTargets();
  assert.equal(targets.find(t=>t.sheetId===e.sheet.sheetId).namesAvailable,true);
  assert.equal(targets.find(t=>t.sheetId===e.answer.sheetId).namesAvailable,false);
- assert.deepEqual({...e.c.fillManagedNames_(e.c.loadManagedRecord_('managed-a'),e.sheet)},{updated:1,unmatched:2,skipped:2});
- assert.deepEqual(e.sheet.rows.slice(1),[
-  ['KID@EXAMPLE.COM','正しい名前','5','採点済み'],['missing@example.com','','3','未照合'],
-  ['kid@example.com','手入力','4','保持'],['kid@example.com','=IF(TRUE,"","")','2','数式'],
-  ['conflict@example.com','','1','氏名競合']
- ]);
+ assert.throws(()=>e.c.scoringRefreshNames(e.managedTarget),/独自の数式|名簿と異なる名前/);
+ assert.deepEqual(e.sheet.rows,managedBefore);
  assert.deepEqual(e.answer.rows,before);
 });
 

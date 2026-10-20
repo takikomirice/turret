@@ -1391,45 +1391,14 @@ function installManagedNameFormula_(record,sheet,context) {
   throw writeError || new Error('名前の自動表示を設定できませんでした。名前列の数式・テーブル設定を確認してください。');
 }
 
-function fillManagedNames_(record, sheet, firstRow, numberRows, context) {
-  // 数式方式へ移行済みの列には、配列の展開結果を含めて値を書き込まない。
-  if(managedNameFormulaReady_(record,sheet))return {updated:0,unmatched:0,skipped:0};
-  if(record.nameFormulaVersion)throw new Error('名前の自動表示の式を確認できません。採点画面の「名前の自動表示」で修復してください。');
-  context=context||{};
-  if(!context.nameMaps)context.nameMaps=new Map();
-  if(!context.nameMaps.has(record.courseId)) {
-    const names=new Map();
-    managedRoster_(record.courseId,context).forEach(function(s){if(names.has(s.email)&&names.get(s.email)!==s.name)names.set(s.email,'');else if(!names.has(s.email))names.set(s.email,s.name);});
-    context.nameMaps.set(record.courseId,names);
-  }
-  const map=context.nameMaps.get(record.courseId);
-  const headers=createHeaderMap_(sheet.getRange(1,1,1,sheet.getLastColumn()).getDisplayValues()[0]);
-  if (!(record.input.emailHeader in headers) || !(record.input.nameHeader in headers)) throw new Error('名前補完用の列がありません。');
-  const start=firstRow||2, length=numberRows||Math.max(0,sheet.getLastRow()-start+1);
-  const result={updated:0,unmatched:0,skipped:0};if(!length)return result;
-  const nameCol=headers[record.input.nameHeader]+1, nameRange=sheet.getRange(start,nameCol,length,1);
-  const names=nameRange.getDisplayValues(), formulas=nameRange.getFormulas();
-  const emails=sheet.getRange(start,headers[record.input.emailHeader]+1,length,1).getDisplayValues(), blocks=[];
-  emails.forEach(function(row,i){
-    if(String(names[i][0]||'').trim() || formulas[i][0]){result.skipped++;return;}
-    const email=String(row[0]||'').trim().toLowerCase(),name=map.get(email);
-    if(!email){result.skipped++;return;}
-    if(!name){result.unmatched++;return;}
-    blocks.push({row:start+i,col:nameCol,values:[managedLiteral_(name)]});result.updated++;
-  });
-  scoringWriteBlocks_(sheet,blocks);
-  return result;
-}
-
+/** 既存の呼び出し口も、名前の直接入力ではなく数式の設定・修復を行う。 */
 function refreshManagedNames(id, revision) {
-  return withAppLock_(function(){const r=loadManagedRecord_(id,revision);if(r.formUpdate)throw new Error('フォームの更新を完了してから名前を補完してください。');return fillManagedNames_(r,managedAnswerSheet_(r));});
-}
-
-/** 通常の取り込み前に、取りこぼした送信イベントや処理中だったイベントを補完する。 */
-function refreshAllManagedNames_() {
-  const context={}; // この実行中だけ使う。次回の取り込みでは名簿の変更を反映する。
-  getManagedRecords_().filter(function(r){return r.kind==='form'&&r.responseSheetId!=null;}).forEach(function(r){
-    assertManagedOwner_(r);fillManagedNames_(r,managedAnswerSheet_(r,context),undefined,undefined,context);
+  return withAppLock_(function(){
+    const r=loadManagedRecord_(id,revision);
+    if(r.formUpdate || r.settingsUpdate || r.columnSetup)throw new Error('フォーム・列・設定の更新を完了してから名前の自動表示を設定してください。');
+    const result=installManagedNameFormula_(r,managedAnswerSheet_(r));
+    if(r.nameFormulaVersion!==1){r.nameFormulaVersion=1;saveManagedRecord_(r);}
+    return result;
   });
 }
 
@@ -3154,7 +3123,7 @@ function ensureManagedResponseTrigger_() {
 }
 
 function managedFormResponseReceived_(event) {
-  // 通常の回答では数式が計算する。初回の行挿入で式が移動した場合と旧方式だけロックする。
+  // 通常の回答では数式が計算する。移行済みの式を修復するときだけロックする。
   const rawRegistration=PropertiesService.getScriptProperties().getProperty('TURRET_RESPONSE_TRIGGER');
   if(!rawRegistration||!event||!event.triggerUid||!event.range||!event.source)return;
   const initialRegistration=JSON.parse(rawRegistration),operation=getAppSpreadsheet_();
@@ -3162,7 +3131,7 @@ function managedFormResponseReceived_(event) {
   const initialSheet=event.range.getSheet();
   if(event.range.getRow()<2||event.range.getNumRows()!==1||initialSheet.getParent().getId()!==operation.getId())return;
   const initialRecord=getManagedRecords_().find(function(r){return r.kind==='form'&&String(r.responseSheetId)===String(initialSheet.getSheetId());});
-  if(!initialRecord)return;
+  if(!initialRecord || !initialRecord.nameFormulaVersion)return;
   assertManagedOwner_(initialRecord);
   if(initialRecord.formUpdate||initialRecord.settingsUpdate||initialRecord.columnSetup)return;
   if(managedNameFormulaReady_(initialRecord,initialSheet))return;
@@ -3174,12 +3143,10 @@ function managedFormResponseReceived_(event) {
     const sheet=event.range.getSheet(),start=event.range.getRow();
     if(start<2 || event.range.getNumRows()!==1 || sheet.getParent().getId()!==ss.getId())return;
     const record=getManagedRecords_().find(function(r){return r.kind==='form'&&String(r.responseSheetId)===String(sheet.getSheetId());});
-    if(!record)return;
+    if(!record || !record.nameFormulaVersion)return;
     assertManagedOwner_(record);
     if(record.formUpdate||record.settingsUpdate||record.columnSetup)return;
-    if(record.nameFormulaVersion){installManagedNameFormula_(record,sheet);return;}
-    const result=fillManagedNames_(record,sheet,start,1);
-    if(result.unmatched)ensureErrorSheet_().appendRow([new Date(),sheet.getName(),start,'','','NAME_UNMATCHED','Classroom生徒一覧に照合できません。名簿を更新して採点画面の「名前の自動表示」を実行してください。']);
+    installManagedNameFormula_(record,sheet);
   },30000);
 }
 
