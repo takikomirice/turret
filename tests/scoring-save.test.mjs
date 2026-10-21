@@ -7,6 +7,43 @@ const cell=(e,row,header)=>e.answer.rows[row-1][e.answer.rows[0].indexOf(header)
 const states=e=>e.answer.rows.slice(1).map((_,i)=>JSON.parse(cell(e,i+2,'管理')).save.state);
 const prepare=e=>e.c.scoringManagementColumn_(e.answer,true);
 
+test('saving returns freshly read display columns in configured order, including retained scores and cleared feedback',()=>{
+ const e=setup();e.c.scoringSetConfig({...config,displayCols:['E','','D','G','D']});
+ e.answer.rows[1][3]=4;
+ const result=e.c.scoringSaveRows({target:e.target,refreshDisplays:true,rows:[{rowNumber:2,scores:['','','','',''],comment:''}]});
+ assert.equal(result.ok,true);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.displayRefresh)),{columns:['D','C','F','C'],previousColumns:['E','D','G','D'],rows:[{rowNumber:2,displays:['',4,'回答内容',4]}]});
+});
+
+test('display refresh reads calculated cells after saving, batches consecutive rows and excludes failed rows',()=>{
+ const e=setup();e.c.scoringSetConfig({...config,displayCols:['D','G']});
+ e.answer.rows.push([...e.answer.rows[1]],[...e.answer.rows[1]]);prepare(e);
+ const getRange=e.answer.getRange.bind(e.answer),reads=[];
+ e.answer.getRange=(row,col,height=1,width=1)=>{const range=getRange(row,col,height,width),read=range.getValues;
+  range.getValues=()=>{const values=read();if(row>1&&col===3&&width===4){reads.push([row,height]);assert.equal(JSON.parse(cell(e,2,'管理')).save.state,'complete');assert.equal(JSON.parse(cell(e,3,'管理')).save.state,'complete');values.forEach((r,i)=>{r[3]=cell(e,row+i,'点数')===0?'採点済み':'未採点';});}return values;};return range;};
+ const result=e.c.scoringSaveRows({target:e.target,refreshDisplays:true,rows:[2,3,4].map(rowNumber=>({rowNumber,scores:rowNumber===4?[]:[0,'','','',''],comment:'保存'}))});
+ assert.equal(result.ok,false);assert.deepEqual(reads,[[2,2]]);
+ assert.deepEqual(JSON.parse(JSON.stringify(result.displayRefresh.rows)),[{rowNumber:2,displays:[0,'採点済み']},{rowNumber:3,displays:[0,'採点済み']}]);
+});
+
+test('display read failure does not turn confirmed saves into failures or keep them pending',()=>{
+ const e=setup(),getRange=e.answer.getRange.bind(e.answer);
+ e.answer.getRange=(row,col,...rest)=>{const range=getRange(row,col,...rest);if(row>1&&col===6)range.getValues=()=>{throw Error('read failed');};return range;};
+ const result=e.c.scoringSaveRows({target:e.target,refreshDisplays:true,rows:[{rowNumber:2,scores:[0,'','','',''],comment:'保存'}]});
+ assert.equal(result.ok,true);assert.deepEqual(states(e),['complete']);assert.match(result.displayRefresh.error,/read failed/);
+ assert.equal(result.displayRefresh.rows,undefined);
+});
+
+test('display refresh handles empty display columns and failed saves without reading answer ranges',()=>{
+ const e=setup();e.c.scoringSetConfig({...config,displayCols:[]});
+ let result=e.c.scoringSaveRows({target:e.target,refreshDisplays:true,rows:[{rowNumber:2,scores:[0,'','','',''],comment:'保存'}]});
+ assert.deepEqual(JSON.parse(JSON.stringify(result.displayRefresh)),{columns:[],rows:[{rowNumber:2,displays:[]}]});
+ result=e.c.scoringSaveRows({target:e.target,refreshDisplays:true,rows:[{rowNumber:2,scores:[],comment:'不正'}]});
+ assert.equal(result.ok,false);assert.deepEqual(Array.from(result.displayRefresh.rows),[]);
+ result=e.c.scoringSaveRows({target:e.target,rows:[{rowNumber:2,scores:[0,'','','',''],comment:'旧クライアント'}]});
+ assert.equal(result.ok,true);assert.equal(result.displayRefresh,undefined);
+});
+
 test('a pending-state failure prevents answer writes and completion failure never reports success',()=>{
  for(const failedState of ['pending','complete']) {
   const e=setup();prepare(e);

@@ -181,6 +181,7 @@ function scoringSaveRows(payload) {
     const context=resolveScoringTarget_(payload.target || payload.sheetName), sheet=context.sheet;
     const config=scoringLegacyApiGetConfig_();
     scoringValidateResolvedConfig_(config,sheet,true);
+    const displayColumnsBeforeSave=config.displayCols.filter(function(col){return col && col.trim();});
     const revision=scoringWriteRevision_(config),lastRow=sheet.getLastRow();
     const entries=payload.rows.map(function(row) {
       const result={rowNumber:row && row.rowNumber,ok:false};
@@ -207,8 +208,36 @@ function scoringSaveRows(payload) {
     });
     if(batch.length)scoringSaveBatch_(sheet,batch,journal);
     const results=entries.map(function(entry){return entry.result;});
-    return {ok:results.every(function(r){return r.ok;}),sheetName:context.target.key,results:results};
+    const response={ok:results.every(function(r){return r.ok;}),sheetName:context.target.key,results:results};
+    if(payload.refreshDisplays) {
+      // 表示の読み取りだけが失敗しても、確定済みの採点を保存失敗に戻さない。
+      try {
+        response.displayRefresh=scoringReadSavedDisplays_(sheet,config,results);
+        // 初回の管理列整理による位置変更だけを、保存前の表示列と対応付ける。
+        if(JSON.stringify(displayColumnsBeforeSave)!==JSON.stringify(response.displayRefresh.columns))response.displayRefresh.previousColumns=displayColumnsBeforeSave;
+      }
+      catch(error) {response.displayRefresh={error:String(error.message || error)};}
+    }
+    return response;
   });
+}
+
+/** 保存成功行の表示列を読み直す。隣接行はまとめ、空欄の得点や数式もシートの値を使う。 */
+function scoringReadSavedDisplays_(sheet,config,results) {
+  const columns=config.displayCols.filter(function(col){return col && col.trim();});
+  const indices=columns.map(scoringLegacyColA1ToIndex_);
+  const numbers=Array.from(new Set(results.filter(function(result){return result.ok;}).map(function(result){return result.rowNumber;}))).sort(function(a,b){return a-b;});
+  const rows=[];
+  if(!indices.length)return {columns:columns,rows:numbers.map(function(n){return {rowNumber:n,displays:[]};})};
+  const first=Math.min.apply(null,indices),last=Math.max.apply(null,indices);
+  for(let i=0;i<numbers.length;) {
+    let end=i+1;
+    while(end<numbers.length && numbers[end]===numbers[end-1]+1)end++;
+    const values=sheet.getRange(numbers[i],first,end-i,last-first+1).getValues();
+    values.forEach(function(row,offset){rows.push({rowNumber:numbers[i]+offset,displays:indices.map(function(col){return scoringLegacyToClientCellValue_(row[col-first]);})});});
+    i=end;
+  }
+  return {columns:columns,rows:rows};
 }
 
 /** 保留中の記録は回答より先に永続化し、完了記録は回答の保存確認後に更新する。 */

@@ -3938,18 +3938,20 @@ function initHelpPopovers_() {
       function flushPendingEdits(isAuto) {
         if (state.saving || state.loading || !state.currentSheet) return;
         if (state.rows.length && (state.dirty || state.pendingRuleCalculation) && !saveCurrentRow()) return;
-        var targetKey=state.currentSheet,data;
+        var targetKey=state.currentSheet,loadRequestId=state.loadRequestId,data;
         try {data=readDrafts_(targetKey);}catch(error){setStatus('下書きの読み込みに失敗しました','error');return;}
         var rows=Object.keys(data).map(Number).sort(function(a,b){return a-b;});
         if (!rows.length) {setStatus('保存済み','ok');return;}
         state.saving=true;updateNameRefreshButton_();clearAutoFlushTimer();setStatus('シートへ保存中…','sending');
         if(els.navFlush)els.navFlush.disabled=true;
-        var offset=0,successes=0,failures=0;
+        var offset=0,successes=0,failures=0,displayRefreshFailed=false;
         function next() {
           if(offset>=rows.length) {
             state.saving=false;updateNameRefreshButton_();if(els.navFlush)els.navFlush.disabled=false;
             if(state.currentSheet===targetKey) {
-              setStatus(failures ? '保存失敗 '+failures+'件（成功 '+successes+'件）。下書きを保持しています。' : 'シートへ保存しました（'+successes+'件）', failures?'error':'ok');
+              var message=failures ? '保存失敗 '+failures+'件（成功 '+successes+'件）。下書きを保持しています。' : 'シートへ保存しました（'+successes+'件）';
+              if(displayRefreshFailed)message+=' 表示データを更新できませんでした。「適用」で読み直してください。';
+              setStatus(message, failures || displayRefreshFailed?'error':'ok');
               // このリクエストの処理中に行われた編集も残す。
               if(!failures)resetAutoFlushTimer();
             }
@@ -3957,17 +3959,45 @@ function initHelpPopovers_() {
           }
           var chunk=rows.slice(offset,offset+100);offset+=chunk.length;
           var payload={target:JSON.parse(targetKey).reduce(function(t,v,i){t[i===0?'spreadsheetId':'sheetId']=v;return t;},{}),
-            rows:chunk.map(function(n){return Object.assign({rowNumber:n},data[String(n)]);})};
+            refreshDisplays:true,rows:chunk.map(function(n){return Object.assign({rowNumber:n},data[String(n)]);})};
           google.script.run.withSuccessHandler(function(result){
             chunk.forEach(function(n){
               var found=result && Array.isArray(result.results) && result.results.find(function(r){return r.rowNumber===n;});
               if(found && found.ok){
                 try{removePendingEditFromLocalStorage(targetKey,n,data[String(n)].revision);successes++;}catch(error){failures++;}
               }else failures++;
-            });next();
+            });
+            if(state.currentSheet===targetKey && state.loadRequestId===loadRequestId && !state.loading && result && result.displayRefresh) {
+              if(!applySavedDisplays_(result.displayRefresh))displayRefreshFailed=true;
+            }
+            next();
           }).withFailureHandler(function(){failures+=chunk.length;next();}).scoringSaveRows(payload);
         }
         next();
+      }
+
+      function applySavedDisplays_(refresh) {
+        var columns=(state.headers || []).map(function(header){return header.col;});
+        if(refresh.error || !Array.isArray(refresh.columns) || !Array.isArray(refresh.rows))return false;
+        var moved=JSON.stringify(refresh.columns)!==JSON.stringify(columns);
+        if(moved && JSON.stringify(refresh.previousColumns)!==JSON.stringify(columns))return false;
+        if(moved) {
+          state.headers.forEach(function(header,i){header.col=refresh.columns[i];});
+          if(els.answers)els.answers.querySelectorAll('.qtag').forEach(function(tag,i){tag.textContent=refresh.columns[i];});
+        }
+        var displays=new Map(refresh.rows.map(function(row){return [row.rowNumber,row.displays];}));
+        state.rows.forEach(function(row){if(displays.has(row.rowNumber))row.displays=displays.get(row.rowNumber);});
+        var current=state.rows[state.currentIndex];
+        if(current && displays.has(current.rowNumber) && els.answers) {
+          // 入力欄・フォーカス・折り畳み・スクロール位置は触らず、確認用の本文と文字数だけを更新する。
+          var bodies=els.answers.querySelectorAll('.answer-body'),counts=els.answers.querySelectorAll('.qcount');
+          current.displays.forEach(function(value,i){
+            var text=value==null?'':String(value);
+            if(bodies[i])bodies[i].textContent=text;
+            if(counts[i])counts[i].textContent='('+countCharsNoWhitespace_(text)+'字)';
+          });
+        }
+        return true;
       }
 
       function preserveCurrentEdit_() {

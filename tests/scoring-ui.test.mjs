@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import vm from 'node:vm';
+import {scoringEnvironment} from './helpers/scoring-environment.mjs';
 
 function page(){
  const html=fs.readFileSync('Scoring.html','utf8'),visible=html.split('<template id="ruleBuilderTemplate">')[0],elements=new Map(),events={},calls=[],storage=new Map();
@@ -51,6 +52,67 @@ function readyPage(){
  p.response=()=>({sheetName:p.h.state.currentSheet,config:JSON.parse(JSON.stringify(p.h.state.config)),configRevision:p.h.state.configRevision,rows:[{rowNumber:2,name:'生徒',displays:['回答'],scores:['','','','',''],comment:''}],headers:[],allHeaders:[{col:'D',header:'点数',label:'点数'},{col:'E',header:'新点数',label:'新点数'}],review:{rows:{},groups:[]}});
  p.load=()=>{p.h.loadInitData();p.calls.at(-1).success(p.response());};p.load();return p;
 }
+
+function savedDisplayPage(){
+ const p=readyPage();p.h.state.headers=[{col:'G',header:'回答'}];p.h.renderCurrentRow();
+ const answers=p.elements.get('answers');
+ answers.querySelectorAll=selector=>{const found=[];const visit=el=>{if(el.className===selector.slice(1))found.push(el);(el.children||[]).forEach(visit);};visit(answers);return found;};
+ return p;
+}
+
+test('saving refreshes visible answers and character counts without overwriting newer inputs or scrolling',()=>{
+ const p=savedDisplayPage(),answers=p.elements.get('answers'),body=answers.querySelectorAll('.answer-body').at(-1),count=answers.querySelectorAll('.qcount').at(-1);
+ // テスト用DOMのinnerHTML代入は子を消さないため、現在の表示要素に限定する。
+ answers.querySelectorAll=s=>s==='.answer-body'?[body]:[count];answers.scrollTop=123;
+ p.h.els.scoreInputs[0].value='3';p.h.markDirty();p.elements.get('btnFlush').onclick();
+ const request=p.calls.at(-1);assert.equal(request.method,'scoringSaveRows');assert.equal(request.payload.refreshDisplays,true);
+ p.h.els.scoreInputs[0].value='4';p.h.els.ruleOutInputs[0].value='追加入力';p.h.markDirty();
+ request.success({results:[{rowNumber:2,ok:true}],displayRefresh:{columns:['G'],rows:[{rowNumber:2,displays:['採点 済み']} ]}});
+ assert.equal(p.h.state.rows[0].displays[0],'採点 済み');assert.equal(body.textContent,'採点 済み');assert.equal(count.textContent,'(4字)');
+ assert.equal(answers.scrollTop,123);assert.equal(p.h.els.scoreInputs[0].value,'4');assert.equal(p.h.els.ruleOutInputs[0].value,'追加入力');assert.equal(p.h.state.dirty,true);
+});
+
+for(const change of ['target','reload','columns'])test('saved displays do not overwrite a changed view: '+change,()=>{
+ const p=savedDisplayPage();p.h.els.scoreInputs[0].value='3';p.h.markDirty();p.elements.get('btnFlush').onclick();const request=p.calls.at(-1);
+ if(change==='target')p.h.state.currentSheet='["other",2]';
+ if(change==='reload')p.h.state.loadRequestId++;
+ if(change==='columns')p.h.state.headers=[{col:'E',header:'別列'}];
+ request.success({results:[{rowNumber:2,ok:true}],displayRefresh:{columns:['G'],rows:[{rowNumber:2,displays:['旧画面用']} ]}});
+ assert.equal(p.h.state.rows[0].displays[0],'回答');
+});
+
+test('display refresh failure reports saved grades separately and leaves previous display intact',()=>{
+ const p=savedDisplayPage();p.h.els.scoreInputs[0].value='3';p.h.markDirty();p.elements.get('btnFlush').onclick();
+ p.calls.at(-1).success({results:[{rowNumber:2,ok:true}],displayRefresh:{error:'読み取り失敗'}});
+ assert.equal(p.h.loadPendingEditFromLocalStorage(p.h.state.currentSheet,2),null);assert.equal(p.h.state.rows[0].displays[0],'回答');
+ assert.match(p.elements.get('statusText').textContent,/保存しました/);assert.match(p.elements.get('statusText').textContent,/表示.*更新/);
+});
+
+test('saving updates other saved rows for later navigation while failed rows keep their displays and drafts',()=>{
+ const p=savedDisplayPage();
+ p.h.els.scoreInputs[0].value='3';p.h.markDirty();p.h.saveCurrentRow();
+ p.h.state.rows.push({rowNumber:3,name:'次の生徒',displays:['以前の表示'],scores:['','','','',''],comment:''});
+ p.h.state.currentIndex=1;p.h.renderCurrentRow();p.h.els.scoreInputs[0].value='4';p.h.markDirty();p.elements.get('btnFlush').onclick();
+ p.calls.at(-1).success({results:[{rowNumber:2,ok:true},{rowNumber:3,ok:false}],displayRefresh:{columns:['G'],rows:[{rowNumber:2,displays:[0]}]}});
+ assert.equal(p.h.state.rows[0].displays[0],0);assert.equal(p.h.state.rows[1].displays[0],'以前の表示');
+ assert.ok(p.h.loadPendingEditFromLocalStorage(p.h.state.currentSheet,3));
+ p.h.state.currentIndex=0;p.h.renderCurrentRow();
+ assert.equal(p.elements.get('answers').querySelectorAll('.answer-body').at(-1).textContent,'0');
+});
+
+test('initial save follows server management-column moves and subsequent saves still refresh the same fields',()=>{
+ const server=scoringEnvironment();server.c.scoringSetConfig({nameCol:'B',displayCols:['D','E','G'],scoreCols:['D','','','',''],commentCol:'E',ruleOutputSlots:[],startRow:2,headerRow:1});
+ const p=readyPage(),initial=server.c.scoringGetInitData({target:server.target,reviewMode:'summary'});
+ p.h.state.currentSheet=initial.sheetName;p.h.loadInitData();p.calls.at(-1).success(initial);
+ const answers=p.elements.get('answers'),cards=answers.children.at(-1).children;
+ answers.querySelectorAll=selector=>cards.map(card=>selector==='.answer-body'?card.children[1]:card.children[0].children[selector==='.qtag'?0:2]);
+ for(const score of ['3','4']){
+  p.h.els.scoreInputs[0].value=score;p.h.markDirty();p.elements.get('btnFlush').onclick();const request=p.calls.at(-1);
+  request.success(server.c.scoringSaveRows(request.payload));
+  assert.equal(p.h.state.rows[0].displays[0],score);assert.equal(answers.querySelectorAll('.answer-body')[0].textContent,score);
+  assert.equal(p.h.state.headers[0].col,'C');assert.equal(answers.querySelectorAll('.qtag')[0].textContent,'C');
+ }
+});
 
 function namesPage(){
  const p=readyPage();p.h.state.targets={[p.h.state.currentSheet]:{namesAvailable:true}};p.load();return p;
